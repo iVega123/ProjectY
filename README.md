@@ -17,6 +17,8 @@ Este documento detalha a implementação do sistema de gestão de aluguel de mot
 - **Dependências**:
   - Comunica com todos os outros microserviços para validar tokens de acesso.
   - **Swagger URL**: [Auth Gate Swagger](http://localhost:8080/swagger)
+  - **Repositório Separado**: [MotoHub](https://github.com/iVega123/AuthGate)
+  - **Sonar Cloud**: [Sonar Cloud](https://sonarcloud.io/project/overview?id=iVega123_AuthGate)
 
 ### MotoHub
 - **Função**: Administração das motos na plataforma, incluindo cadastro, consulta, modificação e remoção de motos.
@@ -29,6 +31,8 @@ Este documento detalha a implementação do sistema de gestão de aluguel de mot
 - **Dependências**:
   - RabbitMQ para comunicação de eventos relacionados a motos.
   - **Swagger URL**: [MotoHub Swagger](http://localhost:8100/swagger)
+  - **Repositório Separado**: [MotoHub](https://github.com/iVega123/MotoHub)
+  - **Sonar Cloud**: [SonarCloud](https://sonarcloud.io/project/overview?id=iVega123_MotoHub)
 
 ### Rider Manager
 - **Função**: Focado no cadastro e gerenciamento dos entregadores que irão alugar motos.
@@ -42,6 +46,7 @@ Este documento detalha a implementação do sistema de gestão de aluguel de mot
   - RabbitMQ para comunicação de eventos relacionados aos entregadores.
   - MinIO para armazenamento das fotos de CNH.
   - **Swagger URL**: [Rider Manager Swagger](http://localhost:8000/swagger)
+  - **Repositório Separado**: [Rider Manager](https://github.com/iVega123/RiderManager)
 
 ### Rental Operations
 - **Função**: Gerenciamento dos aluguéis de motos, incluindo início, término e cálculo de custos associados.
@@ -54,6 +59,7 @@ Este documento detalha a implementação do sistema de gestão de aluguel de mot
 - **Dependências**:
   - RabbitMQ para comunicação de eventos de aluguéis.
   - **Swagger URL**: [Rental Operations Swagger](http://localhost:8200/swagger)
+  - **Repositório Separado**: [Rental Operations](https://github.com/iVega123/RentalOperations)
 
 ### Elastic Stack (Elasticsearch, Logstash, Kibana)
 - **Função**: Utilizado para monitoramento, análise de logs e visualizações em tempo real dos dados gerados pelos microserviços.
