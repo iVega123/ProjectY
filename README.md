@@ -68,6 +68,19 @@ Este documento detalha a implementação do sistema de gestão de aluguel de mot
   - **Logstash**: Agregação e processamento de logs antes de enviar para o Elasticsearch.
   - **Kibana**: Interface gráfica para visualizar dados do Elasticsearch.
 
+## Uso do Kibana
+
+Para acessar e usar o Kibana para visualizar os logs:
+1. Certifique-se de que o Kibana esteja rodando e acessível na porta `5601` (ex: `http://localhost:5601`).
+2. No menu principal do Kibana, navegue até "Discover" para visualizar os logs armazenados.
+3. Na página do "Discover", selecione o índice apropriado dos logs que você deseja explorar. Se necessário, configure um novo índice pattern se for a primeira vez que está acessando os logs.
+4. Utilize os filtros e a barra de pesquisa para buscar entradas específicas ou para explorar os logs por período de tempo.
+5. Clique em qualquer entrada de log para expandir e ver detalhes adicionais.
+
+### Visualizando Logs
+- Para melhorar a análise, você pode personalizar o layout dos campos mostrados nos logs ou criar visualizações e dashboards que ajudem na interpretação dos dados.
+
+
 ## Docker Compose
 
 Todos os microserviços são configurados e gerenciados através de Docker Compose, assegurando isolamento, facilidade de configuração e deploy. O arquivo `docker-compose.yml` inclui a definição de redes, volumes e dependências necessárias para cada serviço.
