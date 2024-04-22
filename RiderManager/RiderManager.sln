@@ -1,0 +1,31 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.9.34728.123
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "RiderManager", "RiderManager\RiderManager.csproj", "{ED02D002-4576-4B38-B0E9-19B5DDC087F9}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RiderManagerTests", "RiderManagerTests\RiderManagerTests.csproj", "{D2B8ECA6-DC53-4ACC-97F0-A7F3969AE5FD}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{ED02D002-4576-4B38-B0E9-19B5DDC087F9}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{ED02D002-4576-4B38-B0E9-19B5DDC087F9}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{ED02D002-4576-4B38-B0E9-19B5DDC087F9}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{ED02D002-4576-4B38-B0E9-19B5DDC087F9}.Release|Any CPU.Build.0 = Release|Any CPU
+		{D2B8ECA6-DC53-4ACC-97F0-A7F3969AE5FD}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{D2B8ECA6-DC53-4ACC-97F0-A7F3969AE5FD}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{D2B8ECA6-DC53-4ACC-97F0-A7F3969AE5FD}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{D2B8ECA6-DC53-4ACC-97F0-A7F3969AE5FD}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {48CE0830-33F8-4BEC-A95A-1DC6D9F824AA}
+	EndGlobalSection
+EndGlobal

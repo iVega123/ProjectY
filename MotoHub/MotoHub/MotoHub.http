@@ -1,0 +1,6 @@
+@MotoHub_HostAddress = http://localhost:5030
+
+GET {{MotoHub_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###

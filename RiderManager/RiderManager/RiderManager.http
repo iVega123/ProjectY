@@ -1,0 +1,6 @@
+@RiderManager_HostAddress = http://localhost:5129
+
+GET {{RiderManager_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###

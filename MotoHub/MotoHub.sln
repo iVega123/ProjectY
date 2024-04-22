@@ -1,0 +1,31 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.9.34728.123
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MotoHub", "MotoHub\MotoHub.csproj", "{EEFA8663-72B8-4492-847F-1D0B43227522}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MotoHubTests", "MotoHubTests\MotoHubTests.csproj", "{14B29080-FC19-419A-A822-167F4FA229FD}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{EEFA8663-72B8-4492-847F-1D0B43227522}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{EEFA8663-72B8-4492-847F-1D0B43227522}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{EEFA8663-72B8-4492-847F-1D0B43227522}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{EEFA8663-72B8-4492-847F-1D0B43227522}.Release|Any CPU.Build.0 = Release|Any CPU
+		{14B29080-FC19-419A-A822-167F4FA229FD}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{14B29080-FC19-419A-A822-167F4FA229FD}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{14B29080-FC19-419A-A822-167F4FA229FD}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{14B29080-FC19-419A-A822-167F4FA229FD}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {7DBD57D7-AF5B-46A7-98C9-CF7D582C0921}
+	EndGlobalSection
+EndGlobal

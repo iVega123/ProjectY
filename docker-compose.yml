@@ -1,0 +1,180 @@
+version: '3.7'
+
+services:
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:7.17.3
+    container_name: elasticsearch
+    environment:
+      - discovery.type=single-node
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m
+    ports:
+      - "9200:9200"
+      - "9300:9300"
+    networks:
+      - elk
+
+  logstash:
+    image: docker.elastic.co/logstash/logstash:7.17.3
+    container_name: logstash
+    volumes:
+      - ./logstash/config/logstash.yml:/usr/share/logstash/config/logstash.yml
+      - ./logstash/pipeline:/usr/share/logstash/pipeline
+    ports:
+      - "5000:5000"
+    depends_on:
+      - elasticsearch
+    networks:
+      - elk
+
+  kibana:
+    image: docker.elastic.co/kibana/kibana:7.17.3
+    container_name: kibana
+    ports:
+      - "5601:5601"
+    depends_on:
+      - elasticsearch
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+    networks:
+      - elk
+
+  postgres:
+    image: postgres:15
+    container_name: postgres
+    environment:
+      - POSTGRES_DB=BikeBookingDB
+      - POSTGRES_USER=user
+      - POSTGRES_PASSWORD=password
+    ports:
+      - "5432:5432"
+    networks:
+      - elk
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+
+  pgadmin:
+    image: dpage/pgadmin4
+    container_name: pgadmin
+    environment:
+      - PGADMIN_DEFAULT_EMAIL=admin@example.com
+      - PGADMIN_DEFAULT_PASSWORD=admin
+    ports:
+      - "5050:80"
+    depends_on:
+      - postgres
+    networks:
+      - elk
+
+  mongodb:
+    image: mongo:latest
+    container_name: mongodb
+    ports:
+      - "27017:27017"
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=mongoadmin
+      - MONGO_INITDB_ROOT_PASSWORD=secret
+    volumes:
+      - mongo-data:/data/db
+    networks:
+      - elk
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: rabbitmq
+    environment:
+      - RABBITMQ_DEFAULT_USER=user
+      - RABBITMQ_DEFAULT_PASS=password
+    ports:
+      - "5672:5672"
+      - "15672:15672" 
+    networks:
+      - elk
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+
+  minio:
+    image: minio/minio:latest
+    container_name: minio
+    environment:
+      - MINIO_ROOT_USER=miniouser
+      - MINIO_ROOT_PASSWORD=miniosecret
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio-data:/data
+    networks:
+      - elk
+    command: server /data --console-address ":9001"
+
+  auth-gate:
+    build: 
+      context: .
+      dockerfile: AuthGate/AuthGate/Dockerfile
+    container_name: auth-gate
+    ports:
+      - "8080:8080"
+      - "8181:8181"
+    networks:
+      - elk
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+  
+  rider-manager:
+    build: 
+      context: .
+      dockerfile: RiderManager/RiderManager/Dockerfile
+    container_name: rider-manager
+    ports:
+      - "8000:8000"
+      - "8001:8001"
+    networks:
+      - elk
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ASPNETCORE_URLS=http://+:8000
+    depends_on:
+      - rabbitmq
+    
+    command: ["sh", "-c", "sleep 20 && dotnet RiderManager.dll"]
+
+  moto-hub:
+    build: 
+      context: .
+      dockerfile: MotoHub/MotoHub/Dockerfile
+    container_name: moto-hub
+    ports:
+      - "8100:8100"
+      - "8101:8101"
+    networks:
+      - elk
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ASPNETCORE_URLS=http://+:8100
+  
+  rental-operations:
+    build: 
+      context: .
+      dockerfile: RentalOperations/RentalOperations/Dockerfile
+    container_name: rental-operations
+    ports:
+      - "8200:8200"
+      - "8201:8201"
+    networks:
+      - elk
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ASPNETCORE_URLS=http://+:8200
+    depends_on:
+      - rabbitmq
+    command: ["sh", "-c", "sleep 20 && dotnet RentalOperations.dll"]
+
+networks:
+  elk:
+    driver: bridge
+
+volumes:
+  postgres-data:
+  mongo-data:
+  rabbitmq-data:
+  minio-data:
