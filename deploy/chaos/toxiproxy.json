@@ -1,0 +1,26 @@
+[
+  {
+    "name": "cockroachdb",
+    "listen": "0.0.0.0:21257",
+    "upstream": "cockroachdb:26257",
+    "enabled": true
+  },
+  {
+    "name": "redis",
+    "listen": "0.0.0.0:26379",
+    "upstream": "redis:6379",
+    "enabled": true
+  },
+  {
+    "name": "rabbitmq",
+    "listen": "0.0.0.0:25672",
+    "upstream": "rabbitmq:5672",
+    "enabled": true
+  },
+  {
+    "name": "kafka",
+    "listen": "0.0.0.0:29092",
+    "upstream": "kafka:9092",
+    "enabled": true
+  }
+]

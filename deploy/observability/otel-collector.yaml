@@ -1,0 +1,74 @@
+# Um único ponto de entrada para traces, métricas e logs dos seis runtimes.
+# Cada serviço só precisa saber falar OTLP — o roteamento para Tempo, Prometheus
+# e Loki é decidido aqui, não no código da aplicação.
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  # Agrupa spans por trace antes de amostrar, para nunca cortar um trace pela metade.
+  batch:
+    timeout: 5s
+    send_batch_size: 1024
+  memory_limiter:
+    check_interval: 2s
+    limit_percentage: 75
+    spike_limit_percentage: 20
+  resource:
+    attributes:
+      - key: deployment.environment
+        value: local
+        action: upsert
+
+connectors:
+  # Deriva RED (taxa, erro, duração) dos próprios traces: os painéis do Grafana
+  # ganham métricas de serviço sem que ninguém instrumente contador na mão.
+  spanmetrics:
+    namespace: traces.span.metrics
+    histogram:
+      explicit:
+        buckets: [2ms, 5ms, 10ms, 25ms, 50ms, 100ms, 250ms, 500ms, 1s, 2.5s, 5s]
+    dimensions:
+      - name: http.route
+      - name: http.request.method
+      - name: http.response.status_code
+    exemplars:
+      enabled: true
+
+exporters:
+  otlp/tempo:
+    endpoint: tempo:4317
+    tls:
+      insecure: true
+  otlphttp/loki:
+    endpoint: http://loki:3100/otlp
+    tls:
+      insecure: true
+  prometheus:
+    endpoint: 0.0.0.0:8889
+    enable_open_metrics: true
+    resource_to_telemetry_conversion:
+      enabled: true
+
+service:
+  telemetry:
+    logs:
+      level: info
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, resource, batch]
+      exporters: [otlp/tempo, spanmetrics]
+    metrics:
+      receivers: [otlp, spanmetrics]
+      processors: [memory_limiter, resource, batch]
+      exporters: [prometheus]
+    logs:
+      receivers: [otlp]
+      processors: [memory_limiter, resource, batch]
+      exporters: [otlphttp/loki]

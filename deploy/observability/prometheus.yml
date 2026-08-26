@@ -1,0 +1,33 @@
+global:
+  scrape_interval: 10s
+  evaluation_interval: 10s
+  external_labels:
+    cluster: projecty-local
+
+scrape_configs:
+  # Métricas RED derivadas dos traces pelo connector spanmetrics.
+  - job_name: otel-collector
+    static_configs:
+      - targets: ["otel-collector:8889"]
+
+  # Serviços que expõem /metrics diretamente.
+  - job_name: projecty-services
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["api-gateway:8090"]
+        labels: { service: api-gateway, language: rust }
+      - targets: ["rental-core:8091"]
+        labels: { service: rental-core, language: dotnet }
+      - targets: ["media-guard:8092"]
+        labels: { service: media-guard, language: rust }
+      - targets: ["risk-pricing:8093"]
+        labels: { service: risk-pricing, language: python }
+      - targets: ["telemetry:4000"]
+        labels: { service: telemetry, language: elixir }
+    # Um serviço fora do ar não deve derrubar o scrape dos outros.
+    honor_labels: true
+
+  - job_name: infra
+    static_configs:
+      - targets: ["prometheus:9090"]
+      - targets: ["tempo:3200"]
