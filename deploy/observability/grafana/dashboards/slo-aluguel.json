@@ -1,0 +1,278 @@
+{
+  "uid": "projecty-slo-aluguel",
+  "title": "ProjectY — SLO da criação de aluguel",
+  "description": "Objetivo: 99,5% das criações de aluguel bem-sucedidas em janela de 30 dias. O que separa um painel bonito de engenharia é ter um número que decide alguma coisa — aqui é o orçamento de erro.",
+  "tags": ["projecty", "slo"],
+  "timezone": "browser",
+  "editable": true,
+  "schemaVersion": 39,
+  "refresh": "30s",
+  "time": { "from": "now-6h", "to": "now" },
+  "templating": {
+    "list": [
+      {
+        "name": "objetivo",
+        "label": "Objetivo (SLO)",
+        "type": "custom",
+        "query": "0.99,0.995,0.999",
+        "current": { "text": "0.995", "value": "0.995" },
+        "options": [
+          { "text": "0.99", "value": "0.99", "selected": false },
+          { "text": "0.995", "value": "0.995", "selected": true },
+          { "text": "0.999", "value": "0.999", "selected": false }
+        ]
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Disponibilidade — 30 dias",
+      "description": "Requisições bem-sucedidas sobre o total, na janela do SLO.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 6, "w": 8, "x": 0, "y": 0 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "1 - (sum(increase(traces_span_metrics_calls_total{service_name=\"rental-core\",span_name=~\".*CreateRental.*\",status_code=\"STATUS_CODE_ERROR\"}[30d])) / clamp_min(sum(increase(traces_span_metrics_calls_total{service_name=\"rental-core\",span_name=~\".*CreateRental.*\"}[30d])), 1))",
+          "legendFormat": "disponibilidade"
+        }
+      ],
+      "options": {
+        "graphMode": "none",
+        "colorMode": "value",
+        "textMode": "value",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 3,
+          "min": 0.98,
+          "max": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "#E0A03B", "value": 0.995 },
+              { "color": "green", "value": 0.999 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 2,
+      "type": "gauge",
+      "title": "Orçamento de erro restante",
+      "description": "Quanto do 0,5% de falha permitido ainda está disponível neste mês. Zerou, congela lançamento e o time volta para confiabilidade.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 6, "w": 8, "x": 8, "y": 0 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "clamp_min(1 - ((sum(increase(traces_span_metrics_calls_total{service_name=\"rental-core\",span_name=~\".*CreateRental.*\",status_code=\"STATUS_CODE_ERROR\"}[30d])) / clamp_min(sum(increase(traces_span_metrics_calls_total{service_name=\"rental-core\",span_name=~\".*CreateRental.*\"}[30d])), 1)) / (1 - $objetivo)), 0)",
+          "legendFormat": "restante"
+        }
+      ],
+      "options": {
+        "showThresholdLabels": false,
+        "showThresholdMarkers": true,
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 1,
+          "min": 0,
+          "max": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "#E0A03B", "value": 0.25 },
+              { "color": "green", "value": 0.5 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Queima agora (1 h)",
+      "description": "1x consome o orçamento exatamente no ritmo do mês. 14,4x esgota em pouco mais de dois dias — é o limiar de página.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 6, "w": 8, "x": 16, "y": 0 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "(sum(rate(traces_span_metrics_calls_total{service_name=\"rental-core\",span_name=~\".*CreateRental.*\",status_code=\"STATUS_CODE_ERROR\"}[1h])) / clamp_min(sum(rate(traces_span_metrics_calls_total{service_name=\"rental-core\",span_name=~\".*CreateRental.*\"}[1h])), 0.001)) / (1 - $objetivo)",
+          "legendFormat": "burn rate"
+        }
+      ],
+      "options": {
+        "graphMode": "area",
+        "colorMode": "value",
+        "textMode": "value",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "#E0A03B", "value": 6 },
+              { "color": "red", "value": 14.4 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Velocidade de queima em duas janelas",
+      "description": "A janela curta detecta rápido; a longa evita alarme por ruído. Só é incidente quando as duas cruzam o limiar juntas — é o padrão multi-window do SRE Workbook.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 6 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "(sum(rate(traces_span_metrics_calls_total{service_name=\"rental-core\",span_name=~\".*CreateRental.*\",status_code=\"STATUS_CODE_ERROR\"}[5m])) / clamp_min(sum(rate(traces_span_metrics_calls_total{service_name=\"rental-core\",span_name=~\".*CreateRental.*\"}[5m])), 0.001)) / (1 - $objetivo)",
+          "legendFormat": "janela curta (5 min)"
+        },
+        {
+          "refId": "B",
+          "expr": "(sum(rate(traces_span_metrics_calls_total{service_name=\"rental-core\",span_name=~\".*CreateRental.*\",status_code=\"STATUS_CODE_ERROR\"}[1h])) / clamp_min(sum(rate(traces_span_metrics_calls_total{service_name=\"rental-core\",span_name=~\".*CreateRental.*\"}[1h])), 0.001)) / (1 - $objetivo)",
+          "legendFormat": "janela longa (1 h)"
+        }
+      ],
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 1,
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 6,
+            "showPoints": "never",
+            "spanNulls": false,
+            "axisBorderShow": false,
+            "thresholdsStyle": { "mode": "dashed" }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "transparent", "value": null },
+              { "color": "#E0A03B", "value": 6 },
+              { "color": "red", "value": 14.4 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Latência de criação de aluguel — p50, p95, p99",
+      "description": "O SLO de latência caminha junto com o de disponibilidade: uma requisição que responde em 8 s tecnicamente não falhou, mas o usuário desistiu.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 15 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(traces_span_metrics_duration_milliseconds_bucket{service_name=\"rental-core\",span_name=~\".*CreateRental.*\"}[5m])))",
+          "legendFormat": "p50"
+        },
+        {
+          "refId": "B",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(traces_span_metrics_duration_milliseconds_bucket{service_name=\"rental-core\",span_name=~\".*CreateRental.*\"}[5m])))",
+          "legendFormat": "p95"
+        },
+        {
+          "refId": "C",
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(traces_span_metrics_duration_milliseconds_bucket{service_name=\"rental-core\",span_name=~\".*CreateRental.*\"}[5m])))",
+          "legendFormat": "p99"
+        }
+      ],
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "decimals": 0,
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 0,
+            "showPoints": "never",
+            "axisBorderShow": false
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Sucesso e falha por minuto",
+      "description": "O numerador e o denominador do SLO, lado a lado — para conferir que a conta acima está olhando volume de verdade e não uma amostra vazia.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 15 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(traces_span_metrics_calls_total{service_name=\"rental-core\",span_name=~\".*CreateRental.*\",status_code!=\"STATUS_CODE_ERROR\"}[1m])) * 60",
+          "legendFormat": "sucesso"
+        },
+        {
+          "refId": "B",
+          "expr": "sum(rate(traces_span_metrics_calls_total{service_name=\"rental-core\",span_name=~\".*CreateRental.*\",status_code=\"STATUS_CODE_ERROR\"}[1m])) * 60",
+          "legendFormat": "falha"
+        }
+      ],
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "drawStyle": "bars",
+            "lineWidth": 1,
+            "fillOpacity": 70,
+            "stacking": { "mode": "normal", "group": "A" },
+            "showPoints": "never",
+            "axisBorderShow": false
+          }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "falha" },
+            "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } }]
+          }
+        ]
+      }
+    }
+  ]
+}

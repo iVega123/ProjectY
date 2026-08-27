@@ -1,0 +1,510 @@
+# ProjectY — pilha de desenvolvimento local, orquestrada pelo Tilt.
+#
+# ATENÇÃO: este arquivo descreve o ambiente de DESENVOLVIMENTO. Bancos sobem em
+# modo inseguro, sem TLS e com credenciais de exemplo, porque tudo aqui vive numa
+# rede interna e nada é publicado além do necessário para o Tilt. Produção usa
+# manifestos separados, com certificados e segredos vindos de um cofre.
+#
+# Perfis:
+#   (nenhum) → núcleo: gateway, rental-core, Cockroach, Redis, RabbitMQ, Kafka, observabilidade
+#   full     → soma telemetry (Elixir), risk-pricing (Python), console, Cassandra, Mongo, MinIO
+#   legacy   → soma os quatro serviços .NET originais, para a fase de estrangulamento
+#
+# Subir manualmente (sem Tilt):  docker compose -f deploy/compose.yaml up -d
+# Com os extras:                 docker compose -f deploy/compose.yaml --profile full up -d
+
+name: projecty
+
+x-observed: &observed
+  environment: &otel-env
+    OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+    OTEL_EXPORTER_OTLP_PROTOCOL: grpc
+    OTEL_TRACES_SAMPLER: parentbased_traceidratio
+    OTEL_TRACES_SAMPLER_ARG: "1.0"
+  depends_on:
+    otel-collector:
+      condition: service_started
+
+x-restart: &restart
+  restart: unless-stopped
+
+networks:
+  projecty:
+    driver: bridge
+
+volumes:
+  cockroach-data:
+  redis-data:
+  rabbitmq-data:
+  kafka-data:
+  cassandra-data:
+  mongo-data:
+  minio-data:
+  grafana-data:
+  prometheus-data:
+  tempo-data:
+  loki-data:
+
+services:
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Dados
+  # ─────────────────────────────────────────────────────────────────────────
+
+  cockroachdb:
+    image: cockroachdb/cockroach:v24.3.5
+    <<: *restart
+    command: start-single-node --insecure --listen-addr=0.0.0.0:26257 --http-addr=0.0.0.0:8080
+    ports:
+      - "26257:26257"   # SQL
+      - "26080:8080"    # console do Cockroach
+    volumes:
+      - cockroach-data:/cockroach/cockroach-data
+    networks: [projecty]
+    healthcheck:
+      test: ["CMD", "cockroach", "sql", "--insecure", "--execute", "SELECT 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+
+  cockroach-init:
+    image: cockroachdb/cockroach:v24.3.5
+    profiles: ["init"]
+    entrypoint: ["/bin/bash", "-c"]
+    command: >
+      "cockroach sql --insecure --host=cockroachdb:26257 --file=/sql/001_init.sql"
+    volumes:
+      - ./db/cockroach:/sql:ro
+    networks: [projecty]
+    depends_on:
+      cockroachdb:
+        condition: service_healthy
+
+  redis:
+    image: redis:7.4-alpine
+    <<: *restart
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    networks: [projecty]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  rabbitmq:
+    image: rabbitmq:4.0-management-alpine
+    <<: *restart
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-projecty}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-dev-only-change-me}
+    ports:
+      - "5673:5672"
+      - "15673:15672"
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    networks: [projecty]
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "check_running"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 20s
+
+  kafka:
+    image: apache/kafka:3.9.0
+    <<: *restart
+    environment:
+      KAFKA_NODE_ID: "1"
+      KAFKA_PROCESS_ROLES: "broker,controller"
+      KAFKA_LISTENERS: "PLAINTEXT://:9092,CONTROLLER://:9093"
+      KAFKA_ADVERTISED_LISTENERS: "PLAINTEXT://kafka:9092"
+      KAFKA_CONTROLLER_LISTENER_NAMES: "CONTROLLER"
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: "CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT"
+      KAFKA_INTER_BROKER_LISTENER_NAME: "PLAINTEXT"
+      KAFKA_CONTROLLER_QUORUM_VOTERS: "1@kafka:9093"
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "1"
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: "1"
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: "1"
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: "0"
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      CLUSTER_ID: "5L6g3nShT-eMCtK--X86sw"
+    ports:
+      - "9092:9092"
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    networks: [projecty]
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 10s
+      retries: 15
+      start_period: 25s
+
+  cassandra:
+    image: cassandra:5.0
+    profiles: ["full"]
+    <<: *restart
+    environment:
+      CASSANDRA_CLUSTER_NAME: projecty
+      CASSANDRA_DC: dev
+      CASSANDRA_ENDPOINT_SNITCH: GossipingPropertyFileSnitch
+      HEAP_NEWSIZE: 128M
+      MAX_HEAP_SIZE: 1G
+    ports:
+      - "9042:9042"
+    volumes:
+      - cassandra-data:/var/lib/cassandra
+      - ./db/cassandra:/schema:ro
+    networks: [projecty]
+    healthcheck:
+      test: ["CMD-SHELL", "cqlsh -e 'DESCRIBE KEYSPACES' >/dev/null 2>&1"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 60s
+
+  mongodb:
+    image: mongo:8.0
+    profiles: ["full"]
+    <<: *restart
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_USER:-projecty}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD:-dev-only-change-me}
+    ports:
+      - "27018:27017"
+    volumes:
+      - mongo-data:/data/db
+    networks: [projecty]
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+
+  minio:
+    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+    profiles: ["full"]
+    <<: *restart
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_USER:-projecty}
+      MINIO_ROOT_PASSWORD: ${MINIO_PASSWORD:-dev-only-change-me}
+    ports:
+      - "9010:9000"
+      - "9011:9001"
+    volumes:
+      - minio-data:/data
+    networks: [projecty]
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Injeção de falhas — todo acesso a dependência passa por aqui
+  # ─────────────────────────────────────────────────────────────────────────
+
+  toxiproxy:
+    image: ghcr.io/shopify/toxiproxy:2.11.0
+    <<: *restart
+    command: ["-host=0.0.0.0", "-config=/config/toxiproxy.json"]
+    ports:
+      - "8474:8474"     # API de controle
+      - "21257:21257"   # → cockroachdb
+      - "26379:26379"   # → redis
+      - "25672:25672"   # → rabbitmq
+      - "29092:29092"   # → kafka
+    volumes:
+      - ./chaos/toxiproxy.json:/config/toxiproxy.json:ro
+    networks: [projecty]
+    healthcheck:
+      test: ["CMD-SHELL", "/toxiproxy-cli list >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Observabilidade — pilha Grafana (LGTM)
+  # ─────────────────────────────────────────────────────────────────────────
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.121.0
+    <<: *restart
+    command: ["--config=/etc/otel/config.yaml"]
+    ports:
+      - "4317:4317"   # OTLP gRPC
+      - "4318:4318"   # OTLP HTTP
+      - "8889:8889"   # métricas expostas para o Prometheus
+    volumes:
+      - ./observability/otel-collector.yaml:/etc/otel/config.yaml:ro
+    networks: [projecty]
+    depends_on:
+      - tempo
+      - loki
+
+  prometheus:
+    image: prom/prometheus:v3.2.1
+    <<: *restart
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=6h
+      - --web.enable-lifecycle
+      - --web.enable-remote-write-receiver   # o k6 escreve as métricas de carga aqui
+      - --enable-feature=exemplar-storage
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    networks: [projecty]
+
+  tempo:
+    image: grafana/tempo:2.7.1
+    <<: *restart
+    command: ["-config.file=/etc/tempo/tempo.yaml"]
+    ports:
+      - "3200:3200"
+    volumes:
+      - ./observability/tempo.yaml:/etc/tempo/tempo.yaml:ro
+      - tempo-data:/var/tempo
+    networks: [projecty]
+
+  loki:
+    image: grafana/loki:3.4.2
+    <<: *restart
+    command: ["-config.file=/etc/loki/loki.yaml"]
+    ports:
+      - "3100:3100"
+    volumes:
+      - ./observability/loki.yaml:/etc/loki/loki.yaml:ro
+      - loki-data:/loki
+    networks: [projecty]
+
+  grafana:
+    image: grafana/grafana:11.6.0
+    <<: *restart
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+      GF_USERS_DEFAULT_THEME: system
+      GF_FEATURE_TOGGLES_ENABLE: traceqlEditor,traceToMetrics
+      GF_INSTALL_PLUGINS: ""
+    ports:
+      - "3001:3000"
+    volumes:
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    networks: [projecty]
+    depends_on:
+      - prometheus
+      - tempo
+      - loki
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Serviços — núcleo
+  # ─────────────────────────────────────────────────────────────────────────
+
+  api-gateway:
+    image: projecty/api-gateway
+    build:
+      context: ../services/api-gateway
+      dockerfile: Dockerfile
+    <<: *restart
+    environment:
+      <<: *otel-env
+      OTEL_SERVICE_NAME: api-gateway
+      GATEWAY_BIND: 0.0.0.0:8090
+      GATEWAY_REDIS_URL: redis://toxiproxy:26379
+      GATEWAY_RATE_LIMIT_RPS: "50"
+      GATEWAY_UPSTREAM_RENTAL: http://rental-core:8091
+      GATEWAY_UPSTREAM_MEDIA: http://media-guard:8092
+      GATEWAY_UPSTREAM_RISK: http://risk-pricing:8093
+      GATEWAY_UPSTREAM_TELEMETRY: http://telemetry:4000
+      RUST_LOG: info,api_gateway=debug
+    ports:
+      - "8090:8090"
+    networks: [projecty]
+    depends_on:
+      redis:
+        condition: service_healthy
+      toxiproxy:
+        condition: service_started
+      otel-collector:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "/app/api-gateway", "--healthcheck"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 10s
+
+  rental-core:
+    image: projecty/rental-core
+    build:
+      context: ../services/rental-core
+      dockerfile: Dockerfile
+    <<: *restart
+    environment:
+      <<: *otel-env
+      OTEL_SERVICE_NAME: rental-core
+      ASPNETCORE_ENVIRONMENT: Development
+      ASPNETCORE_URLS: http://+:8091
+      ConnectionStrings__Cockroach: "Host=toxiproxy;Port=21257;Database=projecty;Username=root;SSL Mode=Disable"
+      Messaging__Kafka__BootstrapServers: "toxiproxy:29092"
+      Messaging__RabbitMq__Host: "toxiproxy"
+      Messaging__RabbitMq__Port: "25672"
+      Redis__Url: "toxiproxy:26379"
+    ports:
+      - "8091:8091"
+    networks: [projecty]
+    depends_on:
+      cockroachdb:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8091/health/ready >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Serviços — perfil full
+  # ─────────────────────────────────────────────────────────────────────────
+
+  media-guard:
+    image: projecty/media-guard
+    profiles: ["full"]
+    build:
+      context: ../services/media-guard
+      dockerfile: Dockerfile
+    <<: *restart
+    environment:
+      <<: *otel-env
+      OTEL_SERVICE_NAME: media-guard
+      MEDIA_BIND: 0.0.0.0:8092
+      MEDIA_RABBITMQ_URL: amqp://${RABBITMQ_USER:-projecty}:${RABBITMQ_PASSWORD:-dev-only-change-me}@toxiproxy:25672/%2f
+      MEDIA_S3_ENDPOINT: http://minio:9000
+      MEDIA_MAX_BYTES: "8388608"
+      RUST_LOG: info,media_guard=debug
+    ports:
+      - "8092:8092"
+    networks: [projecty]
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/app/media-guard", "--healthcheck"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 10s
+
+  risk-pricing:
+    image: projecty/risk-pricing
+    profiles: ["full"]
+    build:
+      context: ../services/risk-pricing
+      dockerfile: Dockerfile
+    <<: *restart
+    environment:
+      <<: *otel-env
+      OTEL_SERVICE_NAME: risk-pricing
+      RISK_BIND_HOST: 0.0.0.0
+      RISK_BIND_PORT: "8093"
+      RISK_KAFKA_BOOTSTRAP: toxiproxy:29092
+    ports:
+      - "8093:8093"
+    networks: [projecty]
+    depends_on:
+      kafka:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8093/health/ready').status==200 else 1)\""]
+      interval: 10s
+      timeout: 5s
+      retries: 8
+      start_period: 15s
+
+  telemetry:
+    image: projecty/telemetry
+    profiles: ["full"]
+    build:
+      context: ../services/telemetry
+      dockerfile: Dockerfile
+    <<: *restart
+    environment:
+      <<: *otel-env
+      OTEL_SERVICE_NAME: telemetry
+      PORT: "4000"
+      CASSANDRA_HOSTS: cassandra
+      KAFKA_BOOTSTRAP: toxiproxy:29092
+    ports:
+      - "4000:4000"
+    networks: [projecty]
+    depends_on:
+      cassandra:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:4000/health/ready >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 25s
+
+  console:
+    image: projecty/console
+    profiles: ["full"]
+    build:
+      context: ../services/console
+      dockerfile: Dockerfile
+    <<: *restart
+    environment:
+      <<: *otel-env
+      OTEL_SERVICE_NAME: console
+      NODE_ENV: development
+      PORT: "3000"
+      GATEWAY_URL: http://api-gateway:8090
+      TELEMETRY_WS_URL: ws://localhost:4000/socket
+      GRAFANA_URL: http://localhost:3001
+    ports:
+      - "3000:3000"
+    networks: [projecty]
+    depends_on:
+      - api-gateway
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/api/health >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Carga — perfil load, acionado por botão no Tilt
+  # ─────────────────────────────────────────────────────────────────────────
+
+  k6:
+    image: grafana/k6:0.57.0
+    profiles: ["load"]
+    command: ["run", "--out", "experimental-prometheus-rw", "/scripts/rental-flow.js"]
+    environment:
+      K6_PROMETHEUS_RW_SERVER_URL: http://prometheus:9090/api/v1/write
+      K6_PROMETHEUS_RW_TREND_STATS: "p(95),p(99),min,max"
+      BASE_URL: http://api-gateway:8090
+      VUS: "${K6_VUS:-20}"
+      DURATION: "${K6_DURATION:-30s}"
+    volumes:
+      - ../load/k6:/scripts:ro
+    networks: [projecty]
