@@ -1,104 +1,73 @@
-# Documentação do Desafio Backend - Sistema de Gestão de Motos e Entregadores
+# ProjectY
 
-## Introdução
+> A case study in turning an audited distributed system into evidence-based architecture.
 
-Este documento detalha a implementação do sistema de gestão de aluguel de motos e entregadores, desenvolvido como parte de um desafio de backend. O sistema é dividido em quatro microserviços: Auth Gate, MotoHub, Rider Manager e Rental Operations, cada um rodando em sua própria instância Docker e comunicando-se através de uma rede definida.
+ProjectY started as four .NET microservices for motorcycle rentals: identity,
+fleet, rider management, and rental operations. A manual review of the code,
+containers, and delivery pipeline found **42 issues: 5 critical security flaws,
+11 high-risk findings, 14 architectural gaps, and 12 delivery or code-quality
+problems**. This repository preserves that real baseline and documents the
+decisions used to redesign it.
 
-## Arquitetura de Microserviços
+**Start with the evidence:** [read the architecture and security audit](docs/AUDITORIA-ARQUITETURA-SEGURANCA.md),
+follow the [ADR consolidation work](https://github.com/iVega123/ProjectY/issues/15),
+or browse the [modernization program](https://github.com/iVega123/ProjectY/issues/2).
+The accompanying [article series](https://github.com/iVega123/ProjectY/issues/13)
+turns the same work into public technical narratives.
 
-### Auth Gate
-- **Função**: Responsável pela autenticação dos usuários e geração de tokens de acesso. Gerencia dois tipos de usuários: Admin e Rider.
-- **Tecnologia**: ASP.NET Core.
-- **Portas**:
-  - `8080`: HTTP API para autenticação.
-  - `8181`: HTTPS API para autenticação segura.
-- **Banco de Dados**:
-  - Utiliza Postgres para armazenar dados de usuários.
-- **Dependências**:
-  - Comunica com todos os outros microserviços para validar tokens de acesso.
-  - **Swagger URL**: [Auth Gate Swagger](http://localhost:8080/swagger)
-  - **Repositório Separado**: [MotoHub](https://github.com/iVega123/AuthGate)
-  - **Sonar Cloud**: [Sonar Cloud](https://sonarcloud.io/project/overview?id=iVega123_AuthGate)
+## The five decisions that shape the redesign
 
-### MotoHub
-- **Função**: Administração das motos na plataforma, incluindo cadastro, consulta, modificação e remoção de motos.
-- **Tecnologia**: ASP.NET Core.
-- **Portas**:
-  - `8100`: HTTP API para gestão de motos.
-  - `8101`: HTTPS API para gestão de motos segura.
-- **Banco de Dados**:
-  - Utiliza Postgres para persistência de dados.
-- **Dependências**:
-  - RabbitMQ para comunicação de eventos relacionados a motos.
-  - **Swagger URL**: [MotoHub Swagger](http://localhost:8100/swagger)
-  - **Repositório Separado**: [MotoHub](https://github.com/iVega123/MotoHub)
-  - **Sonar Cloud**: [SonarCloud](https://sonarcloud.io/project/overview?id=iVega123_MotoHub)
+| Decision | What was rejected | Why | Decision trail |
+|---|---|---|---|
+| Put rental correctness in the database and use an outbox/inbox around events | Application-only pre-checks, in-memory locks, and claims of transport-level "exactly once" | Those approaches do not protect concurrent writers or the gap between committing data and publishing an event | [Transactional core](https://github.com/iVega123/ProjectY/issues/6) |
+| Establish one edge trust boundary | Four editable copies of token and role validation inside domain services | The copies had already diverged and produced an authorization bypass | [Rust edge gateway](https://github.com/iVega123/ProjectY/issues/7) |
+| Optimize the local feedback loop before adding cloud infrastructure | Premature Kubernetes, manual setup steps, and sleep-based startup ordering | A demonstrable system must start predictably and make source changes cheap | [Local development loop](https://github.com/iVega123/ProjectY/issues/5) |
+| Treat failure tolerance as an observable behavior | Generic retry policies and dashboards that cannot be traced back to a request | Failure claims are credible only when they can be injected, observed, and reproduced | [Observability](https://github.com/iVega123/ProjectY/issues/8) and [fault-tolerance drills](https://github.com/iVega123/ProjectY/issues/9) |
+| Keep deployment variants in overlays and choose dependencies by protocol | Long-lived environment branches and vendor-specific contracts in workloads | Branches drift; protocol boundaries preserve a credible self-hosted path and an ephemeral cloud path | [Local Kubernetes](https://github.com/iVega123/ProjectY/issues/11) and [AWS cost profiles](https://github.com/iVega123/ProjectY/issues/12) |
 
-### Rider Manager
-- **Função**: Focado no cadastro e gerenciamento dos entregadores que irão alugar motos.
-- **Tecnologia**: ASP.NET Core.
-- **Portas**:
-  - `8000`: HTTP API para gestão de entregadores.
-  - `8001`: HTTPS API para gestão de entregadores segura.
-- **Banco de Dados**:
-  - Utiliza Postgres para armazenar dados dos entregadores.
-- **Dependências**:
-  - RabbitMQ para comunicação de eventos relacionados aos entregadores.
-  - MinIO para armazenamento das fotos de CNH.
-  - **Swagger URL**: [Rider Manager Swagger](http://localhost:8000/swagger)
-  - **Repositório Separado**: [Rider Manager](https://github.com/iVega123/RiderManager)
+These links currently point to the implementation work items. Stable,
+numbered decision records are being assembled under
+[`docs/adr/`](https://github.com/iVega123/ProjectY/issues/15), beginning with
+the audit as ADR 0000.
 
-### Rental Operations
-- **Função**: Gerenciamento dos aluguéis de motos, incluindo início, término e cálculo de custos associados.
-- **Tecnologia**: ASP.NET Core.
-- **Portas**:
-  - `8200`: HTTP API para operações de aluguel.
-  - `8201`: HTTPS API para operações de aluguel segura.
-- **Banco de Dados**:
-  - Utiliza MongoDB para armazenamento dos registros de aluguéis.
-- **Dependências**:
-  - RabbitMQ para comunicação de eventos de aluguéis.
-  - **Swagger URL**: [Rental Operations Swagger](http://localhost:8200/swagger)
-  - **Repositório Separado**: [Rental Operations](https://github.com/iVega123/RentalOperations)
+## What the audit changed
 
-### Elastic Stack (Elasticsearch, Logstash, Kibana)
-- **Função**: Utilizado para monitoramento, análise de logs e visualizações em tempo real dos dados gerados pelos microserviços.
-- **Componentes**:
-  - **Elasticsearch**: Armazenamento e indexação de logs.
-  - **Logstash**: Agregação e processamento de logs antes de enviar para o Elasticsearch.
-  - **Kibana**: Interface gráfica para visualizar dados do Elasticsearch.
+The service boundaries looked reasonable on paper, but the review found that
+the system had no effective perimeter. Anyone could register an administrator;
+one service accepted any valid token on an admin path; secrets and a shared JWT
+key were committed; rental ownership was not enforced; and queue payloads were
+trusted as authenticated input.
 
-## Uso do Kibana
+The important outcome was not the list of findings. It was the correction
+order: close the open entry points, rotate and externalize secrets, establish a
+single trust boundary, make messaging durable and idempotent, and then remove
+the duplicated security and messaging code. The full evidence, impact, and
+source locations are in the
+[audit](docs/AUDITORIA-ARQUITETURA-SEGURANCA.md).
 
-Para acessar e usar o Kibana para visualizar os logs:
-1. Certifique-se de que o Kibana esteja rodando e acessível na porta `5601` (ex: `http://localhost:5601`).
-2. No menu principal do Kibana, navegue até "Discover" para visualizar os logs armazenados.
-3. Na página do "Discover", selecione o índice apropriado dos logs que você deseja explorar. Se necessário, configure um novo índice pattern se for a primeira vez que está acessando os logs.
-4. Utilize os filtros e a barra de pesquisa para buscar entradas específicas ou para explorar os logs por período de tempo.
-5. Clique em qualquer entrada de log para expandir e ver detalhes adicionais.
+## Repository state
 
-### Visualizando Logs
-- Para melhorar a análise, você pode personalizar o layout dos campos mostrados nos logs ou criar visualizações e dashboards que ajudem na interpretação dos dados.
+| Area | Current state |
+|---|---|
+| Audited baseline | Four ASP.NET Core services: `AuthGate`, `MotoHub`, `RiderManager`, and `RentalOperations` |
+| Data and messaging | PostgreSQL, MongoDB, RabbitMQ, and MinIO in the original local stack |
+| Original observability | Elasticsearch, Logstash, and Kibana |
+| Modernization scaffold | A container topology under `deploy/` for the planned gateway, transactional core, fault injection, and LGTM observability stack |
+| Decision records | Being normalized and numbered in [issue #15](https://github.com/iVega123/ProjectY/issues/15) |
 
+The modernization compose file is a design scaffold: it references services
+that have not landed yet. It is deliberately not presented as a working demo.
+The root compose file runs the audited baseline only.
 
-## Docker Compose
+## Run locally
 
-Todos os microserviços são configurados e gerenciados através de Docker Compose, assegurando isolamento, facilidade de configuração e deploy. O arquivo `docker-compose.yml` inclui a definição de redes, volumes e dependências necessárias para cada serviço.
+See [Running the audited baseline locally](docs/getting-started.md). This code
+contains known security flaws and development credentials; use it only in an
+isolated local environment.
 
-## Uso
+## Follow the work
 
-Para executar o sistema:
-1. Clone o repositório contendo o código fonte e o Docker Compose.
-2. Navegue até a pasta raiz do projeto.
-3. Execute `docker-compose up` para iniciar todos os serviços.
-4. Acesse as APIs expostas pelos microserviços nas portas designadas.
-
-## Testes e Qualidade
-
-- **Testes Unitários e de Integração**: Cada microserviço possui sua suite de testes para garantir a integridade das operações.
-- **Design Patterns**: Utilizados para garantir um código limpo e organizado.
-- **Logs**: Implementados em todos os microserviços para facilitar o diagnóstico e monitoramento.
-
-## Conclusão
-
-Este sistema foi desenvolvido seguindo as melhores práticas de desenvolvimento e arquitetura de microserviços, oferecendo uma solução robusta e escalável para o gerenciamento de aluguéis de motos e entregadores.
+- [Epic 1: repository repositioning](https://github.com/iVega123/ProjectY/issues/2)
+- [All modernization epics](https://github.com/iVega123/ProjectY/issues?q=is%3Aissue%20state%3Aopen%20label%3Aepic)
+- [Architecture decision records](https://github.com/iVega123/ProjectY/issues/15)
+- [Six-part article series](https://github.com/iVega123/ProjectY/issues/13)
