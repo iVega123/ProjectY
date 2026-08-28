@@ -17,7 +17,37 @@ to a shared or production environment.
 - Git
 - Docker Engine or Docker Desktop
 - Docker Compose v2 (`docker compose`)
-- Free local ports for the services listed below
+- Every host port listed in the next section must be available
+
+## Required host ports
+
+The root Compose file publishes application, data, messaging, storage, and
+observability ports. A conflict on any one of them prevents the stack from
+starting.
+
+| Infrastructure service | Required host ports |
+|---|---|
+| Elasticsearch | `9200`, `9300` |
+| Logstash | `5000` |
+| Kibana | `5601` |
+| PostgreSQL | `5432` |
+| pgAdmin | `5050` |
+| MongoDB | `27017` |
+| RabbitMQ | `5672`, `15672` |
+| MinIO | `9000`, `9001` |
+
+| Application service | Required host ports |
+|---|---|
+| Auth Gate | `8080`, `8181` |
+| Rider Manager | `8000`, `8001` |
+| MotoHub | `8100`, `8101` |
+| Rental Operations | `8200`, `8201` |
+
+The secondary application ports (`8181`, `8001`, `8101`, and `8201`)
+are still published and therefore must be free, even though the current
+containers do not configure usable HTTPS listeners on them. If a port is
+already occupied, stop the conflicting local service or change the matching
+host-side mapping in `docker-compose.yml` before starting the stack.
 
 ## Start the stack
 
