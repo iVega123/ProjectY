@@ -7,6 +7,7 @@ using RiderManager.Entities;
 using System.Text.Json;
 using RiderManager.Managers;
 using RiderManager.DTOs;
+using ProjectY.Shared.Messaging;
 
 namespace RiderManager.Services.RabbitMQService
 {
@@ -19,13 +20,15 @@ namespace RiderManager.Services.RabbitMQService
         private readonly string _imageStreamQueueName;
         private readonly string _riderInfoPoisonQueueName;
         private readonly IServiceProvider _serviceProvider;
+        private readonly QueueMessageAuthenticator _messageAuthenticator;
         private ConcurrentDictionary<string, List<ImagePart>> imagePartsStore = new ConcurrentDictionary<string, List<ImagePart>>();
         private ConcurrentDictionary<string, int> riderInfoRetryCounts = new ConcurrentDictionary<string, int>();
 
         public MessagingConsumerService(IRabbitMqService mqService,
             ILogger<MessagingConsumerService> logger, 
             RabbitMQOptions options,
-            IServiceProvider serviceProvider)
+            IServiceProvider serviceProvider,
+            QueueMessageAuthenticator messageAuthenticator)
         {
             _connection = mqService.CreateChannel();
             _logger = logger;
@@ -35,6 +38,7 @@ namespace RiderManager.Services.RabbitMQService
             _channel = _connection.CreateModel();
             InitializeQueues();
             _serviceProvider = serviceProvider;
+            _messageAuthenticator = messageAuthenticator;
         }
 
         private void InitializeQueues()
@@ -64,6 +68,11 @@ namespace RiderManager.Services.RabbitMQService
                     await processMessageFunc(message);
                     _channel.BasicAck(ea.DeliveryTag, false);
                 }
+                catch (QueueMessageAuthenticationException ex)
+                {
+                    _channel.BasicNack(ea.DeliveryTag, false, false);
+                    _logger.LogWarning(ex, "Rejected unauthenticated message from queue {QueueName}.", queueName);
+                }
                 catch (Exception ex)
                 {
                     _channel.BasicNack(ea.DeliveryTag, false, true);
@@ -78,7 +87,10 @@ namespace RiderManager.Services.RabbitMQService
 
         private async Task ProcessRiderInfo(string message)
         {
-            var riderInfo = JsonSerializer.Deserialize<RiderMQEntity>(message);
+            var riderInfo = _messageAuthenticator.ValidateEnvelope<RiderMQEntity>(
+                message,
+                "rider.registration.v1",
+                payload => payload.UserId);
             string messageId = riderInfo.UserId;
 
             if (!riderInfoRetryCounts.TryGetValue(messageId, out int currentRetryCount))
@@ -170,7 +182,10 @@ namespace RiderManager.Services.RabbitMQService
 
         private async Task ProcessImageStream(string message)
         {
-            var imagePart = JsonSerializer.Deserialize<ImagePart>(message);
+            var imagePart = _messageAuthenticator.ValidateEnvelope<ImagePart>(
+                message,
+                "rider.cnh-image-part.v1",
+                payload => payload.UserId);
             List<ImagePart> parts = imagePartsStore.GetOrAdd(imagePart.UserId, new List<ImagePart>());
             parts.Add(imagePart);
 

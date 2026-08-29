@@ -27,6 +27,7 @@ namespace RentalOperations.Services.RabbitMQService
                 UserName = _configuration.UserName,
                 Password = _configuration.Password,
                 HostName = _configuration.HostName,
+                VirtualHost = _configuration.VirtualHost,
                 DispatchConsumersAsync = true
             };
 

@@ -22,7 +22,8 @@ namespace RiderManager.Services.RabbitMQService
             {
                 UserName = _configuration.UserName,
                 Password = _configuration.Password,
-                HostName = _configuration.HostName
+                HostName = _configuration.HostName,
+                VirtualHost = _configuration.VirtualHost
             };
             connection.DispatchConsumersAsync = true;
             var channel = connection.CreateConnection();

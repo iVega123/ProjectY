@@ -100,14 +100,10 @@ services:
   rabbitmq:
     image: rabbitmq:4.0-management-alpine
     <<: *restart
-    environment:
-      RABBITMQ_DEFAULT_USER: "${RABBITMQ_USER:?Set RABBITMQ_USER in .env}"
-      RABBITMQ_DEFAULT_PASS: "${RABBITMQ_PASSWORD:?Set RABBITMQ_PASSWORD in .env}"
-    ports:
-      - "5673:5672"
-      - "15673:15672"
     volumes:
       - rabbitmq-data:/var/lib/rabbitmq
+      - ./rabbitmq/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf:ro
+      - ../.rabbitmq-definitions.json:/etc/rabbitmq/definitions.json:ro
     networks: [projecty]
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "-q", "check_running"]
@@ -220,7 +216,6 @@ services:
       - "8474:8474"     # API de controle
       - "21257:21257"   # → cockroachdb
       - "26379:26379"   # → redis
-      - "25672:25672"   # → rabbitmq
       - "29092:29092"   # → kafka
     volumes:
       - ./chaos/toxiproxy.json:/config/toxiproxy.json:ro
@@ -363,6 +358,9 @@ services:
       Messaging__Kafka__BootstrapServers: "toxiproxy:29092"
       Messaging__RabbitMq__Host: "toxiproxy"
       Messaging__RabbitMq__Port: "25672"
+      Messaging__RabbitMq__Username: "${RENTAL_CORE_RABBITMQ_USER:?Set RENTAL_CORE_RABBITMQ_USER in .env}"
+      Messaging__RabbitMq__Password: "${RENTAL_CORE_RABBITMQ_PASSWORD:?Set RENTAL_CORE_RABBITMQ_PASSWORD in .env}"
+      Messaging__RabbitMq__VirtualHost: "projecty"
       Redis__Url: "toxiproxy:26379"
     ports:
       - "8091:8091"
@@ -396,7 +394,7 @@ services:
       <<: *otel-env
       OTEL_SERVICE_NAME: media-guard
       MEDIA_BIND: 0.0.0.0:8092
-      MEDIA_RABBITMQ_URL: "amqp://${RABBITMQ_USER:?Set RABBITMQ_USER in .env}:${RABBITMQ_PASSWORD:?Set RABBITMQ_PASSWORD in .env}@toxiproxy:25672/%2f"
+      MEDIA_RABBITMQ_URL: "amqp://${MEDIA_GUARD_RABBITMQ_USER:?Set MEDIA_GUARD_RABBITMQ_USER in .env}:${MEDIA_GUARD_RABBITMQ_PASSWORD:?Set MEDIA_GUARD_RABBITMQ_PASSWORD in .env}@toxiproxy:25672/projecty"
       MEDIA_S3_ENDPOINT: http://minio:9000
       MEDIA_MAX_BYTES: "8388608"
       RUST_LOG: info,media_guard=debug

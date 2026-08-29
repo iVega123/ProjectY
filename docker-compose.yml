@@ -84,16 +84,12 @@ services:
   rabbitmq:
     image: rabbitmq:3-management
     container_name: rabbitmq
-    environment:
-      RABBITMQ_DEFAULT_USER: "${RABBITMQ_USER:?Set RABBITMQ_USER in .env}"
-      RABBITMQ_DEFAULT_PASS: "${RABBITMQ_PASSWORD:?Set RABBITMQ_PASSWORD in .env}"
-    ports:
-      - "5672:5672"
-      - "15672:15672" 
     networks:
       - elk
     volumes:
       - rabbitmq-data:/var/lib/rabbitmq
+      - ./deploy/rabbitmq/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf:ro
+      - ./.rabbitmq-definitions.json:/etc/rabbitmq/definitions.json:ro
 
   minio:
     image: minio/minio:latest
@@ -123,8 +119,9 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: Development
       ConnectionStrings__Postgresql: "Host=postgres;Port=5432;Database=${AUTH_GATE_POSTGRES_DB:?Set AUTH_GATE_POSTGRES_DB in .env};Username=${POSTGRES_USER:?Set POSTGRES_USER in .env};Password=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}"
-      RabbitMQ__UserName: "${RABBITMQ_USER:?Set RABBITMQ_USER in .env}"
-      RabbitMQ__Password: "${RABBITMQ_PASSWORD:?Set RABBITMQ_PASSWORD in .env}"
+      RabbitMQ__UserName: "${AUTH_GATE_RABBITMQ_USER:?Set AUTH_GATE_RABBITMQ_USER in .env}"
+      RabbitMQ__Password: "${AUTH_GATE_RABBITMQ_PASSWORD:?Set AUTH_GATE_RABBITMQ_PASSWORD in .env}"
+      Messaging__SigningKey: "${RIDER_EVENTS_SIGNING_KEY:?Set RIDER_EVENTS_SIGNING_KEY in .env}"
       Jwt__SigningKeys__AuthGate: "${AUTH_GATE_JWT_SIGNING_KEY:?Set AUTH_GATE_JWT_SIGNING_KEY in .env}"
       Jwt__SigningKeys__MotoHub: "${MOTO_HUB_JWT_SIGNING_KEY:?Set MOTO_HUB_JWT_SIGNING_KEY in .env}"
       Jwt__SigningKeys__RiderManager: "${RIDER_MANAGER_JWT_SIGNING_KEY:?Set RIDER_MANAGER_JWT_SIGNING_KEY in .env}"
@@ -144,8 +141,9 @@ services:
       ASPNETCORE_ENVIRONMENT: Development
       ASPNETCORE_URLS: http://+:8000
       ConnectionStrings__Postgresql: "Host=postgres;Port=5432;Database=${RIDER_MANAGER_POSTGRES_DB:?Set RIDER_MANAGER_POSTGRES_DB in .env};Username=${POSTGRES_USER:?Set POSTGRES_USER in .env};Password=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}"
-      RabbitMQ__UserName: "${RABBITMQ_USER:?Set RABBITMQ_USER in .env}"
-      RabbitMQ__Password: "${RABBITMQ_PASSWORD:?Set RABBITMQ_PASSWORD in .env}"
+      RabbitMQ__UserName: "${RIDER_MANAGER_RABBITMQ_USER:?Set RIDER_MANAGER_RABBITMQ_USER in .env}"
+      RabbitMQ__Password: "${RIDER_MANAGER_RABBITMQ_PASSWORD:?Set RIDER_MANAGER_RABBITMQ_PASSWORD in .env}"
+      Messaging__SigningKey: "${RIDER_EVENTS_SIGNING_KEY:?Set RIDER_EVENTS_SIGNING_KEY in .env}"
       MinIO__AccessKey: "${MINIO_USER:?Set MINIO_USER in .env}"
       MinIO__SecretKey: "${MINIO_PASSWORD:?Set MINIO_PASSWORD in .env}"
       Jwt__SigningKey: "${RIDER_MANAGER_JWT_SIGNING_KEY:?Set RIDER_MANAGER_JWT_SIGNING_KEY in .env}"
@@ -169,8 +167,8 @@ services:
       ASPNETCORE_ENVIRONMENT: Development
       ASPNETCORE_URLS: http://+:8100
       ConnectionStrings__Postgresql: "Host=postgres;Port=5432;Database=${MOTO_HUB_POSTGRES_DB:?Set MOTO_HUB_POSTGRES_DB in .env};Username=${POSTGRES_USER:?Set POSTGRES_USER in .env};Password=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}"
-      RabbitMQ__UserName: "${RABBITMQ_USER:?Set RABBITMQ_USER in .env}"
-      RabbitMQ__Password: "${RABBITMQ_PASSWORD:?Set RABBITMQ_PASSWORD in .env}"
+      RabbitMQ__UserName: "${MOTO_HUB_RABBITMQ_USER:?Set MOTO_HUB_RABBITMQ_USER in .env}"
+      RabbitMQ__Password: "${MOTO_HUB_RABBITMQ_PASSWORD:?Set MOTO_HUB_RABBITMQ_PASSWORD in .env}"
       Jwt__SigningKey: "${MOTO_HUB_JWT_SIGNING_KEY:?Set MOTO_HUB_JWT_SIGNING_KEY in .env}"
       MotoHubApiKey: "${MOTO_HUB_API_KEY:?Set MOTO_HUB_API_KEY in .env}"
       RentalOperationsSettings__ApiKey: "${RENTAL_OPERATIONS_API_KEY:?Set RENTAL_OPERATIONS_API_KEY in .env}"
@@ -190,8 +188,8 @@ services:
       ASPNETCORE_URLS: http://+:8200
       MongoDbSettings__ConnectionString: "mongodb://${MONGO_USER:?Set MONGO_USER in .env}:${MONGO_PASSWORD:?Set MONGO_PASSWORD in .env}@mongodb:27017"
       MongoDbSettings__DatabaseName: "${MONGO_DB:?Set MONGO_DB in .env}"
-      RabbitMQ__UserName: "${RABBITMQ_USER:?Set RABBITMQ_USER in .env}"
-      RabbitMQ__Password: "${RABBITMQ_PASSWORD:?Set RABBITMQ_PASSWORD in .env}"
+      RabbitMQ__UserName: "${RENTAL_OPERATIONS_RABBITMQ_USER:?Set RENTAL_OPERATIONS_RABBITMQ_USER in .env}"
+      RabbitMQ__Password: "${RENTAL_OPERATIONS_RABBITMQ_PASSWORD:?Set RENTAL_OPERATIONS_RABBITMQ_PASSWORD in .env}"
       Jwt__SigningKey: "${RENTAL_OPERATIONS_JWT_SIGNING_KEY:?Set RENTAL_OPERATIONS_JWT_SIGNING_KEY in .env}"
       RentalOperationsApiKey: "${RENTAL_OPERATIONS_API_KEY:?Set RENTAL_OPERATIONS_API_KEY in .env}"
       RiderManagerSettings__ApiKey: "${RIDER_MANAGER_API_KEY:?Set RIDER_MANAGER_API_KEY in .env}"

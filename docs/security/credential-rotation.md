@@ -18,6 +18,19 @@ The repository cannot prove that an external credential was revoked. A release
 must not mark the environment rotation complete until an owner records it here
 or in the environment's auditable secret-management system.
 
+## C5 broker cutover
+
+| Scope | UTC date | State | Evidence / required action |
+|---|---|---|---|
+| Broker host exposure | 2026-08-29 | Removed from Compose | AMQP, management, and the Toxiproxy RabbitMQ listener have no host port mapping. |
+| Per-service RabbitMQ users and vhosts | On first run after 2026-08-29 | Operator action required | Regenerate `.env` and `.rabbitmq-definitions.json`, then recreate the RabbitMQ volume so boot-time definitions are imported. |
+| Rider event signing key | On first deployment after 2026-08-29 | Operator action required | Provision a fresh `RIDER_EVENTS_SIGNING_KEY` to AuthGate and RiderManager together. Drain or deliberately discard messages signed with the previous key before revocation. |
+
+Do not reuse the former shared broker password for any generated service
+account. Hosted environments should provision equivalent isolated credentials
+and vhosts through their broker control plane rather than copying the local
+definitions file.
+
 ## Environment completions
 
 Append one row per environment without including secret material.

@@ -1,8 +1,8 @@
 ﻿using AuthGate.Configurations;
 using AuthGate.Entities;
 using RabbitMQ.Client;
+using ProjectY.Shared.Messaging;
 using System.Text;
-using System.Text.Json;
 
 namespace AuthGate.Services.RabbitMQ
 {
@@ -11,12 +11,15 @@ namespace AuthGate.Services.RabbitMQ
         private readonly IConnection _connection;
         private readonly IModel _channel;
         private readonly RabbitMQOptions _rabbitmqOptions;
+        private readonly QueueMessageAuthenticator _messageAuthenticator;
 
-        public MessagingPublisherService(IConnection connection, RabbitMQOptions rabbitMQOptions)
+        public MessagingPublisherService(IConnection connection, RabbitMQOptions rabbitMQOptions,
+            QueueMessageAuthenticator messageAuthenticator)
         {
             _connection = connection;
             _channel = _connection.CreateModel();
             _rabbitmqOptions = rabbitMQOptions;
+            _messageAuthenticator = messageAuthenticator;
         }
 
         public void PublishImageStream(Stream imageStream, string extension, string userId)
@@ -41,8 +44,11 @@ namespace AuthGate.Services.RabbitMQ
                     EndOfFile = imageStream.Position == imageStream.Length
                 };
 
-                var json = JsonSerializer.Serialize(message);
-                var body = Encoding.UTF8.GetBytes(json);
+                var envelope = _messageAuthenticator.CreateEnvelope(
+                    "rider.cnh-image-part.v1",
+                    userId,
+                    message);
+                var body = Encoding.UTF8.GetBytes(envelope);
 
                 _channel.BasicPublish(exchange: "",
                                       routingKey: _rabbitmqOptions.ImageStreamQueueName,
@@ -55,8 +61,11 @@ namespace AuthGate.Services.RabbitMQ
         {
             _channel.QueueDeclare(_rabbitmqOptions.RiderInfoQueueName, false, false);
 
-            var message = JsonSerializer.Serialize(rider);
-            var body = Encoding.UTF8.GetBytes(message);
+            var envelope = _messageAuthenticator.CreateEnvelope(
+                "rider.registration.v1",
+                rider.UserId,
+                rider);
+            var body = Encoding.UTF8.GetBytes(envelope);
 
             _channel.BasicPublish(exchange: "",
                                   routingKey: _rabbitmqOptions.RiderInfoQueueName,

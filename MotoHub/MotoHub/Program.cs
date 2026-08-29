@@ -51,6 +51,7 @@ builder.Services.AddSingleton<IConnection>(sp =>
     var factory = new ConnectionFactory()
     {
         HostName = rabbitMQOptions.HostName,
+        VirtualHost = rabbitMQOptions.VirtualHost,
         UserName = rabbitMQOptions.UserName,
         Password = rabbitMQOptions.Password
     };

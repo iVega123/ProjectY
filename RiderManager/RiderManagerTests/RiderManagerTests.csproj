@@ -29,4 +29,8 @@
     <Using Include="Xunit" />
   </ItemGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="..\RiderManager\RiderManager.csproj" />
+  </ItemGroup>
+
 </Project>
