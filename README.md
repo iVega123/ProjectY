@@ -65,6 +65,9 @@ See [Running the audited baseline locally](docs/getting-started.md). This code
 contains known security flaws and development credentials; use it only in an
 isolated local environment.
 
+Database-backed tests use the shared
+[PostgreSQL Testcontainers pattern](docs/testing/testcontainers-postgres.md).
+
 ## Verify published images
 
 After a change reaches `main`, CI publishes each changed service to GHCR with the
