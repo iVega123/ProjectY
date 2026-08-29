@@ -55,6 +55,8 @@ public class AdminAuthorizationPipelineTests : IClassFixture<CustomWebApplicatio
             SecurityAlgorithms.HmacSha256);
 
         var token = new JwtSecurityToken(
+            issuer: "projecty.auth-gate",
+            audience: "projecty.rental-operations",
             claims:
             [
                 new Claim(ClaimTypes.NameIdentifier, "requesting-user"),

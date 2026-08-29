@@ -12,6 +12,10 @@ namespace MotoHubTests.Integration
 {
     public class CustomWebApplicationFactory<TStartup> : WebApplicationFactory<TStartup> where TStartup : class
     {
+        public const string JwtKey = "test-only-moto-hub-key-with-32-bytes";
+        public const string JwtIssuer = "projecty.auth-gate";
+        public const string JwtAudience = "projecty.moto-hub";
+
         protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
             builder.ConfigureServices(services =>
@@ -68,7 +72,9 @@ namespace MotoHubTests.Integration
 
                 var integrationTestConfig = new Dictionary<string, string>
                 {
-                    {"JwtKey", "pnXhunyWll1LgERT86wXwMH5I6ieQC2M"},
+                    {"Jwt:SigningKey", JwtKey},
+                    {"Jwt:Issuer", JwtIssuer},
+                    {"Jwt:Audience", JwtAudience},
                     {"MotoHubApiKey", "" }
                 };
 

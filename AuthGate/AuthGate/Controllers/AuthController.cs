@@ -2,13 +2,11 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using AuthGate.Model;
 using AuthGate.DTO;
-using Microsoft.IdentityModel.Tokens;
-using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
-using System.Text;
 using AuthGate.Validators;
 using AuthGate.Services.File;
 using AuthGate.Services.RabbitMQ;
+using AuthGate.Services;
 using AuthGate.Entities;
 
 namespace AuthGate.Controllers
@@ -20,7 +18,7 @@ namespace AuthGate.Controllers
         private readonly UserManager<ApplicationUser> _userManager;
         private readonly SignInManager<ApplicationUser> _signInManager;
         private readonly RoleManager<IdentityRole> _roleManager;
-        private readonly string _jwtKey;
+        private readonly JwtTokenIssuer _jwtTokenIssuer;
         private readonly ILogger<AuthController> _logger;
         private readonly IFileValidationService _fileValidationService;
         private readonly IMessagingPublisherService _messagingPublisherService;
@@ -38,7 +36,7 @@ namespace AuthGate.Controllers
             _userManager = userManager;
             _signInManager = signInManager;
             _roleManager = roleManager;
-            _jwtKey = configuration["JwtKey"];
+            _jwtTokenIssuer = new JwtTokenIssuer(configuration);
             _logger = logger;
             _fileValidationService = fileValidationService;
             _messagingPublisherService = messagingPublisherService;
@@ -134,8 +132,8 @@ namespace AuthGate.Controllers
             var roles = await _userManager.GetRolesAsync(user);
             var claims = new List<Claim>
             {
-                new Claim(ClaimTypes.Name, user.UserName),
-                new Claim(ClaimTypes.Email, user.Email),
+                new Claim(ClaimTypes.Name, user.UserName ?? user.Id),
+                new Claim(ClaimTypes.Email, user.Email ?? model.Email),
                 new Claim(ClaimTypes.NameIdentifier, user.Id)
             };
 
@@ -144,16 +142,15 @@ namespace AuthGate.Controllers
                 claims.Add(new Claim(ClaimTypes.Role, role));
             }
 
-            var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_jwtKey));
-            var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
-
-            var token = new JwtSecurityToken(
-                claims: claims,
-                expires: DateTime.Now.AddHours(1),
-                signingCredentials: creds);
-
-            var tokenHandler = new JwtSecurityTokenHandler();
-            var stringToken = tokenHandler.WriteToken(token);
+            string stringToken;
+            try
+            {
+                stringToken = _jwtTokenIssuer.CreateToken(claims, model.Audience);
+            }
+            catch (ArgumentOutOfRangeException)
+            {
+                return BadRequest(new { Error = "Unsupported token audience." });
+            }
 
             _logger.LogInformation("JWT token generated for user {Email}.", model.Email);
 

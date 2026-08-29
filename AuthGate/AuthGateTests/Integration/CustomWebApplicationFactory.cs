@@ -6,6 +6,7 @@ using Microsoft.Extensions.Configuration;
 using AuthGate.Data;
 using AuthGate.Model;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.DataProtection;
 using Moq;
 using RabbitMQ.Client;
 using Xunit;
@@ -38,6 +39,8 @@ namespace AuthGateTests.Integration
         {
             builder.ConfigureServices(services =>
             {
+                services.AddDataProtection().UseEphemeralDataProtectionProvider();
+
                 var modelMock = new Mock<IModel>();
                 modelMock.Setup(m => m.BasicPublish(
                     It.IsAny<string>(),
@@ -75,7 +78,11 @@ namespace AuthGateTests.Integration
 
                 var integrationTestConfig = new Dictionary<string, string>
                 {
-                    {"JwtKey", "pnXhunyWll1LgERT86wXwMH5I6ieQC2M"}
+                    {"Jwt:Issuer", "projecty.auth-gate"},
+                    {"Jwt:Audiences:AuthGate", "projecty.auth-gate"},
+                    {"Jwt:SigningKeys:AuthGate", "test-only-auth-gate-key-with-32-bytes"},
+                    {"Jwt:Audiences:MotoHub", "projecty.moto-hub"},
+                    {"Jwt:SigningKeys:MotoHub", "test-only-moto-hub-signing-key-0001"}
                 };
 
                 configBuilder.Sources.Clear();

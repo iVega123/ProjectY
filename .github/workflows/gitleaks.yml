@@ -1,0 +1,31 @@
+name: Gitleaks
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - "epic/**"
+      - "task/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  scan:
+    name: Scan committed changes
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out complete history
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Detect secrets
+        uses: gitleaks/gitleaks-action@v3
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_CONFIG: .gitleaks.toml
+          GITLEAKS_VERSION: 8.30.1

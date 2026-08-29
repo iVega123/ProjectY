@@ -61,7 +61,23 @@ as três chaves de API entre serviços, e as senhas de Postgres, MongoDB, Rabbit
 Nenhum serviço valida `iss`/`aud`, então um token vale nos quatro. Existe `.gitleaks.toml`,
 mas nenhum fluxo o executa.
 **Impacto:** comprometer um serviço — ou ler o repositório — entrega a plataforma inteira.
-Rotacionar exige reescrever o histórico do Git.
+Apagar os valores dos arquivos atuais não os revoga nem os remove do histórico do Git.
+
+**Status: corrigido no código; rotação externa obrigatória antes do deploy.** Segredos foram
+removidos dos arquivos rastreados e agora entram pelo provider de variáveis de ambiente. O Compose
+falha quando uma variável obrigatória não existe, e um gerador criptográfico cria o conjunto local
+sem versioná-lo. AuthGate emite tokens com `iss`/`aud` e uma chave diferente para cada audiência;
+cada API valida apenas sua audiência e sua própria chave. Um teste prova que o token de
+RentalOperations é rejeitado pela validação do MotoHub. O Gitleaks também passa a executar na CI.
+O login exige uma audiência explícita e o bootstrap cria uma database PostgreSQL independente para
+cada contexto EF. Implementado nos commits
+[`9f69358`](https://github.com/iVega123/ProjectY/commit/9f69358) e
+[`a7bb080`](https://github.com/iVega123/ProjectY/commit/a7bb080) (C3, task #20).
+
+Os valores encontrados no histórico continuam comprometidos. A retirada do código não substitui a
+revogação nos provedores; o procedimento e os registros pendentes por ambiente estão em
+[`docs/security/credential-rotation.md`](security/credential-rotation.md). Reescrever o histórico é
+opcional após a rotação e não faz parte desta task.
 
 ### C4 — Encerrar um aluguel alheio e transferi-lo para si
 `CalculateFinalCostAsync` busca por `rentalId` e nunca compara `rental.UserId` com o usuário

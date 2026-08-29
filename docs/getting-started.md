@@ -7,10 +7,9 @@ design scaffold and references services that have not been implemented yet.
 
 ## Safety warning
 
-The baseline contains known critical vulnerabilities, committed development
-credentials, and infrastructure services exposed on host ports. Run it only on
-an isolated development machine. Do not expose it to the internet or deploy it
-to a shared or production environment.
+The baseline still contains known security findings and exposes infrastructure
+services on host ports. Run it only on an isolated development machine. Do not
+expose it to the internet or deploy it to a shared or production environment.
 
 ## Prerequisites
 
@@ -51,9 +50,29 @@ host-side mapping in `docker-compose.yml` before starting the stack.
 
 ## Start the stack
 
+Clone the repository, then create fresh local credentials. The generated `.env`
+is ignored by Git and includes independent JWT signing keys for all four
+services:
+
 ```bash
 git clone https://github.com/iVega123/ProjectY.git
 cd ProjectY
+```
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/New-LocalSecrets.ps1
+```
+
+On PowerShell 7, `pwsh -File scripts/New-LocalSecrets.ps1` is equivalent. If a
+local `.env` already exists, the script refuses to overwrite it. Use `-Force`
+only for an intentional full rotation, and recreate persistent volumes that
+were initialized with the previous database, broker, or storage credentials.
+The PostgreSQL bootstrap creates independent databases for AuthGate,
+RiderManager, and MotoHub so that each EF context owns its schema.
+
+Then start the stack:
+
+```bash
 docker compose up --build
 ```
 
@@ -97,8 +116,9 @@ Named volumes are retained so local database contents survive the restart.
 
 ## Known limitations
 
-- The root `docker-compose.yml` is the audited legacy baseline, not a secure
-  deployment definition.
+- The root `docker-compose.yml` is the audited legacy baseline, not a production
+  deployment definition. It requires secrets from the local environment and
+  contains no committed secret defaults.
 - Supporting databases, queues, object storage, and observability tools publish
   host ports with development settings.
 - There are no reliable health gates; startup currently depends on fixed waits.

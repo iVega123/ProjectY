@@ -10,5 +10,8 @@ namespace AuthGate.DTO
 
         [Required]
         public required string Password { get; set; }
+
+        [Required]
+        public required string Audience { get; set; }
     }
 }

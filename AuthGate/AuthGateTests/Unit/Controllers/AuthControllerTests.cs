@@ -70,8 +70,13 @@ namespace AuthGateTests.Unit.Controllers
 
             var mockFile = new Mock<IFileValidationService>();
 
-            var testJWtKey = "pnXhunyWll1LgERT86wXwMH5I6ieQC2M";
-            mockConfig.Setup(c => c["JwtKey"]).Returns(testJWtKey);
+            mockConfig.Setup(c => c["Jwt:Issuer"]).Returns("projecty.auth-gate");
+            mockConfig.Setup(c => c["Jwt:Audiences:AuthGate"]).Returns("projecty.auth-gate");
+            mockConfig.Setup(c => c["Jwt:SigningKeys:AuthGate"])
+                .Returns("test-only-auth-gate-key-with-32-bytes");
+            mockConfig.Setup(c => c["Jwt:Audiences:MotoHub"]).Returns("projecty.moto-hub");
+            mockConfig.Setup(c => c["Jwt:SigningKeys:MotoHub"])
+                .Returns("test-only-moto-hub-signing-key-0001");
 
             return (userManagerMock, signInManagerMock, roleManagerMock, mockConfig, mockLogger, mockRabbit, mockFile);
         }
@@ -98,7 +103,7 @@ namespace AuthGateTests.Unit.Controllers
                              .ReturnsAsync(Microsoft.AspNetCore.Identity.SignInResult.Success);
 
             var controller = new AuthController(userManagerMock.Object, signInManagerMock.Object, roleManagerMock.Object, mockConfig.Object, mockLogger.Object, mockFile.Object, mockRabbit.Object);
-            var model = new LoginDto { Email = "test@example.com", Password = "password" };
+            var model = new LoginDto { Email = "test@example.com", Password = "password", Audience = "MotoHub" };
 
             // Act
             var result = await controller.Login(model) as OkObjectResult;
@@ -121,7 +126,7 @@ namespace AuthGateTests.Unit.Controllers
                            .ReturnsAsync((ApplicationUser)null);
 
             var controller = new AuthController(userManagerMock.Object, signInManagerMock.Object, roleManagerMock.Object, mockConfig.Object, mockLogger.Object, mockFile.Object, mockRabbit.Object);
-            var model = new LoginDto { Email = "nonexistent@example.com", Password = "password" };
+            var model = new LoginDto { Email = "nonexistent@example.com", Password = "password", Audience = "MotoHub" };
 
             // Act
             var result = await controller.Login(model) as UnauthorizedResult;

@@ -79,7 +79,7 @@ namespace AuthGateTests.Integration
         {
             // Arrange
             var client = _factory.CreateClient();
-            var model = new LoginDto { Email = "user@example.com", Password = "wrongPassword" };
+            var model = new LoginDto { Email = "user@example.com", Password = "wrongPassword", Audience = "MotoHub" };
 
             // Act
             var response = await client.PostAsJsonAsync("/api/auth/login", model);
@@ -142,7 +142,7 @@ namespace AuthGateTests.Integration
         {
             // Arrange
             var client = _factory.CreateClient();
-            var model = new LoginDto { Email = "nonexistent@example.com", Password = "A$Slol123ok" };
+            var model = new LoginDto { Email = "nonexistent@example.com", Password = "A$Slol123ok", Audience = "MotoHub" };
 
             // Act
             var response = await client.PostAsJsonAsync("/api/auth/login", model);
@@ -156,7 +156,7 @@ namespace AuthGateTests.Integration
         {
             // Arrange
             var client = _factory.CreateClient();
-            var model = new LoginDto { Email = "lockeduser@example.com", Password = "A$Slol123ok" };
+            var model = new LoginDto { Email = "lockeduser@example.com", Password = "A$Slol123ok", Audience = "MotoHub" };
 
             // Act
             var response = await client.PostAsJsonAsync("/api/auth/login", model);
@@ -204,7 +204,7 @@ namespace AuthGateTests.Integration
         {
             // Arrange
             var client = _factory.CreateClient();
-            var loginModel = new LoginDto { Email = "user@example.com", Password = "A$Slol123ok" };
+            var loginModel = new LoginDto { Email = "user@example.com", Password = "A$Slol123ok", Audience = "MotoHub" };
             var logoutModel = new LogoutDto { Email = "user@example.com" };
 
             // Act
@@ -252,6 +252,21 @@ namespace AuthGateTests.Integration
 
             // Assert
             Assert.Equal(System.Net.HttpStatusCode.BadRequest, response.StatusCode);
+        }
+
+        [Fact]
+        public async Task Login_WithoutAudience_ReturnsBadRequest()
+        {
+            var client = _factory.CreateClient();
+            var legacyPayload = new
+            {
+                Email = "legacy@example.com",
+                Password = "A$Slol123ok"
+            };
+
+            var response = await client.PostAsJsonAsync("/api/auth/login", legacyPayload);
+
+            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         }
 
     }
