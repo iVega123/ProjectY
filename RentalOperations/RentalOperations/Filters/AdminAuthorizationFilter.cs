@@ -18,39 +18,49 @@ namespace RentalOperations.Filters
 
         public void OnAuthorization(AuthorizationFilterContext context)
         {
-
-            bool isAuthenticated = false;
             var userIdentity = context.HttpContext.User.Identity as ClaimsIdentity;
-            var isAdmin = userIdentity?.Claims.Any(c => c.Type == ClaimTypes.Role && c.Value == "Admin");
-            if (isAdmin.GetValueOrDefault())
+            var hasAdminClaim = userIdentity?.Claims.Any(
+                claim => claim.Type == ClaimTypes.Role && claim.Value == "Admin") ?? false;
+            if (hasAdminClaim)
             {
-                isAuthenticated = true;
+                return;
             }
 
             var expectedApiKey = _configuration["RentalOperationsApiKey"];
             var actualApiKey = context.HttpContext.Request.Headers["X-API-Key"];
             if (!string.IsNullOrWhiteSpace(actualApiKey) && actualApiKey == expectedApiKey)
             {
-                isAuthenticated = true;
+                return;
             }
 
-            if (!isAuthenticated)
-            {
-                var token = context.HttpContext.Request.Headers["Authorization"].ToString().Replace("Bearer ", "");
-                if (!string.IsNullOrWhiteSpace(token) && ValidateToken(token))
-                {
-                    isAuthenticated = true;
-                }
-            }
-
-            if (!isAuthenticated)
+            var token = GetBearerToken(context.HttpContext.Request.Headers.Authorization);
+            if (token is null || !ValidateTokenAndCheckAdmin(token, out var isAdmin))
             {
                 context.Result = new UnauthorizedResult();
+                return;
+            }
+
+            if (!isAdmin)
+            {
+                context.Result = new ForbidResult();
             }
         }
 
-        private bool ValidateToken(string token)
+        private static string? GetBearerToken(string? authorizationHeader)
         {
+            if (string.IsNullOrWhiteSpace(authorizationHeader) ||
+                !authorizationHeader.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
+            {
+                return null;
+            }
+
+            var token = authorizationHeader["Bearer ".Length..].Trim();
+            return string.IsNullOrWhiteSpace(token) ? null : token;
+        }
+
+        private bool ValidateTokenAndCheckAdmin(string token, out bool isAdmin)
+        {
+            isAdmin = false;
             var tokenHandler = new JwtSecurityTokenHandler();
             var jwtKey = _configuration["JwtKey"] ?? throw new InvalidOperationException("JwtKey is not set in the configuration.");
             var keyBytes = Encoding.UTF8.GetBytes(jwtKey);
@@ -65,7 +75,15 @@ namespace RentalOperations.Filters
             try
             {
                 var principal = tokenHandler.ValidateToken(token, validationParameters, out var securityToken);
-                return securityToken != null && principal != null;
+                if (securityToken is null || principal is null)
+                {
+                    return false;
+                }
+
+                var userIdentity = principal.Identity as ClaimsIdentity;
+                isAdmin = userIdentity?.Claims.Any(
+                    claim => claim.Type == ClaimTypes.Role && claim.Value == "Admin") ?? false;
+                return true;
             }
             catch
             {
