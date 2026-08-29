@@ -6,6 +6,7 @@ on:
     branches:
       - main
       - "epic/**"
+      - "task/**"
   workflow_dispatch:
 
 permissions:
@@ -145,12 +146,46 @@ jobs:
     steps:
       - run: echo "No .NET service paths changed; service jobs were skipped."
 
+  secrets:
+    name: Gitleaks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out complete history
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Verify the scanner rejects a canary
+        shell: bash
+        run: |
+          canary_file="$RUNNER_TEMP/gitleaks-canary.txt"
+          trap 'rm -f "$canary_file"' EXIT
+          printf '%s%s\n' 'PROJECTY_GITLEAKS_' 'CANARY_0123456789ABCDEF' > "$canary_file"
+
+          if docker run --rm --network none \
+            --volume "$canary_file:/scan/canary.txt:ro" \
+            --volume "$GITHUB_WORKSPACE/.gitleaks.toml:/scan/.gitleaks.toml:ro" \
+            ghcr.io/gitleaks/gitleaks:v8.30.0@sha256:691af3c7c5a48b16f187ce3446d5f194838f91238f27270ed36eef6359a574d9 \
+            dir --config /scan/.gitleaks.toml --redact=100 --no-banner /scan/canary.txt; then
+            echo "::error::Gitleaks accepted the synthetic secret canary."
+            exit 1
+          fi
+
+      - name: Scan proposed commits
+        uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_CONFIG: .gitleaks.toml
+          GITLEAKS_ENABLE_COMMENTS: "false"
+          GITLEAKS_VERSION: 8.30.0
+
   required:
     name: Required
     needs:
       - changes
       - dotnet
       - no_relevant_changes
+      - secrets
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -159,7 +194,9 @@ jobs:
           CHANGES_RESULT: ${{ needs.changes.result }}
           DOTNET_RESULT: ${{ needs.dotnet.result }}
           NO_CHANGES_RESULT: ${{ needs.no_relevant_changes.result }}
+          SECRETS_RESULT: ${{ needs.secrets.result }}
         shell: bash
         run: |
           [[ "$CHANGES_RESULT" == "success" ]]
           [[ "$DOTNET_RESULT" == "success" || "$NO_CHANGES_RESULT" == "success" ]]
+          [[ "$SECRETS_RESULT" == "success" ]]
