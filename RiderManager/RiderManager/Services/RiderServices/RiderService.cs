@@ -43,9 +43,9 @@ namespace RiderManager.Services.RiderServices
                 // Handle situation where Rider does not exist
                 return;
             }
-            
+
             _mapper.Map(riderDto, rider);
-            
+
             await _repository.UpdateAsync(rider);
         }
 

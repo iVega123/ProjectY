@@ -14,10 +14,10 @@ namespace AuthGate.Model
         [Required]
         [StringLength(20)]
         [RegularExpression(
-            @"([0-9]{2}[\.]?[0-9]{3}[\.]?[0-9]{3}[\/]?[0-9]{4}[-]?[0-9]{2})", 
+            @"([0-9]{2}[\.]?[0-9]{3}[\.]?[0-9]{3}[\/]?[0-9]{4}[-]?[0-9]{2})",
             ErrorMessage = "O CNPJ deve estar no formato XX.XXX.XXX/XXXX-XX")]
         public required string CNPJ { get; set; }
-        
+
         public required string Name { get; set; }
 
         [Required]

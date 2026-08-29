@@ -47,7 +47,7 @@ namespace MotoHub.Controllers
         [Authorize]
         [ServiceFilter(typeof(AdminAuthorizationFilter))]
         [HttpPost]
-        public IActionResult Create([FromBody]MotorcycleDTO motorcycle)
+        public IActionResult Create([FromBody] MotorcycleDTO motorcycle)
         {
             _logger.LogInformation("Creating motorcycle with license plate {LicensePlate}.", motorcycle.LicensePlate);
             if (_motorcycleService.LicensePlateExists(motorcycle.LicensePlate))
@@ -85,15 +85,17 @@ namespace MotoHub.Controllers
             _logger.LogInformation("Deleting motorcycle with license plate {LicensePlate}.", licensePlate);
 
             var result = await _motorcycleService.DeleteMotorcycle(licensePlate);
-            if(result.Success)
+            if (result.Success)
             {
                 return Ok("Deleted Successfully");
-            
-            } else {
-                
-                return BadRequest(result.Message); 
+
             }
-            
+            else
+            {
+
+                return BadRequest(result.Message);
+            }
+
         }
     }
 }

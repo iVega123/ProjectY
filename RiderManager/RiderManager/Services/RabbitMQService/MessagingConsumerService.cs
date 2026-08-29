@@ -25,7 +25,7 @@ namespace RiderManager.Services.RabbitMQService
         private ConcurrentDictionary<string, int> riderInfoRetryCounts = new ConcurrentDictionary<string, int>();
 
         public MessagingConsumerService(IRabbitMqService mqService,
-            ILogger<MessagingConsumerService> logger, 
+            ILogger<MessagingConsumerService> logger,
             RabbitMQOptions options,
             IServiceProvider serviceProvider,
             QueueMessageAuthenticator messageAuthenticator)
