@@ -6,8 +6,8 @@
         public required string Name { get; set; }
         public required string CNPJ { get; set; }
         public DateTime DateOfBirth { get; set; }
-        public required string CNHNumber {  get; set; }
-        public required string CNHType { get; set;}
+        public required string CNHNumber { get; set; }
+        public required string CNHType { get; set; }
         public required string UserId { get; set; }
     }
 }

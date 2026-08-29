@@ -5,7 +5,7 @@ using RentalOperations.Model;
 
 namespace RentalOperations.Repository
 {
-    public class RentalRepository:IRentalRepository
+    public class RentalRepository : IRentalRepository
     {
         private readonly IMongoCollection<Rental> _rentals;
 

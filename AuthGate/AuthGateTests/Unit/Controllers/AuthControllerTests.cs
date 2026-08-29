@@ -21,10 +21,10 @@ namespace AuthGateTests.Unit.Controllers
     {
 
         private static (
-            Mock<FakeUserManager>, 
-            Mock<FakeSignInManager<ApplicationUser>>, 
-            Mock<FakeRoleManager<IdentityRole>>, 
-            Mock<IConfiguration>, 
+            Mock<FakeUserManager>,
+            Mock<FakeSignInManager<ApplicationUser>>,
+            Mock<FakeRoleManager<IdentityRole>>,
+            Mock<IConfiguration>,
             Mock<ILogger<AuthController>>,
             Mock<IMessagingPublisherService>,
             Mock<IFileValidationService>

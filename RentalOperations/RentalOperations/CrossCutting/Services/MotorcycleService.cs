@@ -5,7 +5,7 @@ using RentalOperations.CrossCutting.Model;
 
 namespace RentalOperations.CrossCutting.Services
 {
-    public class MotorcycleService: IMotorcycleService
+    public class MotorcycleService : IMotorcycleService
     {
         private readonly HttpClient _httpClient;
         private readonly MotoHubSettings _settings;

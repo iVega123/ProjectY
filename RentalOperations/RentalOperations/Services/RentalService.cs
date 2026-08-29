@@ -29,7 +29,7 @@ namespace RentalOperations.Services
         public async Task CreateRentalAsync(RentalCreateDto createDto, string userId)
         {
 
-            if(createDto.StartDate.AddDays(1) >= createDto.PredictedEndDate)
+            if (createDto.StartDate.AddDays(1) >= createDto.PredictedEndDate)
             {
                 throw new InvalidOperationException("The Rent time must at least one day");
             }
@@ -76,7 +76,7 @@ namespace RentalOperations.Services
         public async Task<ResponseRentalDTO> CalculateFinalCostAsync(string rentalId, string userId, DateTime actualEndDate)
         {
             var rental = await _repository.GetRentalByIdAsync(rentalId);
-            
+
             if (rental == null)
                 throw new KeyNotFoundException($"No rental found with ID {rentalId}");
 

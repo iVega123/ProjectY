@@ -26,7 +26,7 @@ namespace RentalOperations.Controllers
             try
             {
                 var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier);
-                if(userIdClaim == null)
+                if (userIdClaim == null)
                 {
                     return Forbid();
                 }

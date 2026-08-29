@@ -21,7 +21,7 @@ namespace RentalOperations.Services.RabbitMQService
         private ConcurrentDictionary<string, int> licencePlateRetryCounts = new ConcurrentDictionary<string, int>();
 
         public MessagingConsumerService(IRabbitMqService mqService,
-            ILogger<MessagingConsumerService> logger, 
+            ILogger<MessagingConsumerService> logger,
             RabbitMQOptions options,
             IServiceProvider serviceProvider)
         {

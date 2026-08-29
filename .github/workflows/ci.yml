@@ -1,0 +1,165 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - "epic/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  changes:
+    name: Detect changed services
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+      has_dotnet_changes: ${{ steps.matrix.outputs.has_dotnet_changes }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Detect relevant paths
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            auth_gate:
+              - 'AuthGate/**'
+              - 'Shared/**'
+              - '.github/workflows/ci.yml'
+              - 'global.json'
+              - 'Directory.Build.*'
+              - 'Directory.Packages.props'
+              - 'NuGet.config'
+            moto_hub:
+              - 'MotoHub/**'
+              - '.github/workflows/ci.yml'
+              - 'global.json'
+              - 'Directory.Build.*'
+              - 'Directory.Packages.props'
+              - 'NuGet.config'
+            rental_operations:
+              - 'RentalOperations/**'
+              - '.github/workflows/ci.yml'
+              - 'global.json'
+              - 'Directory.Build.*'
+              - 'Directory.Packages.props'
+              - 'NuGet.config'
+            rider_manager:
+              - 'RiderManager/**'
+              - 'Shared/**'
+              - '.github/workflows/ci.yml'
+              - 'global.json'
+              - 'Directory.Build.*'
+              - 'Directory.Packages.props'
+              - 'NuGet.config'
+
+      - name: Build .NET matrix
+        id: matrix
+        shell: bash
+        env:
+          AUTH_GATE_CHANGED: ${{ steps.filter.outputs.auth_gate }}
+          MOTO_HUB_CHANGED: ${{ steps.filter.outputs.moto_hub }}
+          RENTAL_OPERATIONS_CHANGED: ${{ steps.filter.outputs.rental_operations }}
+          RIDER_MANAGER_CHANGED: ${{ steps.filter.outputs.rider_manager }}
+        run: |
+          matrix='{"include":[]}'
+
+          add_service() {
+            local service="$1"
+            local solution="$2"
+            matrix=$(jq --compact-output \
+              --arg service "$service" \
+              --arg solution "$solution" \
+              '.include += [{language: "dotnet", service: $service, solution: $solution}]' \
+              <<< "$matrix")
+          }
+
+          if [[ "$AUTH_GATE_CHANGED" == "true" ]]; then
+            add_service "AuthGate" "AuthGate/AuthGate.sln"
+          fi
+          if [[ "$MOTO_HUB_CHANGED" == "true" ]]; then
+            add_service "MotoHub" "MotoHub/MotoHub.sln"
+          fi
+          if [[ "$RENTAL_OPERATIONS_CHANGED" == "true" ]]; then
+            add_service "RentalOperations" "RentalOperations/RentalOperations.sln"
+          fi
+          if [[ "$RIDER_MANAGER_CHANGED" == "true" ]]; then
+            add_service "RiderManager" "RiderManager/RiderManager.sln"
+          fi
+
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+          echo "has_dotnet_changes=$(jq --raw-output '.include | length > 0' <<< "$matrix")" >> "$GITHUB_OUTPUT"
+
+  dotnet:
+    name: .NET / ${{ matrix.service }}
+    needs: changes
+    if: needs.changes.outputs.has_dotnet_changes == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.changes.outputs.matrix) }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Restore
+        run: dotnet restore "${{ matrix.solution }}"
+
+      - name: Lint and verify formatting
+        run: dotnet format "${{ matrix.solution }}" --verify-no-changes --no-restore
+
+      - name: Build
+        run: dotnet build "${{ matrix.solution }}" --configuration Release --no-restore
+
+      - name: Run unit tests
+        run: dotnet test "${{ matrix.solution }}" --configuration Release --no-build --logger "trx;LogFileName=${{ matrix.service }}.trx"
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-${{ matrix.service }}
+          path: "**/TestResults/${{ matrix.service }}.trx"
+          if-no-files-found: warn
+
+  no_relevant_changes:
+    name: No relevant service changes
+    needs: changes
+    if: needs.changes.outputs.has_dotnet_changes == 'false'
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "No .NET service paths changed; service jobs were skipped."
+
+  required:
+    name: Required
+    needs:
+      - changes
+      - dotnet
+      - no_relevant_changes
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify CI result
+        env:
+          CHANGES_RESULT: ${{ needs.changes.result }}
+          DOTNET_RESULT: ${{ needs.dotnet.result }}
+          NO_CHANGES_RESULT: ${{ needs.no_relevant_changes.result }}
+        shell: bash
+        run: |
+          [[ "$CHANGES_RESULT" == "success" ]]
+          [[ "$DOTNET_RESULT" == "success" || "$NO_CHANGES_RESULT" == "success" ]]
