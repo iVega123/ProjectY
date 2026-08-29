@@ -80,7 +80,9 @@ namespace AuthGateTests.Integration
                 {
                     {"Jwt:Issuer", "projecty.auth-gate"},
                     {"Jwt:Audiences:AuthGate", "projecty.auth-gate"},
-                    {"Jwt:SigningKeys:AuthGate", "test-only-auth-gate-key-with-32-bytes"}
+                    {"Jwt:SigningKeys:AuthGate", "test-only-auth-gate-key-with-32-bytes"},
+                    {"Jwt:Audiences:MotoHub", "projecty.moto-hub"},
+                    {"Jwt:SigningKeys:MotoHub", "test-only-moto-hub-signing-key-0001"}
                 };
 
                 configBuilder.Sources.Clear();

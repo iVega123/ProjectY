@@ -39,7 +39,9 @@ logical audience:
 | RiderManager | `Jwt__SigningKeys__RiderManager` | `Jwt__SigningKey` in RiderManager |
 | RentalOperations | `Jwt__SigningKeys__RentalOperations` | `Jwt__SigningKey` in RentalOperations |
 
-Clients request the intended logical audience during login. AuthGate emits
+Clients must explicitly request the intended logical audience during login; a
+payload that omits it is rejected instead of receiving an AuthGate-only token.
+AuthGate emits
 both `iss` and `aud`; every API validates signature, issuer, and its own exact
 audience. An API receives only its validator key, while AuthGate necessarily
 receives all signing keys.

@@ -36,7 +36,9 @@ function New-RandomValue {
 
 $localSuffix = (New-RandomValue -ByteCount 6).ToLowerInvariant()
 $values = [ordered]@{
-    POSTGRES_DB                       = "BikeBookingDB"
+    AUTH_GATE_POSTGRES_DB             = "AuthGateDB"
+    MOTO_HUB_POSTGRES_DB              = "MotoHubDB"
+    RIDER_MANAGER_POSTGRES_DB         = "RiderManagerDB"
     POSTGRES_USER                     = "projecty_$localSuffix"
     POSTGRES_PASSWORD                 = (New-RandomValue)
     PGADMIN_EMAIL                     = "admin@projecty.local"

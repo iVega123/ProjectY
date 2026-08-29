@@ -67,6 +67,8 @@ On PowerShell 7, `pwsh -File scripts/New-LocalSecrets.ps1` is equivalent. If a
 local `.env` already exists, the script refuses to overwrite it. Use `-Force`
 only for an intentional full rotation, and recreate persistent volumes that
 were initialized with the previous database, broker, or storage credentials.
+The PostgreSQL bootstrap creates independent databases for AuthGate,
+RiderManager, and MotoHub so that each EF context owns its schema.
 
 Then start the stack:
 

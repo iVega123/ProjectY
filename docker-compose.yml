@@ -42,15 +42,18 @@ services:
     image: postgres:15
     container_name: postgres
     environment:
-      POSTGRES_DB: "${POSTGRES_DB:?Set POSTGRES_DB in .env}"
       POSTGRES_USER: "${POSTGRES_USER:?Set POSTGRES_USER in .env}"
       POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}"
+      AUTH_GATE_POSTGRES_DB: "${AUTH_GATE_POSTGRES_DB:?Set AUTH_GATE_POSTGRES_DB in .env}"
+      MOTO_HUB_POSTGRES_DB: "${MOTO_HUB_POSTGRES_DB:?Set MOTO_HUB_POSTGRES_DB in .env}"
+      RIDER_MANAGER_POSTGRES_DB: "${RIDER_MANAGER_POSTGRES_DB:?Set RIDER_MANAGER_POSTGRES_DB in .env}"
     ports:
       - "5432:5432"
     networks:
       - elk
     volumes:
       - postgres-data:/var/lib/postgresql/data
+      - ./deploy/postgres/init-databases.sh:/docker-entrypoint-initdb.d/10-create-service-databases.sh:ro
 
   pgadmin:
     image: dpage/pgadmin4
@@ -119,7 +122,7 @@ services:
       - elk
     environment:
       ASPNETCORE_ENVIRONMENT: Development
-      ConnectionStrings__Postgresql: "Host=postgres;Port=5432;Database=${POSTGRES_DB:?Set POSTGRES_DB in .env};Username=${POSTGRES_USER:?Set POSTGRES_USER in .env};Password=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}"
+      ConnectionStrings__Postgresql: "Host=postgres;Port=5432;Database=${AUTH_GATE_POSTGRES_DB:?Set AUTH_GATE_POSTGRES_DB in .env};Username=${POSTGRES_USER:?Set POSTGRES_USER in .env};Password=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}"
       RabbitMQ__UserName: "${RABBITMQ_USER:?Set RABBITMQ_USER in .env}"
       RabbitMQ__Password: "${RABBITMQ_PASSWORD:?Set RABBITMQ_PASSWORD in .env}"
       Jwt__SigningKeys__AuthGate: "${AUTH_GATE_JWT_SIGNING_KEY:?Set AUTH_GATE_JWT_SIGNING_KEY in .env}"
@@ -140,7 +143,7 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: Development
       ASPNETCORE_URLS: http://+:8000
-      ConnectionStrings__Postgresql: "Host=postgres;Port=5432;Database=${POSTGRES_DB:?Set POSTGRES_DB in .env};Username=${POSTGRES_USER:?Set POSTGRES_USER in .env};Password=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}"
+      ConnectionStrings__Postgresql: "Host=postgres;Port=5432;Database=${RIDER_MANAGER_POSTGRES_DB:?Set RIDER_MANAGER_POSTGRES_DB in .env};Username=${POSTGRES_USER:?Set POSTGRES_USER in .env};Password=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}"
       RabbitMQ__UserName: "${RABBITMQ_USER:?Set RABBITMQ_USER in .env}"
       RabbitMQ__Password: "${RABBITMQ_PASSWORD:?Set RABBITMQ_PASSWORD in .env}"
       MinIO__AccessKey: "${MINIO_USER:?Set MINIO_USER in .env}"
@@ -165,7 +168,7 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: Development
       ASPNETCORE_URLS: http://+:8100
-      ConnectionStrings__Postgresql: "Host=postgres;Port=5432;Database=${POSTGRES_DB:?Set POSTGRES_DB in .env};Username=${POSTGRES_USER:?Set POSTGRES_USER in .env};Password=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}"
+      ConnectionStrings__Postgresql: "Host=postgres;Port=5432;Database=${MOTO_HUB_POSTGRES_DB:?Set MOTO_HUB_POSTGRES_DB in .env};Username=${POSTGRES_USER:?Set POSTGRES_USER in .env};Password=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}"
       RabbitMQ__UserName: "${RABBITMQ_USER:?Set RABBITMQ_USER in .env}"
       RabbitMQ__Password: "${RABBITMQ_PASSWORD:?Set RABBITMQ_PASSWORD in .env}"
       Jwt__SigningKey: "${MOTO_HUB_JWT_SIGNING_KEY:?Set MOTO_HUB_JWT_SIGNING_KEY in .env}"
