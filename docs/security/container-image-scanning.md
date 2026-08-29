@@ -16,8 +16,11 @@ For each image, CI:
    `image-security-<image>-<commit>` workflow artifact.
 
 The SBOM can therefore be downloaded without a registry, while the OCI layout keeps
-the build-time attestation attached to the image. Publishing the image and its
-attestations to GHCR belongs to the signing/publishing task that follows this gate.
+the build-time attestation attached to the image. On a push to `main`, CI publishes
+that exact scanned OCI digest to GHCR, attaches GitHub SLSA build provenance, signs
+it keylessly with Cosign through GitHub OIDC, and verifies both before the required
+CI job can pass. Pull requests and non-default branches build and scan but cannot
+publish packages or request signing identities.
 
 ## Vulnerability exceptions
 

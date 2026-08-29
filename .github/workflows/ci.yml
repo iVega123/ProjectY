@@ -91,6 +91,7 @@ jobs:
             local solution="$2"
             local image="$3"
             local dockerfile="$4"
+            local repository="$5"
             matrix=$(jq --compact-output \
               --arg service "$service" \
               --arg solution "$solution" \
@@ -100,21 +101,22 @@ jobs:
               --arg service "$service" \
               --arg image "$image" \
               --arg dockerfile "$dockerfile" \
-              '.include += [{service: $service, image: $image, dockerfile: $dockerfile}]' \
+              --arg repository "$repository" \
+              '.include += [{service: $service, image: $image, dockerfile: $dockerfile, repository: $repository}]' \
               <<< "$image_matrix")
           }
 
           if [[ "$AUTH_GATE_CHANGED" == "true" ]]; then
-            add_service "AuthGate" "AuthGate/AuthGate.sln" "auth-gate" "AuthGate/AuthGate/Dockerfile"
+            add_service "AuthGate" "AuthGate/AuthGate.sln" "auth-gate" "AuthGate/AuthGate/Dockerfile" "ghcr.io/ivega123/projecty/auth-gate"
           fi
           if [[ "$MOTO_HUB_CHANGED" == "true" ]]; then
-            add_service "MotoHub" "MotoHub/MotoHub.sln" "moto-hub" "MotoHub/MotoHub/Dockerfile"
+            add_service "MotoHub" "MotoHub/MotoHub.sln" "moto-hub" "MotoHub/MotoHub/Dockerfile" "ghcr.io/ivega123/projecty/moto-hub"
           fi
           if [[ "$RENTAL_OPERATIONS_CHANGED" == "true" ]]; then
-            add_service "RentalOperations" "RentalOperations/RentalOperations.sln" "rental-operations" "RentalOperations/RentalOperations/Dockerfile"
+            add_service "RentalOperations" "RentalOperations/RentalOperations.sln" "rental-operations" "RentalOperations/RentalOperations/Dockerfile" "ghcr.io/ivega123/projecty/rental-operations"
           fi
           if [[ "$RIDER_MANAGER_CHANGED" == "true" ]]; then
-            add_service "RiderManager" "RiderManager/RiderManager.sln" "rider-manager" "RiderManager/RiderManager/Dockerfile"
+            add_service "RiderManager" "RiderManager/RiderManager.sln" "rider-manager" "RiderManager/RiderManager/Dockerfile" "ghcr.io/ivega123/projecty/rider-manager"
           fi
 
           echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
@@ -194,14 +196,14 @@ jobs:
           file: ${{ matrix.dockerfile }}
           platforms: linux/amd64
           tags: projecty/${{ matrix.image }}:ci-${{ github.sha }}
-          outputs: type=oci,dest=${{ runner.temp }}/${{ matrix.image }}-oci,tar=false,oci-mediatypes=true
+          outputs: type=oci,dest=artifacts/${{ matrix.image }}-oci,tar=false,oci-mediatypes=true
           provenance: false
           sbom: true
 
       - name: Verify OCI SBOM attestation
         shell: bash
         env:
-          OCI_LAYOUT: ${{ runner.temp }}/${{ matrix.image }}-oci
+          OCI_LAYOUT: artifacts/${{ matrix.image }}-oci
         run: |
           test -f "$OCI_LAYOUT/index.json"
           if ! grep --extended-regexp --recursive --binary-files=text --quiet \
@@ -215,7 +217,7 @@ jobs:
         id: sbom
         uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
         with:
-          image: oci-dir:${{ runner.temp }}/${{ matrix.image }}-oci
+          image: oci-dir:artifacts/${{ matrix.image }}-oci
           format: spdx-json
           output-file: artifacts/${{ matrix.image }}.spdx.json
           artifact-name: sbom-${{ matrix.image }}
@@ -236,7 +238,7 @@ jobs:
         if: always() && steps.build.outcome == 'success'
         uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
         with:
-          input: ${{ runner.temp }}/${{ matrix.image }}-oci
+          input: artifacts/${{ matrix.image }}-oci
           scanners: vuln
           severity: CRITICAL
           exit-code: 1
@@ -251,10 +253,119 @@ jobs:
           name: image-security-${{ matrix.image }}-${{ github.sha }}
           path: |
             artifacts/${{ matrix.image }}.spdx.json
-            ${{ runner.temp }}/${{ matrix.image }}-oci
+            artifacts/${{ matrix.image }}-oci
           if-no-files-found: error
           retention-days: 14
           compression-level: 0
+
+  publish:
+    name: Publish and sign / ${{ matrix.service }}
+    needs:
+      - changes
+      - images
+    if: >-
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/main' &&
+      needs.changes.outputs.has_image_changes == 'true' &&
+      needs.images.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.changes.outputs.image_matrix) }}
+    steps:
+      - name: Download scanned OCI image
+        uses: actions/download-artifact@70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3 # v8.0.0
+        with:
+          name: image-security-${{ matrix.image }}-${{ github.sha }}
+          path: ${{ runner.temp }}/image-security
+
+      - name: Set up ORAS
+        uses: oras-project/setup-oras@1d808f7d7f6995cc68b7bf507bfe5c5446e1dc9d # v2.0.1
+
+      - name: Set up Cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        with:
+          cosign-release: v3.1.2
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@b45d80f862d83dbcd57f89517bcf500b2ab88fb2 # v4.0.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish the scanned OCI image
+        id: publish
+        shell: bash
+        env:
+          IMAGE: ${{ matrix.repository }}
+          OCI_LAYOUT: ${{ runner.temp }}/image-security/${{ matrix.image }}-oci
+        run: |
+          test -f "$OCI_LAYOUT/index.json"
+
+          manifest_count=$(jq '[.manifests[]] | length' "$OCI_LAYOUT/index.json")
+          if [[ "$manifest_count" != "1" ]]; then
+            echo "::error::Expected exactly one root manifest in the OCI layout; found $manifest_count."
+            exit 1
+          fi
+
+          local_digest=$(jq --raw-output '.manifests[0].digest' "$OCI_LAYOUT/index.json")
+          if [[ ! "$local_digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "::error::The OCI layout does not contain a valid sha256 root digest."
+            exit 1
+          fi
+
+          oras cp --from-oci-layout --recursive \
+            "$OCI_LAYOUT@$local_digest" \
+            "$IMAGE:$GITHUB_SHA"
+
+          remote_digest=$(oras resolve "$IMAGE:$GITHUB_SHA")
+          if [[ "$remote_digest" != "$local_digest" ]]; then
+            echo "::error::Published digest $remote_digest differs from scanned digest $local_digest."
+            exit 1
+          fi
+
+          echo "digest=$remote_digest" >> "$GITHUB_OUTPUT"
+
+      - name: Sign and verify the published image
+        shell: bash
+        env:
+          DIGEST: ${{ steps.publish.outputs.digest }}
+          IMAGE: ${{ matrix.repository }}
+          SIGNING_IDENTITY: https://github.com/${{ github.repository }}/.github/workflows/ci.yml@refs/heads/main
+        run: |
+          cosign sign --yes "$IMAGE@$DIGEST"
+          cosign verify "$IMAGE@$DIGEST" \
+            --certificate-identity="$SIGNING_IDENTITY" \
+            --certificate-oidc-issuer="https://token.actions.githubusercontent.com"
+
+      - name: Publish SLSA build provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ${{ matrix.repository }}
+          subject-digest: ${{ steps.publish.outputs.digest }}
+          push-to-registry: true
+
+      - name: Verify published provenance
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DIGEST: ${{ steps.publish.outputs.digest }}
+          IMAGE: ${{ matrix.repository }}
+        run: gh attestation verify "oci://$IMAGE@$DIGEST" --repo "$GITHUB_REPOSITORY"
+
+      - name: Promote verified image to latest
+        shell: bash
+        env:
+          DIGEST: ${{ steps.publish.outputs.digest }}
+          IMAGE: ${{ matrix.repository }}
+        run: oras tag "$IMAGE@$DIGEST" latest
 
   secrets:
     name: Gitleaks
@@ -296,6 +407,7 @@ jobs:
       - dotnet
       - no_relevant_changes
       - images
+      - publish
       - secrets
     if: always()
     runs-on: ubuntu-latest
@@ -306,10 +418,20 @@ jobs:
           DOTNET_RESULT: ${{ needs.dotnet.result }}
           NO_CHANGES_RESULT: ${{ needs.no_relevant_changes.result }}
           IMAGES_RESULT: ${{ needs.images.result }}
+          PUBLISH_RESULT: ${{ needs.publish.result }}
           SECRETS_RESULT: ${{ needs.secrets.result }}
+          EVENT_NAME: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          HAS_IMAGE_CHANGES: ${{ needs.changes.outputs.has_image_changes }}
         shell: bash
         run: |
           [[ "$CHANGES_RESULT" == "success" ]]
           [[ "$DOTNET_RESULT" == "success" || "$NO_CHANGES_RESULT" == "success" ]]
           [[ "$IMAGES_RESULT" == "success" || "$IMAGES_RESULT" == "skipped" ]]
           [[ "$SECRETS_RESULT" == "success" ]]
+
+          if [[ "$EVENT_NAME" == "push" && "$REF" == "refs/heads/main" && "$HAS_IMAGE_CHANGES" == "true" ]]; then
+            [[ "$PUBLISH_RESULT" == "success" ]]
+          else
+            [[ "$PUBLISH_RESULT" == "skipped" ]]
+          fi
