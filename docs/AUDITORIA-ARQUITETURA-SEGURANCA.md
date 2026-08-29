@@ -69,8 +69,10 @@ falha quando uma variável obrigatória não existe, e um gerador criptográfico
 sem versioná-lo. AuthGate emite tokens com `iss`/`aud` e uma chave diferente para cada audiência;
 cada API valida apenas sua audiência e sua própria chave. Um teste prova que o token de
 RentalOperations é rejeitado pela validação do MotoHub. O Gitleaks também passa a executar na CI.
-Implementado no commit
-[`9f69358`](https://github.com/iVega123/ProjectY/commit/9f69358) (C3, task #20).
+O login exige uma audiência explícita e o bootstrap cria uma database PostgreSQL independente para
+cada contexto EF. Implementado nos commits
+[`9f69358`](https://github.com/iVega123/ProjectY/commit/9f69358) e
+[`a7bb080`](https://github.com/iVega123/ProjectY/commit/a7bb080) (C3, task #20).
 
 Os valores encontrados no histórico continuam comprometidos. A retirada do código não substitui a
 revogação nos provedores; o procedimento e os registros pendentes por ambiente estão em
