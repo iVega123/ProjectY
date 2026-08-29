@@ -11,7 +11,7 @@ namespace RiderManager.DTOs
         public required string CNPJ { get; set; }
 
         public required string Name { get; set; }
-        
+
         public required string Email { get; set; }
 
 

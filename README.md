@@ -65,6 +65,33 @@ See [Running the audited baseline locally](docs/getting-started.md). This code
 contains known security flaws and development credentials; use it only in an
 isolated local environment.
 
+Database-backed tests use the shared
+[PostgreSQL Testcontainers pattern](docs/testing/testcontainers-postgres.md).
+
+## Verify published images
+
+After a change reaches `main`, CI publishes each changed service to GHCR with the
+commit SHA and `latest` tags. Verification should use the immutable digest printed
+by the workflow or returned by `docker buildx imagetools inspect`:
+
+```bash
+IMAGE=ghcr.io/ivega123/projecty/auth-gate
+DIGEST=sha256:<published-digest>
+
+cosign verify "$IMAGE@$DIGEST" \
+  --certificate-identity="https://github.com/iVega123/ProjectY/.github/workflows/ci.yml@refs/heads/main" \
+  --certificate-oidc-issuer="https://token.actions.githubusercontent.com"
+
+gh attestation verify "oci://$IMAGE@$DIGEST" --repo iVega123/ProjectY
+```
+
+The same commands apply to `moto-hub`, `rental-operations`, and `rider-manager`
+under `ghcr.io/ivega123/projecty/`. The keyless signature binds the image to this
+repository's `main` workflow identity; the second command retrieves and verifies
+its GitHub-hosted SLSA build provenance. See the
+[container image security gate](docs/security/container-image-scanning.md) for
+the scans that run before publication.
+
 ## Follow the work
 
 - [Epic 1: repository repositioning](https://github.com/iVega123/ProjectY/issues/2)

@@ -3,7 +3,7 @@ using MotoHub.Models;
 
 namespace MotoHub.Data
 {
-    public class ApplicationDbContext : DbContext , IApplicationDbContext
+    public class ApplicationDbContext : DbContext, IApplicationDbContext
     {
         public ApplicationDbContext(DbContextOptions<ApplicationDbContext> options) : base(options)
         {

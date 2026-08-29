@@ -99,7 +99,7 @@ namespace RiderManager.Managers
                 return await _riderService.GetRiderByUserIdAsync(userId);
             }
 
-            if(uploadFile != null)
+            if (uploadFile != null)
             {
                 var link = await _minioFileStorageService.GetPresignedUrlAsync(uploadFile.fileName, userId);
                 await _preSignedUrlService.StorePresignedUrlAsync(link);

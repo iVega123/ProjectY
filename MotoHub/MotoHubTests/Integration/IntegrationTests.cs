@@ -283,7 +283,7 @@ namespace MotoHubTests.Integration
                 new Claim(ClaimTypes.Role, "Guest")
             };
 
-            var invalidKey = "ThisIsAnInvalidKeyForTestingas@asda"; 
+            var invalidKey = "ThisIsAnInvalidKeyForTestingas@asda";
             var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(invalidKey));
             var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
 

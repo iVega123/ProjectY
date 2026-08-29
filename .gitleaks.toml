@@ -1,5 +1,28 @@
 [extend]
 useDefault = true
 
-[allowlist]
-paths = ['''AuthGateTests''', '''.*\/AuthGateTests\/.*''']
+[[rules]]
+id = "projecty-ci-canary"
+description = "ProjectY synthetic secret used to prove the CI gate"
+regex = '''PROJECTY_GITLEAKS_CANARY_[0-9A-F]{16}'''
+keywords = ["PROJECTY_GITLEAKS_CANARY_"]
+
+# Owner: @iVega123. Review by: 2027-08-29.
+# EF generated stable row identifiers, not credentials.
+[[allowlists]]
+targetRules = ["generic-api-key"]
+description = "Entity Framework migration primary-key GUIDs"
+condition = "AND"
+regexTarget = "line"
+paths = ['''^AuthGate/AuthGate/Migrations/20240420031009_AddMoreLength\.cs$''']
+regexes = ['''keyValue:\s+"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"''']
+
+# Owner: @iVega123. Review by: 2027-08-29.
+# This matches only an empty example value; populated .env files are ignored by Git.
+[[allowlists]]
+targetRules = ["generic-api-key"]
+description = "Empty RiderManager API-key template value"
+condition = "AND"
+regexTarget = "line"
+paths = ['''^\.env\.example$''']
+regexes = ['''RIDER_MANAGER_API_KEY=''']
