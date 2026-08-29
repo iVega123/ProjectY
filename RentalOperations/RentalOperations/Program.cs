@@ -65,7 +65,7 @@ builder.Services.AddSwaggerGen(c =>
 {
     c.SwaggerDoc("v1", new OpenApiInfo { Title = "RentalOperations", Version = "v1" });
 
-    // Configuração do esquema de segurança JWT no Swagger
+    // ConfiguraÃ§Ã£o do esquema de seguranÃ§a JWT no Swagger
     var securityScheme = new OpenApiSecurityScheme
     {
         Name = "JWT Authentication",
@@ -112,8 +112,11 @@ if (app.Environment.IsDevelopment())
 
 app.UseHttpsRedirection();
 
+app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapControllers();
 
 app.Run();
+
+public partial class Program { }

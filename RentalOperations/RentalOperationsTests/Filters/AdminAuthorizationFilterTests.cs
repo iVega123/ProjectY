@@ -4,23 +4,19 @@ using Microsoft.AspNetCore.Mvc.Abstractions;
 using Microsoft.AspNetCore.Mvc.Filters;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Configuration;
-using Microsoft.IdentityModel.Tokens;
 using RentalOperations.Filters;
-using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
-using System.Text;
 
 namespace RentalOperationsTests.Filters;
 
 public class AdminAuthorizationFilterTests
 {
-    private const string JwtKey = "test-only-key-with-at-least-32-bytes";
     private const string ApiKey = "test-api-key";
 
     [Fact]
     public void RiderToken_ReturnsForbidden()
     {
-        var context = CreateContext(CreateToken("Rider"));
+        var context = CreateContext("Rider");
         var filter = CreateFilter();
 
         filter.OnAuthorization(context);
@@ -31,7 +27,7 @@ public class AdminAuthorizationFilterTests
     [Fact]
     public void AdminToken_IsAuthorized()
     {
-        var context = CreateContext(CreateToken("Admin"));
+        var context = CreateContext("Admin");
         var filter = CreateFilter();
 
         filter.OnAuthorization(context);
@@ -40,9 +36,9 @@ public class AdminAuthorizationFilterTests
     }
 
     [Fact]
-    public void InvalidToken_ReturnsUnauthorized()
+    public void UnauthenticatedRequest_ReturnsUnauthorized()
     {
-        var context = CreateContext("not-a-jwt");
+        var context = CreateContext();
         var filter = CreateFilter();
 
         filter.OnAuthorization(context);
@@ -55,7 +51,6 @@ public class AdminAuthorizationFilterTests
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
-                ["JwtKey"] = JwtKey,
                 ["RentalOperationsApiKey"] = ApiKey
             })
             .Build();
@@ -63,10 +58,16 @@ public class AdminAuthorizationFilterTests
         return new AdminAuthorizationFilter(configuration);
     }
 
-    private static AuthorizationFilterContext CreateContext(string token)
+    private static AuthorizationFilterContext CreateContext(string? role = null)
     {
         var httpContext = new DefaultHttpContext();
-        httpContext.Request.Headers.Authorization = $"Bearer {token}";
+        if (role is not null)
+        {
+            httpContext.User = new ClaimsPrincipal(
+                new ClaimsIdentity(
+                    [new Claim(ClaimTypes.Role, role)],
+                    authenticationType: "Test"));
+        }
 
         var actionContext = new ActionContext(
             httpContext,
@@ -74,19 +75,5 @@ public class AdminAuthorizationFilterTests
             new ActionDescriptor());
 
         return new AuthorizationFilterContext(actionContext, []);
-    }
-
-    private static string CreateToken(string role)
-    {
-        var credentials = new SigningCredentials(
-            new SymmetricSecurityKey(Encoding.UTF8.GetBytes(JwtKey)),
-            SecurityAlgorithms.HmacSha256);
-
-        var token = new JwtSecurityToken(
-            claims: [new Claim(ClaimTypes.Role, role)],
-            expires: DateTime.UtcNow.AddMinutes(5),
-            signingCredentials: credentials);
-
-        return new JwtSecurityTokenHandler().WriteToken(token);
     }
 }
