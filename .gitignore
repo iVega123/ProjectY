@@ -41,3 +41,8 @@ bld/
 msbuild.log
 msbuild.err
 msbuild.wrn
+
+# Local secrets
+.env
+.env.*
+!.env.example

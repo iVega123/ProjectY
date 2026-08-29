@@ -70,8 +70,10 @@ namespace AuthGateTests.Unit.Controllers
 
             var mockFile = new Mock<IFileValidationService>();
 
-            var testJWtKey = "pnXhunyWll1LgERT86wXwMH5I6ieQC2M";
-            mockConfig.Setup(c => c["JwtKey"]).Returns(testJWtKey);
+            mockConfig.Setup(c => c["Jwt:Issuer"]).Returns("projecty.auth-gate");
+            mockConfig.Setup(c => c["Jwt:Audiences:AuthGate"]).Returns("projecty.auth-gate");
+            mockConfig.Setup(c => c["Jwt:SigningKeys:AuthGate"])
+                .Returns("test-only-auth-gate-key-with-32-bytes");
 
             return (userManagerMock, signInManagerMock, roleManagerMock, mockConfig, mockLogger, mockRabbit, mockFile);
         }

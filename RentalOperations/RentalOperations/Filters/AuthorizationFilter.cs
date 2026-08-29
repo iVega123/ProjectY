@@ -1,9 +1,5 @@
 ﻿using Microsoft.AspNetCore.Mvc.Filters;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.IdentityModel.Tokens;
-using System.IdentityModel.Tokens.Jwt;
-using System.Security.Claims;
-using System.Text;
 
 namespace RentalOperations.Filters
 {
@@ -18,62 +14,25 @@ namespace RentalOperations.Filters
 
         public void OnAuthorization(AuthorizationFilterContext context)
         {
-            bool isAuthenticated = false;
-
-            var userIdentity = context.HttpContext.User.Identity as ClaimsIdentity;
-
-            var hasRole = userIdentity?.Claims.Any(c => c.Type == ClaimTypes.Role && (c.Value == "Admin" || c.Value == "Rider"));
-
-            if (hasRole.GetValueOrDefault())
-            {
-                isAuthenticated = true;
-            }
-
             var expectedApiKey = _configuration["RentalOperationsApiKey"];
             var actualApiKey = context.HttpContext.Request.Headers["X-API-Key"];
             if (!string.IsNullOrWhiteSpace(actualApiKey) && actualApiKey == expectedApiKey)
             {
-                isAuthenticated = true;
-            }
-
-            if (!isAuthenticated)
-            {
-                var token = context.HttpContext.Request.Headers["Authorization"].ToString().Replace("Bearer ", "");
-                isAuthenticated = ValidateToken(token);
-            }
-
-            if (!isAuthenticated)
-            {
-                context.Result = new UnauthorizedResult();
                 return;
             }
-        }
 
-        private bool ValidateToken(string token)
-        {
-            if (string.IsNullOrEmpty(token))
-                return false;
-
-            var tokenHandler = new JwtSecurityTokenHandler();
-            var jwtKey = _configuration["JwtKey"] ?? throw new InvalidOperationException("JwtKey is not set in the configuration.");
-            var keyBytes = Encoding.UTF8.GetBytes(jwtKey);
-            var validationParameters = new TokenValidationParameters
+            if (context.HttpContext.User.Identity?.IsAuthenticated == true)
             {
-                ValidateIssuerSigningKey = true,
-                IssuerSigningKey = new SymmetricSecurityKey(keyBytes),
-                ValidateIssuer = false,
-                ValidateAudience = false
-            };
+                if (context.HttpContext.User.IsInRole("Admin") || context.HttpContext.User.IsInRole("Rider"))
+                {
+                    return;
+                }
 
-            try
-            {
-                var principal = tokenHandler.ValidateToken(token, validationParameters, out var validatedToken);
-                return validatedToken != null && principal != null;
+                context.Result = new ForbidResult();
+                return;
             }
-            catch
-            {
-                return false;
-            }
+
+            context.Result = new UnauthorizedResult();
         }
     }
 }
