@@ -2,13 +2,11 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using AuthGate.Model;
 using AuthGate.DTO;
-using Microsoft.IdentityModel.Tokens;
-using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
-using System.Text;
 using AuthGate.Validators;
 using AuthGate.Services.File;
 using AuthGate.Services.RabbitMQ;
+using AuthGate.Services;
 using AuthGate.Entities;
 
 namespace AuthGate.Controllers
@@ -20,7 +18,7 @@ namespace AuthGate.Controllers
         private readonly UserManager<ApplicationUser> _userManager;
         private readonly SignInManager<ApplicationUser> _signInManager;
         private readonly RoleManager<IdentityRole> _roleManager;
-        private readonly string _jwtKey;
+        private readonly JwtTokenIssuer _jwtTokenIssuer;
         private readonly ILogger<AuthController> _logger;
         private readonly IFileValidationService _fileValidationService;
         private readonly IMessagingPublisherService _messagingPublisherService;
@@ -38,53 +36,11 @@ namespace AuthGate.Controllers
             _userManager = userManager;
             _signInManager = signInManager;
             _roleManager = roleManager;
-            _jwtKey = configuration["JwtKey"];
+            _jwtTokenIssuer = new JwtTokenIssuer(configuration);
             _logger = logger;
             _fileValidationService = fileValidationService;
             _messagingPublisherService = messagingPublisherService;
         }
-
-        [HttpPost("register/admin")]
-        public async Task<IActionResult> RegisterAdmin([FromBody] AdminRegisterDto model)
-        {
-            if (!ModelState.IsValid)
-                return BadRequest(ModelState);
-
-            if (!await _roleManager.RoleExistsAsync("Admin"))
-            {
-                _logger.LogInformation("Admin role does not exist; creating new admin role.");
-                var roleResult = await _roleManager.CreateAsync(new IdentityRole("Admin"));
-                if (!roleResult.Succeeded)
-                {
-                    _logger.LogError("Failed to create admin role. Errors: {Errors}", roleResult.Errors);
-                    return BadRequest(roleResult.Errors);
-                }
-            }
-
-            var adminUser = new AdminUser { UserName = model.Email, Email = model.Email };
-            var userCreationResult = await _userManager.CreateAsync(adminUser, model.Password);
-            if (!userCreationResult.Succeeded)
-            {
-                _logger.LogError("Failed to create admin user for {Email}. Errors: {Errors}", model.Email, userCreationResult.Errors);
-                return BadRequest(userCreationResult.Errors);
-            }
-
-            _logger.LogInformation("Admin user {UserId} created successfully, assigning 'Admin' role.", adminUser.Id);
-            var roleAssignmentResult = await _userManager.AddToRoleAsync(adminUser, "Admin");
-
-            if (!roleAssignmentResult.Succeeded)
-            {
-                _logger.LogError("Failed to assign 'Admin' role to user {UserId}. Errors: {Errors}", adminUser.Id, roleAssignmentResult.Errors);
-                await _userManager.DeleteAsync(adminUser);
-                return BadRequest(roleAssignmentResult.Errors);
-            }
-
-            _logger.LogInformation("Admin user {UserId} successfully registered and signed in.", adminUser.Id);
-            await _signInManager.SignInAsync(adminUser, isPersistent: false);
-            return Ok(new { UserId = adminUser.Id });
-        }
-
-
 
         [HttpPost("register/rider")]
         public async Task<IActionResult> RegisterRider([FromForm] RiderRegisterDto model)
@@ -176,8 +132,8 @@ namespace AuthGate.Controllers
             var roles = await _userManager.GetRolesAsync(user);
             var claims = new List<Claim>
             {
-                new Claim(ClaimTypes.Name, user.UserName),
-                new Claim(ClaimTypes.Email, user.Email),
+                new Claim(ClaimTypes.Name, user.UserName ?? user.Id),
+                new Claim(ClaimTypes.Email, user.Email ?? model.Email),
                 new Claim(ClaimTypes.NameIdentifier, user.Id)
             };
 
@@ -186,16 +142,15 @@ namespace AuthGate.Controllers
                 claims.Add(new Claim(ClaimTypes.Role, role));
             }
 
-            var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_jwtKey));
-            var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
-
-            var token = new JwtSecurityToken(
-                claims: claims,
-                expires: DateTime.Now.AddHours(1),
-                signingCredentials: creds);
-
-            var tokenHandler = new JwtSecurityTokenHandler();
-            var stringToken = tokenHandler.WriteToken(token);
+            string stringToken;
+            try
+            {
+                stringToken = _jwtTokenIssuer.CreateToken(claims, model.Audience);
+            }
+            catch (ArgumentOutOfRangeException)
+            {
+                return BadRequest(new { Error = "Unsupported token audience." });
+            }
 
             _logger.LogInformation("JWT token generated for user {Email}.", model.Email);
 

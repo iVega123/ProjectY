@@ -70,94 +70,15 @@ namespace AuthGateTests.Unit.Controllers
 
             var mockFile = new Mock<IFileValidationService>();
 
-            var testJWtKey = "pnXhunyWll1LgERT86wXwMH5I6ieQC2M";
-            mockConfig.Setup(c => c["JwtKey"]).Returns(testJWtKey);
+            mockConfig.Setup(c => c["Jwt:Issuer"]).Returns("projecty.auth-gate");
+            mockConfig.Setup(c => c["Jwt:Audiences:AuthGate"]).Returns("projecty.auth-gate");
+            mockConfig.Setup(c => c["Jwt:SigningKeys:AuthGate"])
+                .Returns("test-only-auth-gate-key-with-32-bytes");
+            mockConfig.Setup(c => c["Jwt:Audiences:MotoHub"]).Returns("projecty.moto-hub");
+            mockConfig.Setup(c => c["Jwt:SigningKeys:MotoHub"])
+                .Returns("test-only-moto-hub-signing-key-0001");
 
             return (userManagerMock, signInManagerMock, roleManagerMock, mockConfig, mockLogger, mockRabbit, mockFile);
-        }
-
-        [Fact]
-        public async Task RegisterAdmin_ValidModel_ReturnsOk()
-        {
-            // Arrange
-            var (userManagerMock, signInManagerMock, roleManagerMock, mockConfig, mockLogger, mockRabbit, mockFile) = GetMocks();
-
-            userManagerMock.Setup(mock => mock.CreateAsync(It.IsAny<AdminUser>(), It.IsAny<string>()))
-                           .ReturnsAsync(IdentityResult.Success);
-
-            roleManagerMock.Setup(mock => mock.RoleExistsAsync("Admin"))
-                   .ReturnsAsync(true);
-
-            roleManagerMock.Setup(mock => mock.CreateAsync(It.IsAny<IdentityRole>()))
-                   .ReturnsAsync(IdentityResult.Success);
-
-            userManagerMock.Setup(mock => mock.AddToRoleAsync(It.IsAny<AdminUser>(), "Admin"))
-                       .ReturnsAsync(IdentityResult.Success);
-
-            var controller = new AuthController(userManagerMock.Object, signInManagerMock.Object, roleManagerMock.Object, mockConfig.Object, mockLogger.Object, mockFile.Object, mockRabbit.Object);
-            var model = new AdminRegisterDto { Email = "test@example.com", Password = "Password@1" };
-
-            // Act
-            var result = await controller.RegisterAdmin(model) as OkObjectResult;
-
-            // Assert
-            Assert.NotNull(result);
-            Assert.Equal(200, result.StatusCode);
-            Assert.NotNull(result.Value);
-            userManagerMock.Verify(mock => mock.CreateAsync(It.IsAny<AdminUser>(), It.IsAny<string>()), Times.Once);
-            signInManagerMock.Verify(mock => mock.SignInAsync(It.IsAny<AdminUser>(), false, null), Times.Once);
-        }
-
-        [Fact]
-        public async Task RegisterAdmin_InvalidModel_ReturnsBadRequest()
-        {
-            // Arrange
-            var (userManagerMock, signInManagerMock, roleManagerMock, mockConfig, mockLogger, mockRabbit, mockFile) = GetMocks();
-            var controller = new AuthController(userManagerMock.Object, signInManagerMock.Object, roleManagerMock.Object, mockConfig.Object, mockLogger.Object, mockFile.Object, mockRabbit.Object);
-            controller.ModelState.AddModelError("Email", "Email is required.");
-            var model = new AdminRegisterDto { Email = "", Password = "" };
-
-            // Act
-            var result = await controller.RegisterAdmin(model) as BadRequestObjectResult;
-
-            // Assert
-            Assert.NotNull(result);
-            Assert.Equal(400, result.StatusCode);
-            userManagerMock.Verify(mock => mock.CreateAsync(It.IsAny<AdminUser>(), It.IsAny<string>()), Times.Never);
-            signInManagerMock.Verify(mock => mock.SignInAsync(It.IsAny<AdminUser>(), false, null), Times.Never);
-        }
-
-        [Fact]
-        public async Task RegisterAdmin_UserCreationFailed_ReturnsBadRequestWithErrors()
-        {
-            // Arrange
-            var (userManagerMock, signInManagerMock, roleManagerMock, mockConfig, mockLogger, mockRabbit, mockFile) = GetMocks();
-
-            var controller = new AuthController(userManagerMock.Object, signInManagerMock.Object, roleManagerMock.Object, mockConfig.Object, mockLogger.Object, mockFile.Object, mockRabbit.Object);
-            var error = new IdentityError { Code = "DuplicateEmail", Description = "Email is already taken." };
-            userManagerMock.Setup(mock => mock.CreateAsync(It.IsAny<AdminUser>(), It.IsAny<string>()))
-                   .ReturnsAsync(IdentityResult.Failed(error));
-            roleManagerMock.Setup(mock => mock.RoleExistsAsync("Admin"))
-                    .ReturnsAsync(true);
-
-            roleManagerMock.Setup(mock => mock.CreateAsync(It.IsAny<IdentityRole>()))
-                   .ReturnsAsync(IdentityResult.Success);
-
-            userManagerMock.Setup(mock => mock.AddToRoleAsync(It.IsAny<AdminUser>(), "Admin"))
-                       .ReturnsAsync(IdentityResult.Success);
-            var model = new AdminRegisterDto { Email = "test@example.com", Password = "password" };
-
-            // Act
-            var result = await controller.RegisterAdmin(model) as BadRequestObjectResult;
-
-            // Assert
-            Assert.NotNull(result);
-            Assert.Equal(400, result.StatusCode);
-            Assert.NotNull(result.Value);
-            var errors = (List<IdentityError>)result.Value;
-            Assert.Contains(errors, error => error.Code == "DuplicateEmail");
-            userManagerMock.Verify(mock => mock.CreateAsync(It.IsAny<AdminUser>(), It.IsAny<string>()), Times.Once);
-            signInManagerMock.Verify(mock => mock.SignInAsync(It.IsAny<AdminUser>(), false, null), Times.Never);
         }
 
         [Fact]
@@ -182,7 +103,7 @@ namespace AuthGateTests.Unit.Controllers
                              .ReturnsAsync(Microsoft.AspNetCore.Identity.SignInResult.Success);
 
             var controller = new AuthController(userManagerMock.Object, signInManagerMock.Object, roleManagerMock.Object, mockConfig.Object, mockLogger.Object, mockFile.Object, mockRabbit.Object);
-            var model = new LoginDto { Email = "test@example.com", Password = "password" };
+            var model = new LoginDto { Email = "test@example.com", Password = "password", Audience = "MotoHub" };
 
             // Act
             var result = await controller.Login(model) as OkObjectResult;
@@ -205,7 +126,7 @@ namespace AuthGateTests.Unit.Controllers
                            .ReturnsAsync((ApplicationUser)null);
 
             var controller = new AuthController(userManagerMock.Object, signInManagerMock.Object, roleManagerMock.Object, mockConfig.Object, mockLogger.Object, mockFile.Object, mockRabbit.Object);
-            var model = new LoginDto { Email = "nonexistent@example.com", Password = "password" };
+            var model = new LoginDto { Email = "nonexistent@example.com", Password = "password", Audience = "MotoHub" };
 
             // Act
             var result = await controller.Login(model) as UnauthorizedResult;

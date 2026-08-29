@@ -12,7 +12,7 @@ namespace AuthGateTests.Integration
 {
     public class IntegrationTests : IClassFixture<CustomWebApplicationFactory<Program>>
     {
-        private readonly WebApplicationFactory<Program> _factory;
+        private readonly CustomWebApplicationFactory<Program> _factory;
 
         public IntegrationTests(CustomWebApplicationFactory<Program> factory)
         {
@@ -20,7 +20,7 @@ namespace AuthGateTests.Integration
         }
 
         [Fact]
-        public async Task RegisterAdmin_ValidModel_ReturnsOk()
+        public async Task RegisterAdmin_Unauthenticated_ReturnsNotFound()
         {
             // Arrange
             var client = _factory.CreateClient(new WebApplicationFactoryClientOptions
@@ -28,31 +28,13 @@ namespace AuthGateTests.Integration
                 AllowAutoRedirect = false
             });
 
-            var model = new AdminRegisterDto { Email = "test@example.com", Password = "A$Slol123ok" };
+            var model = new AdminRegisterDto { Email = "attacker@example.com", Password = "A$Slol123ok" };
 
             // Act
             var response = await client.PostAsJsonAsync("/api/auth/register/admin", model);
 
             // Assert
-            response.EnsureSuccessStatusCode();
-
-            var responseContent = await response.Content.ReadAsStringAsync();
-            Assert.Contains("userId", responseContent);
-        }
-
-        [Fact]
-        public async Task RegisterAdmin_DuplicateEmail_ReturnsBadRequest()
-        {
-            // Arrange
-            var client = _factory.CreateClient();
-            var model = new AdminRegisterDto { Email = "duplicate@example.com", Password = "A$Slol123ok" };
-            await client.PostAsJsonAsync("/api/auth/register/admin", model);
-
-            // Act
-            var response = await client.PostAsJsonAsync("/api/auth/register/admin", model);
-
-            // Assert
-            Assert.Equal(System.Net.HttpStatusCode.BadRequest, response.StatusCode);
+            Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
         }
 
         [Fact]
@@ -97,7 +79,7 @@ namespace AuthGateTests.Integration
         {
             // Arrange
             var client = _factory.CreateClient();
-            var model = new LoginDto { Email = "user@example.com", Password = "wrongPassword" };
+            var model = new LoginDto { Email = "user@example.com", Password = "wrongPassword", Audience = "MotoHub" };
 
             // Act
             var response = await client.PostAsJsonAsync("/api/auth/login", model);
@@ -160,7 +142,7 @@ namespace AuthGateTests.Integration
         {
             // Arrange
             var client = _factory.CreateClient();
-            var model = new LoginDto { Email = "nonexistent@example.com", Password = "A$Slol123ok" };
+            var model = new LoginDto { Email = "nonexistent@example.com", Password = "A$Slol123ok", Audience = "MotoHub" };
 
             // Act
             var response = await client.PostAsJsonAsync("/api/auth/login", model);
@@ -174,7 +156,7 @@ namespace AuthGateTests.Integration
         {
             // Arrange
             var client = _factory.CreateClient();
-            var model = new LoginDto { Email = "lockeduser@example.com", Password = "A$Slol123ok" };
+            var model = new LoginDto { Email = "lockeduser@example.com", Password = "A$Slol123ok", Audience = "MotoHub" };
 
             // Act
             var response = await client.PostAsJsonAsync("/api/auth/login", model);
@@ -222,12 +204,11 @@ namespace AuthGateTests.Integration
         {
             // Arrange
             var client = _factory.CreateClient();
-            var loginModel = new LoginDto { Email = "user@example.com", Password = "A$Slol123ok" };
+            var loginModel = new LoginDto { Email = "user@example.com", Password = "A$Slol123ok", Audience = "MotoHub" };
             var logoutModel = new LogoutDto { Email = "user@example.com" };
 
             // Act
-            var regResponse = await client.PostAsJsonAsync("/api/auth/register/admin", loginModel);
-            regResponse.EnsureSuccessStatusCode();
+            await _factory.CreateAdminAsync(loginModel.Email, loginModel.Password);
             var loginResponse = await client.PostAsJsonAsync("/api/auth/login", loginModel);
             loginResponse.EnsureSuccessStatusCode();
             var logout = await client.PostAsJsonAsync("/api/auth/logout", logoutModel);
@@ -274,43 +255,19 @@ namespace AuthGateTests.Integration
         }
 
         [Fact]
-        public async Task RegisterAdmin_WeakPassword_ReturnsBadRequest()
+        public async Task Login_WithoutAudience_ReturnsBadRequest()
         {
-            // Arrange
             var client = _factory.CreateClient();
-            var model = new AdminRegisterDto { Email = "weakpass@example.com", Password = "123" };
+            var legacyPayload = new
+            {
+                Email = "legacy@example.com",
+                Password = "A$Slol123ok"
+            };
 
-            // Act
-            var response = await client.PostAsJsonAsync("/api/auth/register/admin", model);
+            var response = await client.PostAsJsonAsync("/api/auth/login", legacyPayload);
 
-            // Assert
-            Assert.Equal(System.Net.HttpStatusCode.BadRequest, response.StatusCode);
+            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         }
 
-        [Fact]
-        public async Task RegisterAdmin_CheckUserRoleAssignment_ReturnsUserRole()
-        {
-            // Arrange
-            var client = _factory.CreateClient();
-            var model = new AdminRegisterDto { Email = "newadmin@example.com", Password = "StrongPass1!" };
-
-            // Act
-            var regResponse = await client.PostAsJsonAsync("/api/auth/register/admin", model);
-            regResponse.EnsureSuccessStatusCode();
-
-            var loginResponse = await client.PostAsJsonAsync("/api/auth/login", new LoginDto { Email = model.Email, Password = model.Password });
-            loginResponse.EnsureSuccessStatusCode();
-            var loginContent = await loginResponse.Content.ReadAsStringAsync();
-            using var doc = JsonDocument.Parse(loginContent);
-            var token = doc.RootElement.GetProperty("token").GetString();
-
-            var handler = new JwtSecurityTokenHandler();
-            var jwtToken = handler.ReadJwtToken(token);
-            var roleClaims = jwtToken.Claims.FirstOrDefault(claim => claim.Type == ClaimTypes.Role)?.Value;
-
-            // Assert
-            Assert.NotNull(token);
-            Assert.Equal("Admin", roleClaims);
-        }
     }
 }

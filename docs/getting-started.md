@@ -7,10 +7,11 @@ design scaffold and references services that have not been implemented yet.
 
 ## Safety warning
 
-The baseline contains known critical vulnerabilities, committed development
-credentials, and infrastructure services exposed on host ports. Run it only on
-an isolated development machine. Do not expose it to the internet or deploy it
-to a shared or production environment.
+The baseline still contains known security findings and exposes several
+infrastructure services on host ports. Run it only on an isolated development
+machine. Do not expose it to the internet or deploy it to a shared or
+production environment. RabbitMQ is an exception: it is reachable only from
+the Compose network.
 
 ## Prerequisites
 
@@ -33,7 +34,6 @@ starting.
 | PostgreSQL | `5432` |
 | pgAdmin | `5050` |
 | MongoDB | `27017` |
-| RabbitMQ | `5672`, `15672` |
 | MinIO | `9000`, `9001` |
 
 | Application service | Required host ports |
@@ -51,9 +51,38 @@ host-side mapping in `docker-compose.yml` before starting the stack.
 
 ## Start the stack
 
+Clone the repository, then create fresh local credentials. The generated `.env`
+is ignored by Git and includes independent JWT signing keys and RabbitMQ
+credentials for every service:
+
 ```bash
 git clone https://github.com/iVega123/ProjectY.git
 cd ProjectY
+```
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/New-LocalSecrets.ps1
+```
+
+On PowerShell 7, `pwsh -File scripts/New-LocalSecrets.ps1` is equivalent. If a
+local `.env` already exists, the script refuses to overwrite it. Use `-Force`
+only for an intentional full rotation, and recreate persistent volumes that
+were initialized with the previous database, broker, or storage credentials.
+The PostgreSQL bootstrap creates independent databases for AuthGate,
+RiderManager, and MotoHub so that each EF context owns its schema. The same
+command creates an ignored `.rabbitmq-definitions.json` containing salted
+password hashes, isolated vhosts, and service-specific queue permissions. The
+rider and rental message flows use separate vhosts so access to the AMQP
+default exchange cannot cross domain boundaries. Both ignored files are
+required before the first Compose startup.
+
+RabbitMQ does not publish its AMQP or management ports to the host. To inspect
+it locally, run management commands inside the container or attach a temporary
+tool to the Compose network instead of adding a permanent host port mapping.
+
+Then start the stack:
+
+```bash
 docker compose up --build
 ```
 
@@ -73,6 +102,40 @@ Only the HTTP endpoints above are documented as usable. The compose file also
 publishes ports that older documentation described as HTTPS, but it configures
 no certificates or HTTPS listener; the audit records this as finding A4.
 
+## Bootstrap the first administrator
+
+Administrator creation is deliberately unavailable over HTTP. Open a second
+terminal in the repository root after the Compose stack is running. Set the
+bootstrap credentials only in that shell, then start a one-off AuthGate
+container in bootstrap mode:
+
+```powershell
+$env:BootstrapAdmin__Email = Read-Host "Administrator email"
+$bootstrapPassword = Read-Host "Administrator password" -AsSecureString
+$env:BootstrapAdmin__Password = [System.Net.NetworkCredential]::new('', $bootstrapPassword).Password
+
+try {
+    docker compose run --rm `
+        -e BootstrapAdmin__Email `
+        -e BootstrapAdmin__Password `
+        auth-gate --bootstrap-admin
+}
+finally {
+    Remove-Item Env:BootstrapAdmin__Email -ErrorAction SilentlyContinue
+    Remove-Item Env:BootstrapAdmin__Password -ErrorAction SilentlyContinue
+}
+```
+
+Compose passes the two shell variables only to the one-off process. That
+container joins the same Compose network and reuses the AuthGate service
+configuration, so the PostgreSQL hostname `postgres` resolves correctly. It
+does not publish another copy of the AuthGate ports and is removed after the
+command exits.
+
+The command creates the `Admin` role when needed, creates or promotes the
+configured account, and exits. The `finally` block removes both plaintext
+values from the shell even if bootstrap fails.
+
 ## Stop the stack
 
 Press `Ctrl+C` in the attached Compose session, then run:
@@ -85,8 +148,9 @@ Named volumes are retained so local database contents survive the restart.
 
 ## Known limitations
 
-- The root `docker-compose.yml` is the audited legacy baseline, not a secure
-  deployment definition.
+- The root `docker-compose.yml` is the audited legacy baseline, not a production
+  deployment definition. It requires secrets from the local environment and
+  contains no committed secret defaults.
 - Supporting databases, queues, object storage, and observability tools publish
   host ports with development settings.
 - There are no reliable health gates; startup currently depends on fixed waits.

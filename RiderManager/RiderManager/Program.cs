@@ -18,6 +18,7 @@ using RiderManager.Managers;
 using RiderManager.Services.PreSignedService;
 using RiderManager.Services;
 using Serilog.Sinks.Elasticsearch;
+using ProjectY.Shared.Messaging;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -32,6 +33,9 @@ builder.Services.AddMinio(configureClient => configureClient
 var rabbitMQConfig = builder.Configuration.GetSection("RabbitMQ").Get<RabbitMQOptions>();
 builder.Services.AddSingleton<RabbitMQOptions>(rabbitMQConfig);
 builder.Services.Configure<RabbitMQOptions>(builder.Configuration.GetSection("RabbitMQ"));
+builder.Services.AddSingleton(new QueueMessageAuthenticator(
+    builder.Configuration["Messaging:SigningKey"]
+        ?? throw new InvalidOperationException("Messaging:SigningKey is not configured.")));
 
 
 var applicationName = builder.Configuration["ApplicationName"];
@@ -55,20 +59,23 @@ builder.Host.UseSerilog();
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
     options.UseNpgsql(builder.Configuration.GetConnectionString("Postgresql")));
 
-var jwtKey = builder.Configuration["JwtKey"] ?? throw new InvalidOperationException("JwtKey is not set in the environment variables.");
-var keyBytes = Encoding.UTF8.GetBytes(jwtKey);
 builder.Services.AddAuthentication(options =>
 {
     options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
     options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
 }).AddJwtBearer(options =>
 {
+    var jwtKey = builder.Configuration["Jwt:SigningKey"] ?? throw new InvalidOperationException("Jwt:SigningKey is not configured.");
+    var jwtIssuer = builder.Configuration["Jwt:Issuer"] ?? throw new InvalidOperationException("Jwt:Issuer is not configured.");
+    var jwtAudience = builder.Configuration["Jwt:Audience"] ?? throw new InvalidOperationException("Jwt:Audience is not configured.");
     options.TokenValidationParameters = new TokenValidationParameters
     {
         ValidateIssuerSigningKey = true,
-        IssuerSigningKey = new SymmetricSecurityKey(keyBytes),
-        ValidateIssuer = false,
-        ValidateAudience = false
+        IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey)),
+        ValidateIssuer = true,
+        ValidIssuer = jwtIssuer,
+        ValidateAudience = true,
+        ValidAudience = jwtAudience
     };
 });
 
@@ -89,7 +96,7 @@ builder.Services.AddSwaggerGen(c =>
 {
     c.SwaggerDoc("v1", new OpenApiInfo { Title = "RiderManager", Version = "v1" });
 
-    // Configuração do esquema de segurança JWT no Swagger
+    // ConfiguraÃ§Ã£o do esquema de seguranÃ§a JWT no Swagger
     var securityScheme = new OpenApiSecurityScheme
     {
         Name = "JWT Authentication",

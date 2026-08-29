@@ -1,8 +1,9 @@
 # ProjectY — pilha de desenvolvimento local, orquestrada pelo Tilt.
 #
 # ATENÇÃO: este arquivo descreve o ambiente de DESENVOLVIMENTO. Bancos sobem em
-# modo inseguro, sem TLS e com credenciais de exemplo, porque tudo aqui vive numa
-# rede interna e nada é publicado além do necessário para o Tilt. Produção usa
+# modo inseguro e sem TLS, porque tudo aqui vive numa rede interna e nada é
+# publicado além do necessário para o Tilt. Credenciais são obrigatoriamente
+# injetadas pelo ambiente; produção usa
 # manifestos separados, com certificados e segredos vindos de um cofre.
 #
 # Perfis:
@@ -99,14 +100,10 @@ services:
   rabbitmq:
     image: rabbitmq:4.0-management-alpine
     <<: *restart
-    environment:
-      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-projecty}
-      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-dev-only-change-me}
-    ports:
-      - "5673:5672"
-      - "15673:15672"
     volumes:
       - rabbitmq-data:/var/lib/rabbitmq
+      - ./rabbitmq/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf:ro
+      - ../.rabbitmq-definitions.json:/etc/rabbitmq/definitions.json:ro
     networks: [projecty]
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "-q", "check_running"]
@@ -173,8 +170,8 @@ services:
     profiles: ["full"]
     <<: *restart
     environment:
-      MONGO_INITDB_ROOT_USERNAME: ${MONGO_USER:-projecty}
-      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD:-dev-only-change-me}
+      MONGO_INITDB_ROOT_USERNAME: "${MONGO_USER:?Set MONGO_USER in .env}"
+      MONGO_INITDB_ROOT_PASSWORD: "${MONGO_PASSWORD:?Set MONGO_PASSWORD in .env}"
     ports:
       - "27018:27017"
     volumes:
@@ -193,8 +190,8 @@ services:
     <<: *restart
     command: server /data --console-address ":9001"
     environment:
-      MINIO_ROOT_USER: ${MINIO_USER:-projecty}
-      MINIO_ROOT_PASSWORD: ${MINIO_PASSWORD:-dev-only-change-me}
+      MINIO_ROOT_USER: "${MINIO_USER:?Set MINIO_USER in .env}"
+      MINIO_ROOT_PASSWORD: "${MINIO_PASSWORD:?Set MINIO_PASSWORD in .env}"
     ports:
       - "9010:9000"
       - "9011:9001"
@@ -219,7 +216,6 @@ services:
       - "8474:8474"     # API de controle
       - "21257:21257"   # → cockroachdb
       - "26379:26379"   # → redis
-      - "25672:25672"   # → rabbitmq
       - "29092:29092"   # → kafka
     volumes:
       - ./chaos/toxiproxy.json:/config/toxiproxy.json:ro
@@ -292,8 +288,8 @@ services:
     image: grafana/grafana:11.6.0
     <<: *restart
     environment:
-      GF_SECURITY_ADMIN_USER: ${GRAFANA_USER:-admin}
-      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+      GF_SECURITY_ADMIN_USER: "${GRAFANA_USER:?Set GRAFANA_USER in .env}"
+      GF_SECURITY_ADMIN_PASSWORD: "${GRAFANA_PASSWORD:?Set GRAFANA_PASSWORD in .env}"
       GF_USERS_DEFAULT_THEME: system
       GF_FEATURE_TOGGLES_ENABLE: traceqlEditor,traceToMetrics
       GF_INSTALL_PLUGINS: ""
@@ -362,6 +358,9 @@ services:
       Messaging__Kafka__BootstrapServers: "toxiproxy:29092"
       Messaging__RabbitMq__Host: "toxiproxy"
       Messaging__RabbitMq__Port: "25672"
+      Messaging__RabbitMq__Username: "${RENTAL_CORE_RABBITMQ_USER:?Set RENTAL_CORE_RABBITMQ_USER in .env}"
+      Messaging__RabbitMq__Password: "${RENTAL_CORE_RABBITMQ_PASSWORD:?Set RENTAL_CORE_RABBITMQ_PASSWORD in .env}"
+      Messaging__RabbitMq__VirtualHost: "projecty"
       Redis__Url: "toxiproxy:26379"
     ports:
       - "8091:8091"
@@ -395,7 +394,7 @@ services:
       <<: *otel-env
       OTEL_SERVICE_NAME: media-guard
       MEDIA_BIND: 0.0.0.0:8092
-      MEDIA_RABBITMQ_URL: amqp://${RABBITMQ_USER:-projecty}:${RABBITMQ_PASSWORD:-dev-only-change-me}@toxiproxy:25672/%2f
+      MEDIA_RABBITMQ_URL: "amqp://${MEDIA_GUARD_RABBITMQ_USER:?Set MEDIA_GUARD_RABBITMQ_USER in .env}:${MEDIA_GUARD_RABBITMQ_PASSWORD:?Set MEDIA_GUARD_RABBITMQ_PASSWORD in .env}@toxiproxy:25672/projecty"
       MEDIA_S3_ENDPOINT: http://minio:9000
       MEDIA_MAX_BYTES: "8388608"
       RUST_LOG: info,media_guard=debug

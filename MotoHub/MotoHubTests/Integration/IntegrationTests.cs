@@ -15,14 +15,10 @@ namespace MotoHubTests.Integration
     public class IntegrationTests : IClassFixture<CustomWebApplicationFactory<Program>>
     {
         private readonly WebApplicationFactory<Program> _factory;
-        private readonly IConfiguration _configuration;
 
         public IntegrationTests(CustomWebApplicationFactory<Program> factory)
         {
             _factory = factory;
-            _configuration = new ConfigurationBuilder()
-                .AddJsonFile("appsettings.json")
-                .Build();
         }
 
         [Fact]
@@ -310,11 +306,13 @@ namespace MotoHubTests.Integration
                 new Claim(ClaimTypes.Role, "Admin")
             };
 
-            var jwtKey = _configuration["JwtKey"];
+            var jwtKey = CustomWebApplicationFactory<Program>.JwtKey;
             var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey));
             var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
 
             var token = new JwtSecurityToken(
+                issuer: CustomWebApplicationFactory<Program>.JwtIssuer,
+                audience: CustomWebApplicationFactory<Program>.JwtAudience,
                 claims: claims,
                 expires: DateTime.Now.AddHours(1),
                 signingCredentials: creds);

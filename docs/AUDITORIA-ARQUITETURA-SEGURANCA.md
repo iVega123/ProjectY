@@ -37,6 +37,10 @@ por controle de acesso nenhum:
 **Impacto:** controle administrativo completo dos quatro serviços a partir de uma requisição anônima.
 `AuthGate/AuthGate/Controllers/AuthController.cs:47-85`
 
+**Status: closed.** The public endpoint was removed and administrator bootstrap is now an explicit
+CLI operation backed by process environment variables. Closed by commit
+[`fef0c1f`](https://github.com/iVega123/ProjectY/commit/fef0c1feecdfc8314ffa389eac397fa3d638c110) (C1, task #18).
+
 ### C2 — O filtro de administrador do RentalOperations aceita qualquer token válido
 O `AdminAuthorizationFilter` tenta claim de papel, chave de API e, por último, apenas
 `ValidateToken(token)` — que confere só a assinatura. Um Rider passa pelo terceiro caminho.
@@ -44,13 +48,36 @@ Os filtros de MotoHub e RiderManager retornam `isAdmin` corretamente; esta cópi
 **Impacto:** escalonamento de privilégio; qualquer Rider lê `GET /api/rental/user/{userId}` de terceiros.
 `RentalOperations/RentalOperations/Filters/AdminAuthorizationFilter.cs:38-46`
 
+**Status: closed.** The authentication middleware now builds the validated principal before the MVC
+filter authorizes it. Only the `Admin` role is accepted; valid non-admin tokens receive `403`, while
+missing or invalid tokens receive `401`. Closed by commits
+[`8349c54`](https://github.com/iVega123/ProjectY/commit/8349c54bc0bd826cac6ecd534a13043472179c2e) and
+[`9fe37cd`](https://github.com/iVega123/ProjectY/commit/9fe37cd2a530861668aaab26b2486bdcd9d2694f)
+(C2, task #19).
+
 ### C3 — Todos os segredos versionados, com JwtKey única nos quatro serviços
 Os quatro `appsettings.json` carregam em texto puro: `JwtKey` (mesma string de 32 caracteres),
 as três chaves de API entre serviços, e as senhas de Postgres, MongoDB, RabbitMQ e MinIO.
 Nenhum serviço valida `iss`/`aud`, então um token vale nos quatro. Existe `.gitleaks.toml`,
 mas nenhum fluxo o executa.
 **Impacto:** comprometer um serviço — ou ler o repositório — entrega a plataforma inteira.
-Rotacionar exige reescrever o histórico do Git.
+Apagar os valores dos arquivos atuais não os revoga nem os remove do histórico do Git.
+
+**Status: corrigido no código; rotação externa obrigatória antes do deploy.** Segredos foram
+removidos dos arquivos rastreados e agora entram pelo provider de variáveis de ambiente. O Compose
+falha quando uma variável obrigatória não existe, e um gerador criptográfico cria o conjunto local
+sem versioná-lo. AuthGate emite tokens com `iss`/`aud` e uma chave diferente para cada audiência;
+cada API valida apenas sua audiência e sua própria chave. Um teste prova que o token de
+RentalOperations é rejeitado pela validação do MotoHub. O Gitleaks também passa a executar na CI.
+O login exige uma audiência explícita e o bootstrap cria uma database PostgreSQL independente para
+cada contexto EF. Implementado nos commits
+[`9f69358`](https://github.com/iVega123/ProjectY/commit/9f69358) e
+[`a7bb080`](https://github.com/iVega123/ProjectY/commit/a7bb080) (C3, task #20).
+
+Os valores encontrados no histórico continuam comprometidos. A retirada do código não substitui a
+revogação nos provedores; o procedimento e os registros pendentes por ambiente estão em
+[`docs/security/credential-rotation.md`](security/credential-rotation.md). Reescrever o histórico é
+opcional após a rotação e não faz parte desta task.
 
 ### C4 — Encerrar um aluguel alheio e transferi-lo para si
 `CalculateFinalCostAsync` busca por `rentalId` e nunca compara `rental.UserId` com o usuário
@@ -58,11 +85,23 @@ autenticado; na linha 111 faz `response.UserId = userId` antes de gravar.
 **Impacto:** falha de controle de acesso somada a adulteração de dado financeiro.
 `RentalOperations/RentalOperations/Services/RentalService.cs:76-116`
 
+**Status: closed.** `CalculateFinalCostAsync` agora compara o proprietário persistido com o
+`NameIdentifier` autenticado antes de qualquer retorno ou cálculo, e não sobrescreve mais o
+`UserId`. O controller converte a violação em `403`. Testes pelo pipeline HTTP comprovam que um
+rider não consegue finalizar nem ler o resultado já finalizado de outro, que o documento permanece
+inalterado na tentativa e que o proprietário legítimo continua conseguindo finalizar o aluguel.
+Fechado pelo commit
+[`e0873be`](https://github.com/iVega123/ProjectY/commit/e0873be) (C4, task #21).
+
 ### C5 — A fila é uma fronteira de confiança implícita, e está aberta
-O `userId` que decide de quem é o cadastro e a foto de CNH vem do corpo da mensagem, sem
-assinatura nem verificação. A porta 5672 é publicada no host com `user`/`password`.
-**Impacto:** escrita direta no domínio, sem passar por API, autenticação ou validação.
-`RiderManager/.../MessagingConsumerService.cs:79-122, 171-204` · `docker-compose.yml:81-95`
+**Resolvido.** AuthGate agora publica cadastro e partes da CNH em envelopes versionados com
+tipo, identidade do sujeito, ID, instante, payload e HMAC-SHA256. RiderManager verifica a
+assinatura em tempo constante antes de desserializar, exige que o `UserId` do payload corresponda
+à identidade assinada e rejeita mensagens inválidas sem requeue. Testes cobrem JSON direto sem
+assinatura, divergência de identidade e o fluxo válido. RabbitMQ deixou de publicar AMQP e
+management no host (inclusive via Toxiproxy), e cada serviço recebe credencial própria em vhosts
+isolados com permissões específicas. Fechado pelo commit
+[`b4de324`](https://github.com/iVega123/ProjectY/commit/b4de324) (C5, task #22).
 
 ---
 
