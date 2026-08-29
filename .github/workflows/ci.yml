@@ -24,6 +24,8 @@ jobs:
     outputs:
       matrix: ${{ steps.matrix.outputs.matrix }}
       has_dotnet_changes: ${{ steps.matrix.outputs.has_dotnet_changes }}
+      image_matrix: ${{ steps.matrix.outputs.image_matrix }}
+      has_image_changes: ${{ steps.matrix.outputs.has_image_changes }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
@@ -37,6 +39,8 @@ jobs:
               - 'AuthGate/**'
               - 'Shared/**'
               - '.github/workflows/ci.yml'
+              - '.grype.yaml'
+              - '.trivyignore.yaml'
               - 'global.json'
               - 'Directory.Build.*'
               - 'Directory.Packages.props'
@@ -44,6 +48,8 @@ jobs:
             moto_hub:
               - 'MotoHub/**'
               - '.github/workflows/ci.yml'
+              - '.grype.yaml'
+              - '.trivyignore.yaml'
               - 'global.json'
               - 'Directory.Build.*'
               - 'Directory.Packages.props'
@@ -51,6 +57,8 @@ jobs:
             rental_operations:
               - 'RentalOperations/**'
               - '.github/workflows/ci.yml'
+              - '.grype.yaml'
+              - '.trivyignore.yaml'
               - 'global.json'
               - 'Directory.Build.*'
               - 'Directory.Packages.props'
@@ -59,12 +67,14 @@ jobs:
               - 'RiderManager/**'
               - 'Shared/**'
               - '.github/workflows/ci.yml'
+              - '.grype.yaml'
+              - '.trivyignore.yaml'
               - 'global.json'
               - 'Directory.Build.*'
               - 'Directory.Packages.props'
               - 'NuGet.config'
 
-      - name: Build .NET matrix
+      - name: Build CI matrices
         id: matrix
         shell: bash
         env:
@@ -74,32 +84,43 @@ jobs:
           RIDER_MANAGER_CHANGED: ${{ steps.filter.outputs.rider_manager }}
         run: |
           matrix='{"include":[]}'
+          image_matrix='{"include":[]}'
 
           add_service() {
             local service="$1"
             local solution="$2"
+            local image="$3"
+            local dockerfile="$4"
             matrix=$(jq --compact-output \
               --arg service "$service" \
               --arg solution "$solution" \
               '.include += [{language: "dotnet", service: $service, solution: $solution}]' \
               <<< "$matrix")
+            image_matrix=$(jq --compact-output \
+              --arg service "$service" \
+              --arg image "$image" \
+              --arg dockerfile "$dockerfile" \
+              '.include += [{service: $service, image: $image, dockerfile: $dockerfile}]' \
+              <<< "$image_matrix")
           }
 
           if [[ "$AUTH_GATE_CHANGED" == "true" ]]; then
-            add_service "AuthGate" "AuthGate/AuthGate.sln"
+            add_service "AuthGate" "AuthGate/AuthGate.sln" "auth-gate" "AuthGate/AuthGate/Dockerfile"
           fi
           if [[ "$MOTO_HUB_CHANGED" == "true" ]]; then
-            add_service "MotoHub" "MotoHub/MotoHub.sln"
+            add_service "MotoHub" "MotoHub/MotoHub.sln" "moto-hub" "MotoHub/MotoHub/Dockerfile"
           fi
           if [[ "$RENTAL_OPERATIONS_CHANGED" == "true" ]]; then
-            add_service "RentalOperations" "RentalOperations/RentalOperations.sln"
+            add_service "RentalOperations" "RentalOperations/RentalOperations.sln" "rental-operations" "RentalOperations/RentalOperations/Dockerfile"
           fi
           if [[ "$RIDER_MANAGER_CHANGED" == "true" ]]; then
-            add_service "RiderManager" "RiderManager/RiderManager.sln"
+            add_service "RiderManager" "RiderManager/RiderManager.sln" "rider-manager" "RiderManager/RiderManager/Dockerfile"
           fi
 
           echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
           echo "has_dotnet_changes=$(jq --raw-output '.include | length > 0' <<< "$matrix")" >> "$GITHUB_OUTPUT"
+          echo "image_matrix=$image_matrix" >> "$GITHUB_OUTPUT"
+          echo "has_image_changes=$(jq --raw-output '.include | length > 0' <<< "$image_matrix")" >> "$GITHUB_OUTPUT"
 
   dotnet:
     name: .NET / ${{ matrix.service }}
@@ -146,6 +167,95 @@ jobs:
     steps:
       - run: echo "No .NET service paths changed; service jobs were skipped."
 
+  images:
+    name: Image security / ${{ matrix.service }}
+    needs: changes
+    if: needs.changes.outputs.has_image_changes == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.changes.outputs.image_matrix) }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
+
+      - name: Create artifact directory
+        shell: bash
+        run: mkdir -p artifacts
+
+      - name: Build attested OCI image
+        id: build
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          platforms: linux/amd64
+          tags: projecty/${{ matrix.image }}:ci-${{ github.sha }}
+          outputs: type=oci,dest=${{ runner.temp }}/${{ matrix.image }}-oci,tar=false,oci-mediatypes=true
+          provenance: false
+          sbom: true
+
+      - name: Verify OCI SBOM attestation
+        shell: bash
+        env:
+          OCI_LAYOUT: ${{ runner.temp }}/${{ matrix.image }}-oci
+        run: |
+          test -f "$OCI_LAYOUT/index.json"
+          if ! grep --extended-regexp --recursive --binary-files=text --quiet \
+            '"predicateType"[[:space:]]*:[[:space:]]*"https://spdx.dev/Document"' \
+            "$OCI_LAYOUT/blobs"; then
+            echo "::error::The OCI image does not contain an SPDX SBOM attestation."
+            exit 1
+          fi
+
+      - name: Generate SPDX SBOM with Syft
+        id: sbom
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        with:
+          image: oci-dir:${{ runner.temp }}/${{ matrix.image }}-oci
+          format: spdx-json
+          output-file: artifacts/${{ matrix.image }}.spdx.json
+          artifact-name: sbom-${{ matrix.image }}
+          upload-artifact: false
+          syft-version: v1.51.1
+
+      - name: Scan SBOM with Grype
+        uses: anchore/scan-action@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2 # v7.4.0
+        with:
+          sbom: artifacts/${{ matrix.image }}.spdx.json
+          fail-build: true
+          severity-cutoff: critical
+          only-fixed: false
+          output-format: table
+          grype-version: v0.118.0
+
+      - name: Scan OCI image with Trivy
+        if: always() && steps.build.outcome == 'success'
+        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
+        with:
+          input: ${{ runner.temp }}/${{ matrix.image }}-oci
+          scanners: vuln
+          severity: CRITICAL
+          exit-code: 1
+          ignore-unfixed: false
+          trivyignores: .trivyignore.yaml
+          version: v0.74.0
+
+      - name: Upload SBOM and attested OCI image
+        if: always() && steps.build.outcome == 'success'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: image-security-${{ matrix.image }}-${{ github.sha }}
+          path: |
+            artifacts/${{ matrix.image }}.spdx.json
+            ${{ runner.temp }}/${{ matrix.image }}-oci
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
+
   secrets:
     name: Gitleaks
     runs-on: ubuntu-latest
@@ -185,6 +295,7 @@ jobs:
       - changes
       - dotnet
       - no_relevant_changes
+      - images
       - secrets
     if: always()
     runs-on: ubuntu-latest
@@ -194,9 +305,11 @@ jobs:
           CHANGES_RESULT: ${{ needs.changes.result }}
           DOTNET_RESULT: ${{ needs.dotnet.result }}
           NO_CHANGES_RESULT: ${{ needs.no_relevant_changes.result }}
+          IMAGES_RESULT: ${{ needs.images.result }}
           SECRETS_RESULT: ${{ needs.secrets.result }}
         shell: bash
         run: |
           [[ "$CHANGES_RESULT" == "success" ]]
           [[ "$DOTNET_RESULT" == "success" || "$NO_CHANGES_RESULT" == "success" ]]
+          [[ "$IMAGES_RESULT" == "success" || "$IMAGES_RESULT" == "skipped" ]]
           [[ "$SECRETS_RESULT" == "success" ]]

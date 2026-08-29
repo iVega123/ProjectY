@@ -1,0 +1,3 @@
+# Vulnerability waivers require the process documented in
+# docs/security/container-image-scanning.md. Keep the two scanner files aligned.
+ignore: []
