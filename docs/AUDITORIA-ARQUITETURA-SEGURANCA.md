@@ -48,6 +48,13 @@ Os filtros de MotoHub e RiderManager retornam `isAdmin` corretamente; esta cópi
 **Impacto:** escalonamento de privilégio; qualquer Rider lê `GET /api/rental/user/{userId}` de terceiros.
 `RentalOperations/RentalOperations/Filters/AdminAuthorizationFilter.cs:38-46`
 
+**Status: closed.** The authentication middleware now builds the validated principal before the MVC
+filter authorizes it. Only the `Admin` role is accepted; valid non-admin tokens receive `403`, while
+missing or invalid tokens receive `401`. Closed by commits
+[`8349c54`](https://github.com/iVega123/ProjectY/commit/8349c54bc0bd826cac6ecd534a13043472179c2e) and
+[`9fe37cd`](https://github.com/iVega123/ProjectY/commit/9fe37cd2a530861668aaab26b2486bdcd9d2694f)
+(C2, task #19).
+
 ### C3 — Todos os segredos versionados, com JwtKey única nos quatro serviços
 Os quatro `appsettings.json` carregam em texto puro: `JwtKey` (mesma string de 32 caracteres),
 as três chaves de API entre serviços, e as senhas de Postgres, MongoDB, RabbitMQ e MinIO.
