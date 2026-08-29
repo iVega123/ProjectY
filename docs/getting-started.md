@@ -104,15 +104,37 @@ no certificates or HTTPS listener; the audit records this as finding A4.
 
 ## Bootstrap the first administrator
 
-Administrator creation is deliberately unavailable over HTTP. Set `BootstrapAdmin__Email` and
-`BootstrapAdmin__Password` in the process environment, then run AuthGate once in bootstrap mode:
+Administrator creation is deliberately unavailable over HTTP. Open a second
+terminal in the repository root after the Compose stack is running. Set the
+bootstrap credentials only in that shell, then start a one-off AuthGate
+container in bootstrap mode:
 
-```bash
-dotnet run --project AuthGate/AuthGate -- --bootstrap-admin
+```powershell
+$env:BootstrapAdmin__Email = Read-Host "Administrator email"
+$bootstrapPassword = Read-Host "Administrator password" -AsSecureString
+$env:BootstrapAdmin__Password = [System.Net.NetworkCredential]::new('', $bootstrapPassword).Password
+
+try {
+    docker compose run --rm `
+        -e BootstrapAdmin__Email `
+        -e BootstrapAdmin__Password `
+        auth-gate --bootstrap-admin
+}
+finally {
+    Remove-Item Env:BootstrapAdmin__Email -ErrorAction SilentlyContinue
+    Remove-Item Env:BootstrapAdmin__Password -ErrorAction SilentlyContinue
+}
 ```
 
-The command creates the `Admin` role when needed, creates or promotes the configured account, and
-exits. Remove both environment variables from the shell after the command completes.
+Compose passes the two shell variables only to the one-off process. That
+container joins the same Compose network and reuses the AuthGate service
+configuration, so the PostgreSQL hostname `postgres` resolves correctly. It
+does not publish another copy of the AuthGate ports and is removed after the
+command exits.
+
+The command creates the `Admin` role when needed, creates or promotes the
+configured account, and exits. The `finally` block removes both plaintext
+values from the shell even if bootstrap fails.
 
 ## Stop the stack
 
