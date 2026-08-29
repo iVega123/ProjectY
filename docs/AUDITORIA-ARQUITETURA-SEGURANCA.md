@@ -94,10 +94,14 @@ Fechado pelo commit
 [`e0873be`](https://github.com/iVega123/ProjectY/commit/e0873be) (C4, task #21).
 
 ### C5 — A fila é uma fronteira de confiança implícita, e está aberta
-O `userId` que decide de quem é o cadastro e a foto de CNH vem do corpo da mensagem, sem
-assinatura nem verificação. A porta 5672 é publicada no host com `user`/`password`.
-**Impacto:** escrita direta no domínio, sem passar por API, autenticação ou validação.
-`RiderManager/.../MessagingConsumerService.cs:79-122, 171-204` · `docker-compose.yml:81-95`
+**Resolvido.** AuthGate agora publica cadastro e partes da CNH em envelopes versionados com
+tipo, identidade do sujeito, ID, instante, payload e HMAC-SHA256. RiderManager verifica a
+assinatura em tempo constante antes de desserializar, exige que o `UserId` do payload corresponda
+à identidade assinada e rejeita mensagens inválidas sem requeue. Testes cobrem JSON direto sem
+assinatura, divergência de identidade e o fluxo válido. RabbitMQ deixou de publicar AMQP e
+management no host (inclusive via Toxiproxy), e cada serviço recebe credencial própria em vhosts
+isolados com permissões específicas. Fechado pelo commit
+[`b4de324`](https://github.com/iVega123/ProjectY/commit/b4de324) (C5, task #22).
 
 ---
 
