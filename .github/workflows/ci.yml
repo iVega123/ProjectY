@@ -163,8 +163,9 @@ jobs:
 
           if docker run --rm --network none \
             --volume "$canary_file:/scan/canary.txt:ro" \
+            --volume "$GITHUB_WORKSPACE/.gitleaks.toml:/scan/.gitleaks.toml:ro" \
             ghcr.io/gitleaks/gitleaks:v8.30.0@sha256:691af3c7c5a48b16f187ce3446d5f194838f91238f27270ed36eef6359a574d9 \
-            dir --redact=100 --no-banner /scan/canary.txt; then
+            dir --config /scan/.gitleaks.toml --redact=100 --no-banner /scan/canary.txt; then
             echo "::error::Gitleaks accepted the synthetic secret canary."
             exit 1
           fi
