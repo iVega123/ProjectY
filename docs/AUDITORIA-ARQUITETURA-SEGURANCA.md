@@ -37,6 +37,10 @@ por controle de acesso nenhum:
 **Impacto:** controle administrativo completo dos quatro serviços a partir de uma requisição anônima.
 `AuthGate/AuthGate/Controllers/AuthController.cs:47-85`
 
+**Status: closed.** The public endpoint was removed and administrator bootstrap is now an explicit
+CLI operation backed by process environment variables. Closed by commit
+[`fef0c1f`](https://github.com/iVega123/ProjectY/commit/fef0c1feecdfc8314ffa389eac397fa3d638c110) (C1, task #18).
+
 ### C2 — O filtro de administrador do RentalOperations aceita qualquer token válido
 O `AdminAuthorizationFilter` tenta claim de papel, chave de API e, por último, apenas
 `ValidateToken(token)` — que confere só a assinatura. Um Rider passa pelo terceiro caminho.
