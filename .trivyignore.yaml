@@ -1,0 +1,3 @@
+# Vulnerability waivers require the process documented in
+# docs/security/container-image-scanning.md. Trivy enforces each waiver's expiry.
+vulnerabilities: []
