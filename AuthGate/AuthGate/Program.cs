@@ -12,6 +12,7 @@ using AuthGate.Services.RabbitMQ;
 using AuthGate.Services.File;
 using AuthGate.Services;
 using Serilog.Sinks.Elasticsearch;
+using ProjectY.Shared.Messaging;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -40,6 +41,9 @@ builder.Host.UseSerilog();
 
 var rabbitMQConfig = builder.Configuration.GetSection("RabbitMQ").Get<RabbitMQOptions>();
 builder.Services.AddSingleton<RabbitMQOptions>(rabbitMQConfig);
+builder.Services.AddSingleton(new QueueMessageAuthenticator(
+    builder.Configuration["Messaging:SigningKey"]
+        ?? throw new InvalidOperationException("Messaging:SigningKey is not configured.")));
 
 builder.Services.AddSingleton<IConnection>(sp =>
 {
@@ -47,6 +51,7 @@ builder.Services.AddSingleton<IConnection>(sp =>
     var factory = new ConnectionFactory()
     {
         HostName = rabbitMQOptions.HostName,
+        VirtualHost = rabbitMQOptions.VirtualHost,
         UserName = rabbitMQOptions.UserName,
         Password = rabbitMQOptions.Password
     };

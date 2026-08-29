@@ -7,9 +7,11 @@ design scaffold and references services that have not been implemented yet.
 
 ## Safety warning
 
-The baseline still contains known security findings and exposes infrastructure
-services on host ports. Run it only on an isolated development machine. Do not
-expose it to the internet or deploy it to a shared or production environment.
+The baseline still contains known security findings and exposes several
+infrastructure services on host ports. Run it only on an isolated development
+machine. Do not expose it to the internet or deploy it to a shared or
+production environment. RabbitMQ is an exception: it is reachable only from
+the Compose network.
 
 ## Prerequisites
 
@@ -32,7 +34,6 @@ starting.
 | PostgreSQL | `5432` |
 | pgAdmin | `5050` |
 | MongoDB | `27017` |
-| RabbitMQ | `5672`, `15672` |
 | MinIO | `9000`, `9001` |
 
 | Application service | Required host ports |
@@ -51,8 +52,8 @@ host-side mapping in `docker-compose.yml` before starting the stack.
 ## Start the stack
 
 Clone the repository, then create fresh local credentials. The generated `.env`
-is ignored by Git and includes independent JWT signing keys for all four
-services:
+is ignored by Git and includes independent JWT signing keys and RabbitMQ
+credentials for every service:
 
 ```bash
 git clone https://github.com/iVega123/ProjectY.git
@@ -68,7 +69,16 @@ local `.env` already exists, the script refuses to overwrite it. Use `-Force`
 only for an intentional full rotation, and recreate persistent volumes that
 were initialized with the previous database, broker, or storage credentials.
 The PostgreSQL bootstrap creates independent databases for AuthGate,
-RiderManager, and MotoHub so that each EF context owns its schema.
+RiderManager, and MotoHub so that each EF context owns its schema. The same
+command creates an ignored `.rabbitmq-definitions.json` containing salted
+password hashes, isolated vhosts, and service-specific queue permissions. The
+rider and rental message flows use separate vhosts so access to the AMQP
+default exchange cannot cross domain boundaries. Both ignored files are
+required before the first Compose startup.
+
+RabbitMQ does not publish its AMQP or management ports to the host. To inspect
+it locally, run management commands inside the container or attach a temporary
+tool to the Compose network instead of adding a permanent host port mapping.
 
 Then start the stack:
 

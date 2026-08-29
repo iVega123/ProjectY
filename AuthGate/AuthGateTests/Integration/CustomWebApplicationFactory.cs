@@ -37,6 +37,8 @@ namespace AuthGateTests.Integration
 
         protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
+            builder.UseSetting("Messaging:SigningKey", "test-only-queue-signing-key-with-32-bytes");
+
             builder.ConfigureServices(services =>
             {
                 services.AddDataProtection().UseEphemeralDataProtectionProvider();
@@ -82,7 +84,8 @@ namespace AuthGateTests.Integration
                     {"Jwt:Audiences:AuthGate", "projecty.auth-gate"},
                     {"Jwt:SigningKeys:AuthGate", "test-only-auth-gate-key-with-32-bytes"},
                     {"Jwt:Audiences:MotoHub", "projecty.moto-hub"},
-                    {"Jwt:SigningKeys:MotoHub", "test-only-moto-hub-signing-key-0001"}
+                    {"Jwt:SigningKeys:MotoHub", "test-only-moto-hub-signing-key-0001"},
+                    {"Messaging:SigningKey", "test-only-queue-signing-key-with-32-bytes"}
                 };
 
                 configBuilder.Sources.Clear();
