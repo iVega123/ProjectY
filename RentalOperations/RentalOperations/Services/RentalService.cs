@@ -79,7 +79,10 @@ namespace RentalOperations.Services
             
             if (rental == null)
                 throw new KeyNotFoundException($"No rental found with ID {rentalId}");
-            
+
+            if (!string.Equals(rental.UserId, userId, StringComparison.Ordinal))
+                throw new UnauthorizedAccessException("The rental belongs to another rider.");
+
             if (rental.FinalCost > 0)
                 return _mapper.Map<ResponseRentalDTO>(rental);
 
@@ -108,7 +111,6 @@ namespace RentalOperations.Services
             }
 
             response.FinalTotalCost = response.OriginalTotalCost + response.AdditionalCostsOrSavings;
-            response.UserId = userId;
 
             var updateRent = _mapper.Map<Rental>(response);
             await _repository.UpdateRentalAsync(updateRent);

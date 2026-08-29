@@ -97,6 +97,10 @@ namespace RentalOperations.Controllers
                 var response = await _rentalService.CalculateFinalCostAsync(rentalId, userIdClaim.Value, actualEndDate);
                 return Ok(response);
             }
+            catch (UnauthorizedAccessException)
+            {
+                return Forbid();
+            }
             catch (Exception ex)
             {
                 return BadRequest(ex.Message);
