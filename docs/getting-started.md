@@ -73,6 +73,18 @@ Only the HTTP endpoints above are documented as usable. The compose file also
 publishes ports that older documentation described as HTTPS, but it configures
 no certificates or HTTPS listener; the audit records this as finding A4.
 
+## Bootstrap the first administrator
+
+Administrator creation is deliberately unavailable over HTTP. Set `BootstrapAdmin__Email` and
+`BootstrapAdmin__Password` in the process environment, then run AuthGate once in bootstrap mode:
+
+```bash
+dotnet run --project AuthGate/AuthGate -- --bootstrap-admin
+```
+
+The command creates the `Admin` role when needed, creates or promotes the configured account, and
+exits. Remove both environment variables from the shell after the command completes.
+
 ## Stop the stack
 
 Press `Ctrl+C` in the attached Compose session, then run:
