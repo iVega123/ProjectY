@@ -4,13 +4,36 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Configuration;
 using AuthGate.Data;
+using AuthGate.Model;
+using Microsoft.AspNetCore.Identity;
 using Moq;
 using RabbitMQ.Client;
+using Xunit;
 
 namespace AuthGateTests.Integration
 {
     public class CustomWebApplicationFactory<TStartup> : WebApplicationFactory<TStartup> where TStartup : class
     {
+        public async Task CreateAdminAsync(string email, string password)
+        {
+            using var scope = Services.CreateScope();
+            var roleManager = scope.ServiceProvider.GetRequiredService<RoleManager<IdentityRole>>();
+            var userManager = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
+
+            if (!await roleManager.RoleExistsAsync("Admin"))
+            {
+                var roleResult = await roleManager.CreateAsync(new IdentityRole("Admin"));
+                Assert.True(roleResult.Succeeded);
+            }
+
+            var user = new AdminUser { UserName = email, Email = email };
+            var createResult = await userManager.CreateAsync(user, password);
+            Assert.True(createResult.Succeeded);
+
+            var assignmentResult = await userManager.AddToRoleAsync(user, "Admin");
+            Assert.True(assignmentResult.Succeeded);
+        }
+
         protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
             builder.ConfigureServices(services =>

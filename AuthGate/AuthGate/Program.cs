@@ -10,6 +10,7 @@ using AuthGate.Configurations;
 using RabbitMQ.Client;
 using AuthGate.Services.RabbitMQ;
 using AuthGate.Services.File;
+using AuthGate.Services;
 using Serilog.Sinks.Elasticsearch;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -90,6 +91,11 @@ builder.Services.AddAuthentication(options =>
 
 var app = builder.Build();
 
+if (args.Contains("--bootstrap-admin", StringComparer.Ordinal))
+{
+    await AdminBootstrapper.BootstrapAsync(app.Services, app.Configuration, app.Logger);
+    return;
+}
 
 if (app.Environment.IsDevelopment())
 {
