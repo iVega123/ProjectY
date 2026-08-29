@@ -85,6 +85,14 @@ autenticado; na linha 111 faz `response.UserId = userId` antes de gravar.
 **Impacto:** falha de controle de acesso somada a adulteração de dado financeiro.
 `RentalOperations/RentalOperations/Services/RentalService.cs:76-116`
 
+**Status: closed.** `CalculateFinalCostAsync` agora compara o proprietário persistido com o
+`NameIdentifier` autenticado antes de qualquer retorno ou cálculo, e não sobrescreve mais o
+`UserId`. O controller converte a violação em `403`. Testes pelo pipeline HTTP comprovam que um
+rider não consegue finalizar nem ler o resultado já finalizado de outro, que o documento permanece
+inalterado na tentativa e que o proprietário legítimo continua conseguindo finalizar o aluguel.
+Fechado pelo commit
+[`e0873be`](https://github.com/iVega123/ProjectY/commit/e0873be) (C4, task #21).
+
 ### C5 — A fila é uma fronteira de confiança implícita, e está aberta
 O `userId` que decide de quem é o cadastro e a foto de CNH vem do corpo da mensagem, sem
 assinatura nem verificação. A porta 5672 é publicada no host com `user`/`password`.
