@@ -84,6 +84,12 @@ ignored `.env` and `.rabbitmq-definitions.json` files with random local-only
 credentials. Existing files are never overwritten, so later starts preserve
 the same local data credentials.
 
+The two files are one credential set. If exactly one is missing, Tilt stops
+instead of silently rotating the other and desynchronizing persistent volumes.
+To recover intentionally, stop the stack, remove volumes initialized with the
+old credentials, and run
+`powershell -ExecutionPolicy Bypass -File scripts/New-LocalSecrets.ps1 -Force`.
+
 The complete profile adds Cassandra, MongoDB, MinIO, media processing, risk
 pricing, telemetry, and the web console:
 

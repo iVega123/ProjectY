@@ -11,6 +11,20 @@ config.define_bool(
 cfg = config.parse()
 full = cfg.get('full', False)
 
+local_env_exists = os.path.exists('.env')
+rabbitmq_definitions_exist = os.path.exists('.rabbitmq-definitions.json')
+
+if local_env_exists != rabbitmq_definitions_exist:
+    existing_local_file = '.env' if local_env_exists else '.rabbitmq-definitions.json'
+    missing_local_file = '.rabbitmq-definitions.json' if local_env_exists else '.env'
+    partial_credentials_message = (
+        'Partial local credential set: %s exists but %s is missing. Tilt will not ' +
+        'rotate credentials automatically because persistent volumes may still use them. ' +
+        'Stop the stack, remove volumes initialized with the old credentials, then run ' +
+        '`powershell -ExecutionPolicy Bypass -File scripts/New-LocalSecrets.ps1 -Force`.'
+    ) % (existing_local_file, missing_local_file)
+    fail(partial_credentials_message)
+
 required_local_files = ['.env', '.rabbitmq-definitions.json']
 missing_local_files = [path for path in required_local_files if not os.path.exists(path)]
 if missing_local_files and config.tilt_subcommand in ['up', 'ci']:
@@ -37,7 +51,7 @@ if missing_local_files:
     ) % ', '.join(missing_local_files)
     fail(missing_files_message)
 
-profiles = ['full'] if full else []
+profiles = ['init', 'full'] if full else ['init']
 docker_compose(
     'deploy/compose.yaml',
     env_file = '.env',
@@ -45,7 +59,7 @@ docker_compose(
     project_name = 'projecty',
 )
 
-infra_resources = ['cockroachdb', 'redis', 'rabbitmq', 'kafka']
+infra_resources = ['cockroachdb', 'cockroach-init', 'redis', 'rabbitmq', 'kafka']
 observability_resources = ['otel-collector', 'prometheus', 'tempo', 'loki']
 service_resources = ['api-gateway', 'rental-core']
 
