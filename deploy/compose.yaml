@@ -441,6 +441,7 @@ services:
       MEDIA_BIND: 0.0.0.0:8092
       MEDIA_RABBITMQ_URL: "amqp://${MEDIA_GUARD_RABBITMQ_USER:?Set MEDIA_GUARD_RABBITMQ_USER in .env}:${MEDIA_GUARD_RABBITMQ_PASSWORD:?Set MEDIA_GUARD_RABBITMQ_PASSWORD in .env}@toxiproxy:25672/projecty"
       MEDIA_S3_ENDPOINT: http://minio:9000
+      MEDIA_S3_BUCKET: projecty-media
       MEDIA_MAX_BYTES: "8388608"
       RUST_LOG: info,media_guard=debug
     ports:
