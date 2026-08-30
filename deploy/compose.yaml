@@ -11,8 +11,8 @@
 #   full     → soma telemetry (Elixir), risk-pricing (Python), console, Cassandra, Mongo, MinIO
 #   legacy   → soma os quatro serviços .NET originais, para a fase de estrangulamento
 #
-# Subir manualmente (sem Tilt):  docker compose -f deploy/compose.yaml up -d
-# Com os extras:                 docker compose -f deploy/compose.yaml --profile full up -d
+# Subir manualmente (sem Tilt):  docker compose -f deploy/compose.yaml --profile init up -d
+# Com os extras:                 docker compose -f deploy/compose.yaml --profile init --profile full up -d
 
 name: projecty
 
@@ -55,7 +55,8 @@ services:
   cockroachdb:
     image: cockroachdb/cockroach:v24.3.5
     <<: *restart
-    command: start-single-node --insecure --listen-addr=0.0.0.0:26257 --http-addr=0.0.0.0:8080
+    # O entrypoint rejeita --listen-addr customizado; o padrão já atende a rede do container.
+    command: start-single-node --insecure --http-addr=0.0.0.0:8080
     ports:
       - "26257:26257"   # SQL
       - "26080:8080"    # console do Cockroach
@@ -72,9 +73,8 @@ services:
   cockroach-init:
     image: cockroachdb/cockroach:v24.3.5
     profiles: ["init"]
-    entrypoint: ["/bin/bash", "-c"]
-    command: >
-      "cockroach sql --insecure --host=cockroachdb:26257 --file=/sql/001_init.sql"
+    entrypoint: ["cockroach", "sql"]
+    command: ["--insecure", "--host=cockroachdb:26257", "--file=/sql/001_init.sql"]
     volumes:
       - ./db/cockroach:/sql:ro
     networks: [projecty]
@@ -366,6 +366,8 @@ services:
       - "8091:8091"
     networks: [projecty]
     depends_on:
+      cockroach-init:
+        condition: service_completed_successfully
       cockroachdb:
         condition: service_healthy
       kafka:

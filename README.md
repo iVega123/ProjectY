@@ -68,6 +68,47 @@ isolated local environment.
 Database-backed tests use the shared
 [PostgreSQL Testcontainers pattern](docs/testing/testcontainers-postgres.md).
 
+### Modernization development loop
+
+The root [`Tiltfile`](Tiltfile) organizes the topology in
+`deploy/compose.yaml` into infrastructure, observability, service, and failure
+drill groups. It requires Docker Compose v2, Tilt, and PowerShell (`powershell`
+on Windows or `pwsh` on macOS/Linux). Start the core profile with one command:
+
+```bash
+tilt up
+```
+
+On the first run, Tilt invokes `scripts/New-LocalSecrets.ps1` to generate the
+ignored `.env` and `.rabbitmq-definitions.json` files with random local-only
+credentials. Existing files are never overwritten, so later starts preserve
+the same local data credentials.
+
+The two files are one credential set. If exactly one is missing, Tilt stops
+instead of silently rotating the other and desynchronizing persistent volumes.
+To recover intentionally, stop the stack, remove volumes initialized with the
+old credentials, and run
+`powershell -ExecutionPolicy Bypass -File scripts/New-LocalSecrets.ps1 -Force`.
+
+The complete profile adds Cassandra, MongoDB, MinIO, media processing, risk
+pricing, telemetry, and the web console:
+
+```bash
+tilt up -- --full
+```
+
+The Tilt UI is at <http://localhost:10350>, Grafana is at
+<http://localhost:3001>, and the full-profile console is at
+<http://localhost:3000>. Use `tilt down` to stop the selected profile.
+
+There is not yet an honest all-green first-run time to publish. The Compose
+topology references `services/api-gateway`, `services/rental-core`, and the
+full-profile services that have not landed in the repository, so a clean clone
+cannot complete their image builds today. Once those service directories are
+implemented, the first successful cold start must be timed on a clean Docker
+cache and the measured hardware, network conditions, and duration recorded
+here before the modernization loop is presented as runnable.
+
 ## Verify published images
 
 After a change reaches `main`, CI publishes each changed service to GHCR with the
