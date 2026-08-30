@@ -10,7 +10,7 @@ problems**. This repository preserves that real baseline and documents the
 decisions used to redesign it.
 
 **Start with the evidence:** [read the architecture and security audit](docs/AUDITORIA-ARQUITETURA-SEGURANCA.md),
-follow the [ADR consolidation work](https://github.com/iVega123/ProjectY/issues/15),
+then the [architecture decision records](docs/adr/README.md) that answer it,
 or browse the [modernization program](https://github.com/iVega123/ProjectY/issues/2).
 The accompanying [article series](https://github.com/iVega123/ProjectY/issues/13)
 turns the same work into public technical narratives.
@@ -19,16 +19,15 @@ turns the same work into public technical narratives.
 
 | Decision | What was rejected | Why | Decision trail |
 |---|---|---|---|
-| Put rental correctness in the database and use an outbox/inbox around events | Application-only pre-checks, in-memory locks, and claims of transport-level "exactly once" | Those approaches do not protect concurrent writers or the gap between committing data and publishing an event | [Transactional core](https://github.com/iVega123/ProjectY/issues/6) |
-| Establish one edge trust boundary | Four editable copies of token and role validation inside domain services | The copies had already diverged and produced an authorization bypass | [Rust edge gateway](https://github.com/iVega123/ProjectY/issues/7) |
-| Optimize the local feedback loop before adding cloud infrastructure | Premature Kubernetes, manual setup steps, and sleep-based startup ordering | A demonstrable system must start predictably and make source changes cheap | [Local development loop](https://github.com/iVega123/ProjectY/issues/5) |
-| Treat failure tolerance as an observable behavior | Generic retry policies and dashboards that cannot be traced back to a request | Failure claims are credible only when they can be injected, observed, and reproduced | [Observability](https://github.com/iVega123/ProjectY/issues/8) and [fault-tolerance drills](https://github.com/iVega123/ProjectY/issues/9) |
-| Keep deployment variants in overlays and choose dependencies by protocol | Long-lived environment branches and vendor-specific contracts in workloads | Branches drift; protocol boundaries preserve a credible self-hosted path and an ephemeral cloud path | [Local Kubernetes](https://github.com/iVega123/ProjectY/issues/11) and [AWS cost profiles](https://github.com/iVega123/ProjectY/issues/12) |
+| Put rental correctness in the database and use an outbox/inbox around events | Application-only pre-checks, in-memory locks, and claims of transport-level "exactly once" | Those approaches do not protect concurrent writers or the gap between committing data and publishing an event | [ADR 0001](docs/adr/0001-polyglot-technology-choices.md), [ADR 0003](docs/adr/0003-observability-and-fault-tolerance.md) |
+| Establish one edge trust boundary | Four editable copies of token and role validation inside domain services | The copies had already diverged and produced an authorization bypass | [ADR 0008](docs/adr/0008-single-trust-boundary.md) |
+| Optimize the local feedback loop before adding cloud infrastructure | Premature Kubernetes, manual setup steps, and sleep-based startup ordering | A demonstrable system must start predictably and make source changes cheap | [ADR 0002](docs/adr/0002-development-loop-and-containers.md) |
+| Treat failure tolerance as an observable behavior | Generic retry policies and dashboards that cannot be traced back to a request | Failure claims are credible only when they can be injected, observed, and reproduced | [ADR 0003](docs/adr/0003-observability-and-fault-tolerance.md) |
+| Keep deployment variants in overlays and choose dependencies by protocol | Long-lived environment branches and vendor-specific contracts in workloads | Branches drift; protocol boundaries preserve a credible self-hosted path and an ephemeral cloud path | [ADR 0004](docs/adr/0004-cloud-portability-by-protocol.md), [ADR 0005](docs/adr/0005-repository-and-publication-strategy.md) |
 
-These links currently point to the implementation work items. Stable,
-numbered decision records are being assembled under
-[`docs/adr/`](https://github.com/iVega123/ProjectY/issues/15), beginning with
-the audit as ADR 0000.
+Each row links to the record that argues it, including what was rejected and
+at what cost. The full set is indexed in [`docs/adr/`](docs/adr/README.md),
+beginning with the audit as ADR 0000.
 
 ## What the audit changed
 
@@ -53,11 +52,19 @@ source locations are in the
 | Data and messaging | PostgreSQL, MongoDB, RabbitMQ, and MinIO in the original local stack |
 | Original observability | Elasticsearch, Logstash, and Kibana |
 | Modernization scaffold | A container topology under `deploy/` for the planned gateway, transactional core, fault injection, and LGTM observability stack |
-| Decision records | Being normalized and numbered in [issue #15](https://github.com/iVega123/ProjectY/issues/15) |
+| Decision records | Eight records under [`docs/adr/`](docs/adr/README.md): 0000-0005 are the design trail, 0006-0007 are remediation decisions |
 
 The modernization compose file is a design scaffold: it references services
 that have not landed yet. It is deliberately not presented as a working demo.
 The root compose file runs the audited baseline only.
+
+## Branches
+
+`main` carries every deployment variant as an overlay, so a fix lands once.
+Branches named `article/NN-*` are **frozen citations** cut when an article is
+published: they are never maintained and never accept pull requests. Target
+`main` for any change. The reasoning is in
+[ADR 0005](docs/adr/0005-repository-and-publication-strategy.md).
 
 ## Run locally
 
@@ -96,5 +103,5 @@ the scans that run before publication.
 
 - [Epic 1: repository repositioning](https://github.com/iVega123/ProjectY/issues/2)
 - [All modernization epics](https://github.com/iVega123/ProjectY/issues?q=is%3Aissue%20state%3Aopen%20label%3Aepic)
-- [Architecture decision records](https://github.com/iVega123/ProjectY/issues/15)
+- [Architecture decision records](docs/adr/README.md)
 - [Six-part article series](https://github.com/iVega123/ProjectY/issues/13)
