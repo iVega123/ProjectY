@@ -11,8 +11,15 @@ using RabbitMQ.Client;
 using AuthGate.Services.RabbitMQ;
 using AuthGate.Services.File;
 using AuthGate.Services;
+using Npgsql;
+using ProjectY.Shared.Health;
 using Serilog.Sinks.Elasticsearch;
 using ProjectY.Shared.Messaging;
+
+if (await HealthProbeCommand.TryRunAsync(args))
+{
+    return;
+}
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -41,6 +48,12 @@ builder.Host.UseSerilog();
 
 var rabbitMQConfig = builder.Configuration.GetSection("RabbitMQ").Get<RabbitMQOptions>();
 builder.Services.AddSingleton<RabbitMQOptions>(rabbitMQConfig);
+var postgresConnection = new NpgsqlConnectionStringBuilder(
+    builder.Configuration.GetConnectionString("Postgresql") ?? "Host=postgres;Port=5432");
+builder.Services
+    .AddProjectYHealthChecks()
+    .AddTcpDependency("postgres", postgresConnection.Host ?? "postgres", postgresConnection.Port)
+    .AddTcpDependency("rabbitmq", rabbitMQConfig?.HostName ?? "rabbitmq", 5672);
 builder.Services.AddSingleton(new QueueMessageAuthenticator(
     builder.Configuration["Messaging:SigningKey"]
         ?? throw new InvalidOperationException("Messaging:SigningKey is not configured.")));
@@ -120,6 +133,7 @@ app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapControllers();
+app.MapProjectYHealthChecks();
 
 app.Run();
 

@@ -6,6 +6,7 @@ RUN dotnet restore RiderManager/RiderManager/RiderManager.csproj
 
 FROM restore AS publish
 COPY RiderManager/ RiderManager/RiderManager/
+COPY --from=shared Health/ Shared/Health/
 COPY --from=shared Messaging/ Shared/Messaging/
 RUN dotnet publish RiderManager/RiderManager/RiderManager.csproj \
     --configuration Release \

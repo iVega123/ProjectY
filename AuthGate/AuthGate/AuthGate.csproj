@@ -29,6 +29,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Compile Include="..\..\Shared\Health\ServiceHealthChecks.cs" Link="Shared\Health\ServiceHealthChecks.cs" />
     <Compile Include="..\..\Shared\Messaging\QueueMessageAuthenticator.cs" Link="Shared\Messaging\QueueMessageAuthenticator.cs" />
   </ItemGroup>
   

@@ -25,4 +25,8 @@
     <PackageReference Include="Swashbuckle.AspNetCore" Version="6.5.0" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Compile Include="..\..\Shared\Health\ServiceHealthChecks.cs" Link="Shared\Health\ServiceHealthChecks.cs" />
+  </ItemGroup>
+
 </Project>
