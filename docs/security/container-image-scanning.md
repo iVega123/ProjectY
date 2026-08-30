@@ -5,6 +5,30 @@ AuthGate, MotoHub, RentalOperations, and RiderManager. A change to the CI workfl
 builds all four. References in `deploy/compose.yaml` whose build contexts do not yet
 exist are outside this gate until their Dockerfiles are added.
 
+Each current image uses its service directory as the primary build context. AuthGate
+and RiderManager receive `Shared/` as a separate, read-only BuildKit named context,
+so the repository root and `.git/` are never sent to either build. The equivalent
+standalone commands are:
+
+```bash
+docker build --build-context shared=./Shared -f AuthGate/AuthGate/Dockerfile -t projecty/auth-gate AuthGate
+docker build -f MotoHub/MotoHub/Dockerfile -t projecty/moto-hub MotoHub
+docker build -f RentalOperations/RentalOperations/Dockerfile -t projecty/rental-operations RentalOperations
+docker build --build-context shared=./Shared -f RiderManager/RiderManager/Dockerfile -t projecty/rider-manager RiderManager
+```
+
+Local Linux/amd64 measurements after the chiseled-runtime rewrite:
+
+| Image | Local image size |
+|---|---:|
+| AuthGate | 67.1 MiB |
+| MotoHub | 65.7 MiB |
+| RentalOperations | 80.0 MiB |
+| RiderManager | 66.4 MiB |
+
+All four final images run as the built-in non-root `app` user and declare an
+exec-form `ENTRYPOINT`; Compose supplies no application command.
+
 For each image, CI:
 
 1. builds a Linux/amd64 OCI layout with a BuildKit SPDX SBOM attestation;

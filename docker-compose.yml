@@ -107,9 +107,11 @@ services:
     command: server /data --console-address ":9001"
 
   auth-gate:
-    build: 
-      context: .
-      dockerfile: AuthGate/AuthGate/Dockerfile
+    build:
+      context: ./AuthGate
+      dockerfile: AuthGate/Dockerfile
+      additional_contexts:
+        shared: ./Shared
     container_name: auth-gate
     ports:
       - "8080:8080"
@@ -128,9 +130,11 @@ services:
       Jwt__SigningKeys__RentalOperations: "${RENTAL_OPERATIONS_JWT_SIGNING_KEY:?Set RENTAL_OPERATIONS_JWT_SIGNING_KEY in .env}"
   
   rider-manager:
-    build: 
-      context: .
-      dockerfile: RiderManager/RiderManager/Dockerfile
+    build:
+      context: ./RiderManager
+      dockerfile: RiderManager/Dockerfile
+      additional_contexts:
+        shared: ./Shared
     container_name: rider-manager
     ports:
       - "8000:8000"
@@ -150,13 +154,11 @@ services:
       RiderManagerApiKey: "${RIDER_MANAGER_API_KEY:?Set RIDER_MANAGER_API_KEY in .env}"
     depends_on:
       - rabbitmq
-    
-    command: ["sh", "-c", "sleep 20 && dotnet RiderManager.dll"]
 
   moto-hub:
-    build: 
-      context: .
-      dockerfile: MotoHub/MotoHub/Dockerfile
+    build:
+      context: ./MotoHub
+      dockerfile: MotoHub/Dockerfile
     container_name: moto-hub
     ports:
       - "8100:8100"
@@ -174,9 +176,9 @@ services:
       RentalOperationsSettings__ApiKey: "${RENTAL_OPERATIONS_API_KEY:?Set RENTAL_OPERATIONS_API_KEY in .env}"
   
   rental-operations:
-    build: 
-      context: .
-      dockerfile: RentalOperations/RentalOperations/Dockerfile
+    build:
+      context: ./RentalOperations
+      dockerfile: RentalOperations/Dockerfile
     container_name: rental-operations
     ports:
       - "8200:8200"
@@ -196,7 +198,6 @@ services:
       MotoHubSettings__ApiKey: "${MOTO_HUB_API_KEY:?Set MOTO_HUB_API_KEY in .env}"
     depends_on:
       - rabbitmq
-    command: ["sh", "-c", "sleep 20 && dotnet RentalOperations.dll"]
 
 networks:
   elk:

@@ -1,25 +1,21 @@
-#See https://aka.ms/customizecontainer to learn how to customize your debug container and how Visual Studio uses this Dockerfile to build your images for faster debugging.
-
-FROM mcr.microsoft.com/dotnet/aspnet:8.0-alpine AS base
-USER app
-WORKDIR /app
-EXPOSE 8000
-EXPOSE 8001
-
-FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
-ARG BUILD_CONFIGURATION=Release
+FROM mcr.microsoft.com/dotnet/sdk:8.0 AS restore
 WORKDIR /src
-COPY ["RiderManager/RiderManager/RiderManager.csproj", "RiderManager/"]
-RUN dotnet restore "./RiderManager/RiderManager.csproj"
-COPY . .
-WORKDIR "/src/RiderManager"
-RUN dotnet build "./RiderManager/RiderManager.csproj" -c $BUILD_CONFIGURATION -o /app/build
 
-FROM build AS publish
-ARG BUILD_CONFIGURATION=Release
-RUN dotnet publish "./RiderManager/RiderManager.csproj" -c $BUILD_CONFIGURATION -o /app/publish /p:UseAppHost=false
+COPY RiderManager/RiderManager.csproj RiderManager/RiderManager/
+RUN dotnet restore RiderManager/RiderManager/RiderManager.csproj
 
-FROM base AS final
+FROM restore AS publish
+COPY RiderManager/ RiderManager/RiderManager/
+COPY --from=shared Messaging/ Shared/Messaging/
+RUN dotnet publish RiderManager/RiderManager/RiderManager.csproj \
+    --configuration Release \
+    --output /app/publish \
+    --no-restore \
+    /p:UseAppHost=false
+
+FROM mcr.microsoft.com/dotnet/aspnet:8.0-jammy-chiseled-extra AS final
 WORKDIR /app
-COPY --from=publish /app/publish .
-#ENTRYPOINT ["dotnet", "RiderManager.dll"]
+COPY --chown=app:app --from=publish /app/publish ./
+USER app
+EXPOSE 8000
+ENTRYPOINT ["dotnet", "RiderManager.dll"]
