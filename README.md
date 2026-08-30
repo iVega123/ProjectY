@@ -70,10 +70,12 @@ Database-backed tests use the shared
 
 ### Modernization development loop
 
-The root [`Tiltfile`](Tiltfile) organizes the topology in
-`deploy/compose.yaml` into infrastructure, observability, service, and failure
-drill groups. It requires Docker Compose v2, Tilt, and PowerShell (`powershell`
-on Windows or `pwsh` on macOS/Linux). Start the core profile with one command:
+The root [`Tiltfile`](Tiltfile) organizes the self-hosted overlay at
+`deploy/overlays/selfhost/compose.yaml` into infrastructure, observability,
+service, and failure drill groups. The overlay composes the environment-neutral
+model in `deploy/base/` with local build, port, mount, and runtime settings. It
+requires Docker Compose 2.20 or newer, Tilt, and PowerShell (`powershell` on
+Windows or `pwsh` on macOS/Linux). Start the core profile with one command:
 
 ```bash
 tilt up

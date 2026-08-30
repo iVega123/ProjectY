@@ -2,8 +2,9 @@
 
 The root CI workflow builds every changed service that currently has a Dockerfile:
 AuthGate, MotoHub, RentalOperations, and RiderManager. A change to the CI workflow
-builds all four. References in `deploy/compose.yaml` whose build contexts do not yet
-exist are outside this gate until their Dockerfiles are added.
+builds all four. References in `deploy/overlays/selfhost/compose.yaml` whose
+build contexts do not yet exist are outside this gate until their Dockerfiles
+are added.
 
 Each current image uses its service directory as the primary build context. All four
 receive `Shared/` as a separate, read-only BuildKit named context, so the repository

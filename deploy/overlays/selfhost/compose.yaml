@@ -1,0 +1,10 @@
+# The self-hosted entrypoint deliberately points at an overlay, not at the
+# canonical base. Compose 2.20+ resolves both files with deploy/ as their shared
+# project directory before importing the merged application model.
+name: projecty
+
+include:
+  - path:
+      - ../../base/compose.yaml
+      - compose.override.yaml
+    project_directory: ../..
