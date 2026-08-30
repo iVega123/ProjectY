@@ -1,25 +1,20 @@
-#See https://aka.ms/customizecontainer to learn how to customize your debug container and how Visual Studio uses this Dockerfile to build your images for faster debugging.
-
-FROM mcr.microsoft.com/dotnet/aspnet:8.0-alpine AS base
-USER app
-WORKDIR /app
-EXPOSE 8200
-EXPOSE 8201
-
-FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
-ARG BUILD_CONFIGURATION=Release
+FROM mcr.microsoft.com/dotnet/sdk:8.0 AS restore
 WORKDIR /src
-COPY ["RentalOperations/RentalOperations/RentalOperations.csproj", "RentalOperations/"]
-RUN dotnet restore "./RentalOperations/RentalOperations.csproj"
-COPY . .
-WORKDIR "/src/RentalOperations"
-RUN dotnet build "./RentalOperations/RentalOperations.csproj" -c $BUILD_CONFIGURATION -o /app/build
 
-FROM build AS publish
-ARG BUILD_CONFIGURATION=Release
-RUN dotnet publish "./RentalOperations/RentalOperations.csproj" -c $BUILD_CONFIGURATION -o /app/publish /p:UseAppHost=false
+COPY RentalOperations/RentalOperations.csproj RentalOperations/RentalOperations/
+RUN dotnet restore RentalOperations/RentalOperations/RentalOperations.csproj
 
-FROM base AS final
+FROM restore AS publish
+COPY RentalOperations/ RentalOperations/RentalOperations/
+RUN dotnet publish RentalOperations/RentalOperations/RentalOperations.csproj \
+    --configuration Release \
+    --output /app/publish \
+    --no-restore \
+    /p:UseAppHost=false
+
+FROM mcr.microsoft.com/dotnet/aspnet:8.0-jammy-chiseled-extra AS final
 WORKDIR /app
-COPY --from=publish /app/publish .
-#ENTRYPOINT ["dotnet", "RentalOperations.dll"]
+COPY --chown=app:app --from=publish /app/publish ./
+USER app
+EXPOSE 8200
+ENTRYPOINT ["dotnet", "RentalOperations.dll"]
