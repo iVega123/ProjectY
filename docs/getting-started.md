@@ -170,6 +170,33 @@ from rotation. Inter-service HTTP upstreams are deliberately excluded from
 readiness: a circuit breaker opening for one upstream must not disable unrelated
 routes served by the same process.
 
+## Verify startup gates
+
+The modernization Compose graph waits for real health instead of elapsed time.
+Tempo and Loki become healthy first, followed by the OpenTelemetry Collector,
+Prometheus, and Grafana. Application services wait for a healthy collector and
+for each infrastructure dependency they use through Toxiproxy.
+
+The observability portion can be exercised before the modernization service
+builds land:
+
+```bash
+docker compose --env-file .env -f deploy/compose.yaml up --build -d \
+  tempo loki otel-collector prometheus grafana toxiproxy
+docker compose --env-file .env -f deploy/compose.yaml ps
+
+# Dependents must retain their container IDs and return to all-green.
+docker compose --env-file .env -f deploy/compose.yaml ps -q \
+  otel-collector prometheus grafana
+docker compose --env-file .env -f deploy/compose.yaml restart loki
+docker compose --env-file .env -f deploy/compose.yaml ps -q \
+  otel-collector prometheus grafana
+```
+
+The IDs before and after the Loki restart must match. Compose health conditions
+gate initial startup only; they do not cascade a dependency restart into healthy
+dependents. No fixed delay is used anywhere in `deploy/compose.yaml`.
+
 ## Stop the stack
 
 Press `Ctrl+C` in the attached Compose session, then run:

@@ -16,15 +16,11 @@
 
 name: projecty
 
-x-observed: &observed
-  environment: &otel-env
-    OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
-    OTEL_EXPORTER_OTLP_PROTOCOL: grpc
-    OTEL_TRACES_SAMPLER: parentbased_traceidratio
-    OTEL_TRACES_SAMPLER_ARG: "1.0"
-  depends_on:
-    otel-collector:
-      condition: service_started
+x-otel-env: &otel-env
+  OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+  OTEL_EXPORTER_OTLP_PROTOCOL: grpc
+  OTEL_TRACES_SAMPLER: parentbased_traceidratio
+  OTEL_TRACES_SAMPLER_ARG: "1.0"
 
 x-restart: &restart
   restart: unless-stopped
@@ -221,7 +217,7 @@ services:
       - ./chaos/toxiproxy.json:/config/toxiproxy.json:ro
     networks: [projecty]
     healthcheck:
-      test: ["CMD-SHELL", "/toxiproxy-cli list >/dev/null 2>&1"]
+      test: ["CMD", "/toxiproxy-cli", "list"]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -231,7 +227,10 @@ services:
   # ─────────────────────────────────────────────────────────────────────────
 
   otel-collector:
-    image: otel/opentelemetry-collector-contrib:0.121.0
+    image: projecty/otel-collector
+    build:
+      context: ./observability
+      dockerfile: otel-collector.Dockerfile
     <<: *restart
     command: ["--config=/etc/otel/config.yaml"]
     ports:
@@ -242,8 +241,16 @@ services:
       - ./observability/otel-collector.yaml:/etc/otel/config.yaml:ro
     networks: [projecty]
     depends_on:
-      - tempo
-      - loki
+      tempo:
+        condition: service_healthy
+      loki:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/busybox", "wget", "--spider", "-q", "http://localhost:13133/"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
 
   prometheus:
     image: prom/prometheus:v3.2.1
@@ -261,6 +268,15 @@ services:
       - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus-data:/prometheus
     networks: [projecty]
+    depends_on:
+      otel-collector:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/bin/wget", "--spider", "-q", "http://localhost:9090/-/ready"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
 
   tempo:
     image: grafana/tempo:2.7.1
@@ -272,6 +288,12 @@ services:
       - ./observability/tempo.yaml:/etc/tempo/tempo.yaml:ro
       - tempo-data:/var/tempo
     networks: [projecty]
+    healthcheck:
+      test: ["CMD", "/usr/bin/wget", "--spider", "-q", "http://localhost:3200/ready"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
 
   loki:
     image: grafana/loki:3.4.2
@@ -283,6 +305,12 @@ services:
       - ./observability/loki.yaml:/etc/loki/loki.yaml:ro
       - loki-data:/loki
     networks: [projecty]
+    healthcheck:
+      test: ["CMD", "/busybox/wget", "--spider", "-q", "http://localhost:3100/ready"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
 
   grafana:
     image: grafana/grafana:11.6.0
@@ -301,9 +329,18 @@ services:
       - grafana-data:/var/lib/grafana
     networks: [projecty]
     depends_on:
-      - prometheus
-      - tempo
-      - loki
+      prometheus:
+        condition: service_healthy
+      tempo:
+        condition: service_healthy
+      loki:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/usr/bin/wget", "--spider", "-q", "http://localhost:3000/api/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
 
   # ─────────────────────────────────────────────────────────────────────────
   # Serviços — núcleo
@@ -333,9 +370,9 @@ services:
       redis:
         condition: service_healthy
       toxiproxy:
-        condition: service_started
+        condition: service_healthy
       otel-collector:
-        condition: service_started
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "/app/api-gateway", "--healthcheck"]
       interval: 10s
@@ -374,6 +411,12 @@ services:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
+      redis:
+        condition: service_healthy
+      toxiproxy:
+        condition: service_healthy
+      otel-collector:
+        condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:8091/health/ready >/dev/null 2>&1"]
       interval: 10s
@@ -406,6 +449,12 @@ services:
     depends_on:
       rabbitmq:
         condition: service_healthy
+      minio:
+        condition: service_healthy
+      toxiproxy:
+        condition: service_healthy
+      otel-collector:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "/app/media-guard", "--healthcheck"]
       interval: 10s
@@ -431,6 +480,10 @@ services:
     networks: [projecty]
     depends_on:
       kafka:
+        condition: service_healthy
+      toxiproxy:
+        condition: service_healthy
+      otel-collector:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8093/health/ready').status==200 else 1)\""]
@@ -458,6 +511,12 @@ services:
     depends_on:
       cassandra:
         condition: service_healthy
+      kafka:
+        condition: service_healthy
+      toxiproxy:
+        condition: service_healthy
+      otel-collector:
+        condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:4000/health/ready >/dev/null 2>&1"]
       interval: 10s
@@ -484,7 +543,12 @@ services:
       - "3000:3000"
     networks: [projecty]
     depends_on:
-      - api-gateway
+      api-gateway:
+        condition: service_healthy
+      telemetry:
+        condition: service_healthy
+      otel-collector:
+        condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:3000/api/health >/dev/null 2>&1"]
       interval: 10s
@@ -509,3 +573,8 @@ services:
     volumes:
       - ../load/k6:/scripts:ro
     networks: [projecty]
+    depends_on:
+      api-gateway:
+        condition: service_healthy
+      prometheus:
+        condition: service_healthy
