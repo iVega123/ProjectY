@@ -47,6 +47,7 @@ jobs:
               - 'NuGet.config'
             moto_hub:
               - 'MotoHub/**'
+              - 'Shared/Health/**'
               - '.github/workflows/ci.yml'
               - '.grype.yaml'
               - '.trivyignore.yaml'
@@ -56,6 +57,7 @@ jobs:
               - 'NuGet.config'
             rental_operations:
               - 'RentalOperations/**'
+              - 'Shared/Health/**'
               - '.github/workflows/ci.yml'
               - '.grype.yaml'
               - '.trivyignore.yaml'
