@@ -20,7 +20,7 @@ turns the same work into public technical narratives.
 | Decision | What was rejected | Why | Decision trail |
 |---|---|---|---|
 | Put rental correctness in the database and use an outbox/inbox around events | Application-only pre-checks, in-memory locks, and claims of transport-level "exactly once" | Those approaches do not protect concurrent writers or the gap between committing data and publishing an event | [ADR 0001](docs/adr/0001-polyglot-technology-choices.md), [ADR 0003](docs/adr/0003-observability-and-fault-tolerance.md) |
-| Establish one edge trust boundary | Four editable copies of token and role validation inside domain services | The copies had already diverged and produced an authorization bypass | [ADR 0001](docs/adr/0001-polyglot-technology-choices.md) |
+| Establish one edge trust boundary | Four editable copies of token and role validation inside domain services | The copies had already diverged and produced an authorization bypass | [ADR 0008](docs/adr/0008-single-trust-boundary.md) |
 | Optimize the local feedback loop before adding cloud infrastructure | Premature Kubernetes, manual setup steps, and sleep-based startup ordering | A demonstrable system must start predictably and make source changes cheap | [ADR 0002](docs/adr/0002-development-loop-and-containers.md) |
 | Treat failure tolerance as an observable behavior | Generic retry policies and dashboards that cannot be traced back to a request | Failure claims are credible only when they can be injected, observed, and reproduced | [ADR 0003](docs/adr/0003-observability-and-fault-tolerance.md) |
 | Keep deployment variants in overlays and choose dependencies by protocol | Long-lived environment branches and vendor-specific contracts in workloads | Branches drift; protocol boundaries preserve a credible self-hosted path and an ephemeral cloud path | [ADR 0004](docs/adr/0004-cloud-portability-by-protocol.md), [ADR 0005](docs/adr/0005-repository-and-publication-strategy.md) |
@@ -57,6 +57,14 @@ source locations are in the
 The modernization compose file is a design scaffold: it references services
 that have not landed yet. It is deliberately not presented as a working demo.
 The root compose file runs the audited baseline only.
+
+## Branches
+
+`main` carries every deployment variant as an overlay, so a fix lands once.
+Branches named `article/NN-*` are **frozen citations** cut when an article is
+published: they are never maintained and never accept pull requests. Target
+`main` for any change. The reasoning is in
+[ADR 0005](docs/adr/0005-repository-and-publication-strategy.md).
 
 ## Run locally
 

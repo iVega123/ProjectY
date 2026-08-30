@@ -18,12 +18,15 @@ is what separates a decision from a preference.
 | [0005](0005-repository-and-publication-strategy.md) | Variants are overlays; branches are citations | Why there is no branch per cloud, and how cost profiles are chosen |
 | [0006](0006-secret-loading-and-jwt-boundaries.md) | Secret loading and JWT trust boundaries | How finding C3 was closed |
 | [0007](0007-authenticated-queue-boundary.md) | Authenticate domain-writing queue messages | How finding C5 was closed |
+| [0008](0008-single-trust-boundary.md) | One trust boundary, at the edge | Why domain services stop parsing tokens, and what is traded for it |
 
 ## Reading order
 
-Records 0000–0005 are the design trail and read in sequence. Records 0006 and
-onward are remediation decisions taken while closing individual findings, and
-read on their own.
+Records 0000–0005 are the design trail and read in sequence. ADR 0008 belongs
+to that trail but was written later, after review showed the trust-boundary
+decision was implied everywhere and recorded nowhere; read it after 0001.
+Records 0006 and 0007 are remediation decisions taken while closing individual
+findings, and read on their own. Numbers are never reused or reassigned.
 
 The full findings list, with remediation status and the commit that closed each
 one, lives in

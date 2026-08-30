@@ -45,10 +45,22 @@ Fault tolerance, per layer:
 - **Process:** three probes, and graceful shutdown that drains in-flight
   requests and flushes telemetry before exiting.
 
-**The declared degradation table is the contract.** For each dependency: what
-stops, what continues. Written before implementing, it is true; written
-afterwards, it is optimistic fiction. Every degraded path increments a distinct
-metric, so degradation is visible rather than silent.
+**The declared degradation table is the contract.** Written before implementing,
+it is true; written afterwards, it is optimistic fiction. Every degraded path
+increments a distinct metric, so degradation is visible rather than silent.
+
+| Dependency down | Stops | Continues |
+|---|---|---|
+| Redis | Rate limiting and the read cache | Everything, with a degradation counter rising |
+| Risk and pricing | Demand-based pricing | Rentals close on the fixed daily rate |
+| Live tracking | The live map | Last known position, served from Redis |
+| Read projections | Pre-built documents | Reads fall back to the primary store, slower |
+| Kafka | Event propagation | Transactional writes continue; the outbox drains on recovery |
+| Cassandra | Trip history | Current position and rental creation |
+| Primary database | Rental creation and closure | Reads from projections; everything else refuses fast with `Retry-After` |
+
+Fallbacks are explicit code paths, not accidents of exception handling. A row
+reading "unknown" is a defect, not an omission.
 
 Two dependencies fail in deliberately opposite directions. Rate limiting **fails
 open** — without Redis the request passes and a degradation counter rises,
