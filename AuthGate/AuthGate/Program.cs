@@ -13,6 +13,7 @@ using AuthGate.Services.File;
 using AuthGate.Services;
 using Npgsql;
 using ProjectY.Shared.Health;
+using ProjectY.Shared.Hosting;
 using Serilog.Sinks.Elasticsearch;
 using ProjectY.Shared.Messaging;
 
@@ -118,14 +119,11 @@ if (args.Contains("--bootstrap-admin", StringComparer.Ordinal))
     return;
 }
 
-if (app.Environment.IsDevelopment())
+if (SwaggerPolicy.IsEnabled(app.Environment, app.Configuration))
 {
     app.UseSwagger();
     app.UseSwaggerUI();
 }
-
-app.UseSwagger();
-app.UseSwaggerUI();
 
 app.UseHttpsRedirection();
 

@@ -16,6 +16,7 @@ using MotoHub.Services.RabbitMQ;
 using MotoHub.CrossCutting;
 using Npgsql;
 using ProjectY.Shared.Health;
+using ProjectY.Shared.Hosting;
 
 if (await HealthProbeCommand.TryRunAsync(args))
 {
@@ -132,7 +133,7 @@ builder.Services.AddSwaggerGen(c =>
 
 var app = builder.Build();
 
-if (app.Environment.IsDevelopment())
+if (SwaggerPolicy.IsEnabled(app.Environment, app.Configuration))
 {
     app.UseSwagger();
     app.UseSwaggerUI();

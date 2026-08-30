@@ -3,6 +3,7 @@ using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using MongoDB.Driver;
 using ProjectY.Shared.Health;
+using ProjectY.Shared.Hosting;
 using RentalOperations.Configurations;
 using RentalOperations.CrossCutting.Services;
 using RentalOperations.Data;
@@ -119,7 +120,7 @@ builder.Services.AddScoped<IRentalService, RentalService>();
 
 var app = builder.Build();
 
-if (app.Environment.IsDevelopment())
+if (SwaggerPolicy.IsEnabled(app.Environment, app.Configuration))
 {
     app.UseSwagger();
     app.UseSwaggerUI();
