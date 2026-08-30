@@ -46,17 +46,50 @@ function Invoke-Compose {
     }
 }
 
+function Get-OrderedMigration {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Directory,
+
+        [Parameter(Mandatory = $true)]
+        [string]$Extension
+    )
+
+    $migrations = @(
+        Get-ChildItem -LiteralPath $Directory -File |
+            Where-Object { $_.Extension -eq $Extension } |
+            Sort-Object -Property Name
+    )
+    if ($migrations.Count -eq 0) {
+        throw "No $Extension migrations were found in $Directory."
+    }
+
+    return $migrations
+}
+
 Push-Location $repositoryRoot
 try {
     switch ($Resource) {
         'Cockroach' {
-            Invoke-Compose -Arguments @('run', '--rm', '--no-deps', 'cockroach-init')
+            $migrations = @(Get-OrderedMigration -Directory 'deploy/db/cockroach' -Extension '.sql')
+            foreach ($migration in $migrations) {
+                Write-Host "Applying Cockroach migration $($migration.Name)..."
+                Invoke-Compose -Arguments @(
+                    'run', '--rm', '--no-deps', 'cockroach-init',
+                    '--insecure', '--host=cockroachdb:26257',
+                    "--file=/sql/$($migration.Name)"
+                )
+            }
         }
         'Cassandra' {
-            Invoke-Compose -Arguments @(
-                'exec', '-T', 'cassandra',
-                'cqlsh', '-f', '/schema/001_init.cql'
-            )
+            $migrations = @(Get-OrderedMigration -Directory 'deploy/db/cassandra' -Extension '.cql')
+            foreach ($migration in $migrations) {
+                Write-Host "Applying Cassandra migration $($migration.Name)..."
+                Invoke-Compose -Arguments @(
+                    'exec', '-T', 'cassandra',
+                    'cqlsh', '-f', "/schema/$($migration.Name)"
+                )
+            }
         }
         'Kafka' {
             $topics = Get-Content -LiteralPath 'deploy/kafka/topics.txt' |

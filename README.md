@@ -107,7 +107,9 @@ runs `cassandra-schema` and `minio-buckets`. Each resource waits for its backing
 service to become ready and can be triggered again safely from the Tilt UI.
 Cockroach and Cassandra watch the scripts under `deploy/db/`, while Kafka and
 MinIO use the declarative lists in `deploy/kafka/topics.txt` and
-`deploy/minio/buckets.txt`.
+`deploy/minio/buckets.txt`. Schema files run one at a time in lexical filename
+order, so migrations use numbered names such as `002_add_index.sql` and remain
+safe to re-run.
 
 When a modernization service directory lands under `services/`, its source is
 synced into `/workspace` instead of rebuilding the image. Dependency manifests
