@@ -6,6 +6,7 @@ RUN dotnet restore MotoHub/MotoHub/MotoHub.csproj
 
 FROM restore AS publish
 COPY MotoHub/ MotoHub/MotoHub/
+COPY --from=shared Health/ Shared/Health/
 RUN dotnet publish MotoHub/MotoHub/MotoHub.csproj \
     --configuration Release \
     --output /app/publish \

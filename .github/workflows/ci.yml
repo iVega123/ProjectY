@@ -47,6 +47,7 @@ jobs:
               - 'NuGet.config'
             moto_hub:
               - 'MotoHub/**'
+              - 'Shared/Health/**'
               - '.github/workflows/ci.yml'
               - '.grype.yaml'
               - '.trivyignore.yaml'
@@ -56,6 +57,7 @@ jobs:
               - 'NuGet.config'
             rental_operations:
               - 'RentalOperations/**'
+              - 'Shared/Health/**'
               - '.github/workflows/ci.yml'
               - '.grype.yaml'
               - '.trivyignore.yaml'
@@ -114,10 +116,10 @@ jobs:
             add_service "AuthGate" "AuthGate/AuthGate.sln" "auth-gate" "AuthGate" "AuthGate/AuthGate/Dockerfile" "ghcr.io/ivega123/projecty/auth-gate" "shared=./Shared"
           fi
           if [[ "$MOTO_HUB_CHANGED" == "true" ]]; then
-            add_service "MotoHub" "MotoHub/MotoHub.sln" "moto-hub" "MotoHub" "MotoHub/MotoHub/Dockerfile" "ghcr.io/ivega123/projecty/moto-hub"
+            add_service "MotoHub" "MotoHub/MotoHub.sln" "moto-hub" "MotoHub" "MotoHub/MotoHub/Dockerfile" "ghcr.io/ivega123/projecty/moto-hub" "shared=./Shared"
           fi
           if [[ "$RENTAL_OPERATIONS_CHANGED" == "true" ]]; then
-            add_service "RentalOperations" "RentalOperations/RentalOperations.sln" "rental-operations" "RentalOperations" "RentalOperations/RentalOperations/Dockerfile" "ghcr.io/ivega123/projecty/rental-operations"
+            add_service "RentalOperations" "RentalOperations/RentalOperations.sln" "rental-operations" "RentalOperations" "RentalOperations/RentalOperations/Dockerfile" "ghcr.io/ivega123/projecty/rental-operations" "shared=./Shared"
           fi
           if [[ "$RIDER_MANAGER_CHANGED" == "true" ]]; then
             add_service "RiderManager" "RiderManager/RiderManager.sln" "rider-manager" "RiderManager" "RiderManager/RiderManager/Dockerfile" "ghcr.io/ivega123/projecty/rider-manager" "shared=./Shared"

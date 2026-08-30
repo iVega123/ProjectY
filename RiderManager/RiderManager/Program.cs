@@ -17,8 +17,15 @@ using RiderManager.Services.MinioStorageService;
 using RiderManager.Managers;
 using RiderManager.Services.PreSignedService;
 using RiderManager.Services;
+using Npgsql;
+using ProjectY.Shared.Health;
 using Serilog.Sinks.Elasticsearch;
 using ProjectY.Shared.Messaging;
+
+if (await HealthProbeCommand.TryRunAsync(args))
+{
+    return;
+}
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -33,6 +40,13 @@ builder.Services.AddMinio(configureClient => configureClient
 var rabbitMQConfig = builder.Configuration.GetSection("RabbitMQ").Get<RabbitMQOptions>();
 builder.Services.AddSingleton<RabbitMQOptions>(rabbitMQConfig);
 builder.Services.Configure<RabbitMQOptions>(builder.Configuration.GetSection("RabbitMQ"));
+var postgresConnection = new NpgsqlConnectionStringBuilder(
+    builder.Configuration.GetConnectionString("Postgresql") ?? "Host=postgres;Port=5432");
+builder.Services
+    .AddProjectYHealthChecks()
+    .AddTcpDependency("postgres", postgresConnection.Host ?? "postgres", postgresConnection.Port)
+    .AddTcpDependency("rabbitmq", rabbitMQConfig?.HostName ?? "rabbitmq", 5672)
+    .AddTcpDependency("minio", minioConfig?.Endpoint ?? "minio", 9000);
 builder.Services.AddSingleton(new QueueMessageAuthenticator(
     builder.Configuration["Messaging:SigningKey"]
         ?? throw new InvalidOperationException("Messaging:SigningKey is not configured.")));
@@ -135,5 +149,6 @@ app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapControllers();
+app.MapProjectYHealthChecks();
 
 app.Run();

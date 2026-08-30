@@ -134,6 +134,12 @@ services:
       Jwt__SigningKeys__MotoHub: "${MOTO_HUB_JWT_SIGNING_KEY:?Set MOTO_HUB_JWT_SIGNING_KEY in .env}"
       Jwt__SigningKeys__RiderManager: "${RIDER_MANAGER_JWT_SIGNING_KEY:?Set RIDER_MANAGER_JWT_SIGNING_KEY in .env}"
       Jwt__SigningKeys__RentalOperations: "${RENTAL_OPERATIONS_JWT_SIGNING_KEY:?Set RENTAL_OPERATIONS_JWT_SIGNING_KEY in .env}"
+    healthcheck:
+      test: ["CMD", "dotnet", "AuthGate.dll", "--healthcheck", "http://localhost:8080/health/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
   
   rider-manager:
     build:
@@ -158,6 +164,12 @@ services:
       MinIO__SecretKey: "${MINIO_PASSWORD:?Set MINIO_PASSWORD in .env}"
       Jwt__SigningKey: "${RIDER_MANAGER_JWT_SIGNING_KEY:?Set RIDER_MANAGER_JWT_SIGNING_KEY in .env}"
       RiderManagerApiKey: "${RIDER_MANAGER_API_KEY:?Set RIDER_MANAGER_API_KEY in .env}"
+    healthcheck:
+      test: ["CMD", "dotnet", "RiderManager.dll", "--healthcheck", "http://localhost:8000/health/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -166,6 +178,8 @@ services:
     build:
       context: ./MotoHub
       dockerfile: MotoHub/Dockerfile
+      additional_contexts:
+        shared: ./Shared
     container_name: moto-hub
     ports:
       - "8100:8100"
@@ -181,11 +195,19 @@ services:
       Jwt__SigningKey: "${MOTO_HUB_JWT_SIGNING_KEY:?Set MOTO_HUB_JWT_SIGNING_KEY in .env}"
       MotoHubApiKey: "${MOTO_HUB_API_KEY:?Set MOTO_HUB_API_KEY in .env}"
       RentalOperationsSettings__ApiKey: "${RENTAL_OPERATIONS_API_KEY:?Set RENTAL_OPERATIONS_API_KEY in .env}"
+    healthcheck:
+      test: ["CMD", "dotnet", "MotoHub.dll", "--healthcheck", "http://localhost:8100/health/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
   
   rental-operations:
     build:
       context: ./RentalOperations
       dockerfile: RentalOperations/Dockerfile
+      additional_contexts:
+        shared: ./Shared
     container_name: rental-operations
     ports:
       - "8200:8200"
@@ -203,6 +225,12 @@ services:
       RentalOperationsApiKey: "${RENTAL_OPERATIONS_API_KEY:?Set RENTAL_OPERATIONS_API_KEY in .env}"
       RiderManagerSettings__ApiKey: "${RIDER_MANAGER_API_KEY:?Set RIDER_MANAGER_API_KEY in .env}"
       MotoHubSettings__ApiKey: "${MOTO_HUB_API_KEY:?Set MOTO_HUB_API_KEY in .env}"
+    healthcheck:
+      test: ["CMD", "dotnet", "RentalOperations.dll", "--healthcheck", "http://localhost:8200/health/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
     depends_on:
       rabbitmq:
         condition: service_healthy

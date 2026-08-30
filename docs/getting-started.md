@@ -136,6 +136,40 @@ The command creates the `Admin` role when needed, creates or promotes the
 configured account, and exits. The `finally` block removes both plaintext
 values from the shell even if bootstrap fails.
 
+## Verify health probes
+
+Each application exposes three separate endpoints:
+
+| Endpoint | Question | Dependency failure |
+|---|---|---|
+| `/health/live` | Is the process responding? | Stays healthy |
+| `/health/ready` | Can required infrastructure be reached? | Becomes unhealthy |
+| `/health/startup` | Has application startup completed? | Unchanged after startup |
+
+Compose uses `/health/ready` for container health. The probe command runs through
+the application assembly itself, so the chiseled images do not need a shell,
+`curl`, or `wget`.
+
+Manual readiness drill:
+
+```bash
+docker compose up --build -d
+curl --fail http://localhost:8000/health/live
+curl --fail http://localhost:8000/health/ready
+curl --fail http://localhost:8000/health/startup
+
+docker compose stop rabbitmq
+curl --fail http://localhost:8000/health/live
+curl --fail http://localhost:8000/health/ready # expected to fail with HTTP 503
+
+docker compose start rabbitmq
+```
+
+The process remains live while RabbitMQ is unavailable, but readiness removes it
+from rotation. Inter-service HTTP upstreams are deliberately excluded from
+readiness: a circuit breaker opening for one upstream must not disable unrelated
+routes served by the same process.
+
 ## Stop the stack
 
 Press `Ctrl+C` in the attached Compose session, then run:
@@ -153,7 +187,6 @@ Named volumes are retained so local database contents survive the restart.
   contains no committed secret defaults.
 - Supporting databases, queues, object storage, and observability tools publish
   host ports with development settings.
-- There are no reliable health gates; startup currently depends on fixed waits.
 - The modernization topology in `deploy/compose.yaml` is not runnable until its
   referenced services land.
 
