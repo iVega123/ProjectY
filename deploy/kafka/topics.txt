@@ -1,0 +1,4 @@
+# One durable event stream per contract. Commands use --if-not-exists.
+rental.started
+rental.closed
+motorcycle.registered
