@@ -181,21 +181,21 @@ The observability portion can be exercised before the modernization service
 builds land:
 
 ```bash
-docker compose --env-file .env -f deploy/compose.yaml up --build -d \
+docker compose --env-file .env -f deploy/overlays/selfhost/compose.yaml up --build -d \
   tempo loki otel-collector prometheus grafana toxiproxy
-docker compose --env-file .env -f deploy/compose.yaml ps
+docker compose --env-file .env -f deploy/overlays/selfhost/compose.yaml ps
 
 # Dependents must retain their container IDs and return to all-green.
-docker compose --env-file .env -f deploy/compose.yaml ps -q \
+docker compose --env-file .env -f deploy/overlays/selfhost/compose.yaml ps -q \
   otel-collector prometheus grafana
-docker compose --env-file .env -f deploy/compose.yaml restart loki
-docker compose --env-file .env -f deploy/compose.yaml ps -q \
+docker compose --env-file .env -f deploy/overlays/selfhost/compose.yaml restart loki
+docker compose --env-file .env -f deploy/overlays/selfhost/compose.yaml ps -q \
   otel-collector prometheus grafana
 ```
 
 The IDs before and after the Loki restart must match. Compose health conditions
 gate initial startup only; they do not cascade a dependency restart into healthy
-dependents. No fixed delay is used anywhere in `deploy/compose.yaml`.
+dependents. No fixed delay is used in the self-hosted Compose overlay.
 
 ## Stop the stack
 
@@ -214,8 +214,8 @@ Named volumes are retained so local database contents survive the restart.
   contains no committed secret defaults.
 - Supporting databases, queues, object storage, and observability tools publish
   host ports with development settings.
-- The modernization topology in `deploy/compose.yaml` is not runnable until its
-  referenced services land.
+- The modernization topology in `deploy/overlays/selfhost/compose.yaml` is not
+  runnable until its referenced services land.
 
 Use the [audit correction order](AUDITORIA-ARQUITETURA-SEGURANCA.md)
 and the [modernization epics](https://github.com/iVega123/ProjectY/issues?q=is%3Aissue%20state%3Aopen%20label%3Aepic)

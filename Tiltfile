@@ -53,7 +53,7 @@ if missing_local_files:
 
 profiles = ['init', 'full'] if full else ['init']
 docker_compose(
-    'deploy/compose.yaml',
+    'deploy/overlays/selfhost/compose.yaml',
     env_file = '.env',
     profiles = profiles,
     project_name = 'projecty',

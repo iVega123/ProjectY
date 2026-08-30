@@ -31,7 +31,7 @@ $composeArguments = @(
     '--env-file', '.env',
     '--profile', 'init',
     '--profile', 'full',
-    '-f', 'deploy/compose.yaml'
+    '-f', 'deploy/overlays/selfhost/compose.yaml'
 )
 
 function Invoke-Compose {
