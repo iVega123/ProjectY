@@ -55,7 +55,8 @@ services:
   cockroachdb:
     image: cockroachdb/cockroach:v24.3.5
     <<: *restart
-    command: start-single-node --insecure --listen-addr=0.0.0.0:26257 --http-addr=0.0.0.0:8080
+    # O entrypoint rejeita --listen-addr customizado; o padrão já atende a rede do container.
+    command: start-single-node --insecure --http-addr=0.0.0.0:8080
     ports:
       - "26257:26257"   # SQL
       - "26080:8080"    # console do Cockroach
