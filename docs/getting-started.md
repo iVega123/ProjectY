@@ -93,10 +93,18 @@ depends on the network connection and Docker cache.
 
 | Service | Local URL |
 |---|---|
-| Auth Gate | <http://localhost:8080/swagger> |
-| Rider Manager | <http://localhost:8000/swagger> |
-| MotoHub | <http://localhost:8100/swagger> |
-| Rental Operations | <http://localhost:8200/swagger> |
+| Auth Gate | <http://localhost:8080> |
+| Rider Manager | <http://localhost:8000> |
+| MotoHub | <http://localhost:8100> |
+| Rental Operations | <http://localhost:8200> |
+
+The audited baseline Compose stack runs every application in `Production`, so
+Swagger and the developer exception page are disabled. Local IDE launch
+profiles use `Development`; their `appsettings.Development.json` files enable
+Swagger explicitly. Both conditions are required: setting `Swagger:Enabled`
+alone never exposes Swagger from a `Production` process. Set
+`SWAGGER_ENABLED=false` in `.env` to disable Swagger in the self-hosted
+development overlay without editing its Compose files.
 
 Only the HTTP endpoints above are documented as usable. The compose file also
 publishes ports that older documentation described as HTTPS, but it configures

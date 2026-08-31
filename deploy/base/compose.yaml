@@ -132,7 +132,7 @@ services:
   # ─────────────────────────────────────────────────────────────────────────
 
   otel-collector:
-    image: projecty/otel-collector
+    image: projecty/otel-collector:dev
     networks: [projecty]
     depends_on:
       tempo:
@@ -209,7 +209,7 @@ services:
   # ─────────────────────────────────────────────────────────────────────────
 
   api-gateway:
-    image: projecty/api-gateway
+    image: projecty/api-gateway:dev
     networks: [projecty]
     depends_on:
       redis:
@@ -226,7 +226,7 @@ services:
       start_period: 10s
 
   rental-core:
-    image: projecty/rental-core
+    image: projecty/rental-core:dev
     networks: [projecty]
     depends_on:
       cockroach-init:
@@ -255,7 +255,7 @@ services:
   # ─────────────────────────────────────────────────────────────────────────
 
   media-guard:
-    image: projecty/media-guard
+    image: projecty/media-guard:dev
     networks: [projecty]
     depends_on:
       rabbitmq:
@@ -274,7 +274,7 @@ services:
       start_period: 10s
 
   risk-pricing:
-    image: projecty/risk-pricing
+    image: projecty/risk-pricing:dev
     networks: [projecty]
     depends_on:
       kafka:
@@ -291,7 +291,7 @@ services:
       start_period: 15s
 
   telemetry:
-    image: projecty/telemetry
+    image: projecty/telemetry:dev
     networks: [projecty]
     depends_on:
       cassandra:
@@ -310,7 +310,7 @@ services:
       start_period: 25s
 
   console:
-    image: projecty/console
+    image: projecty/console:dev
     networks: [projecty]
     depends_on:
       api-gateway:

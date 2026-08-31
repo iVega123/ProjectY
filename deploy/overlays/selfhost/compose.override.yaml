@@ -189,6 +189,7 @@ services:
       <<: *otel-env
       OTEL_SERVICE_NAME: rental-core
       ASPNETCORE_ENVIRONMENT: Development
+      Swagger__Enabled: "${SWAGGER_ENABLED:-true}"
       ASPNETCORE_URLS: http://+:8091
       ConnectionStrings__Cockroach: "Host=toxiproxy;Port=21257;Database=projecty;Username=root;SSL Mode=Disable"
       Messaging__Kafka__BootstrapServers: "toxiproxy:29092"

@@ -19,6 +19,7 @@ using RiderManager.Services.PreSignedService;
 using RiderManager.Services;
 using Npgsql;
 using ProjectY.Shared.Health;
+using ProjectY.Shared.Hosting;
 using Serilog.Sinks.Elasticsearch;
 using ProjectY.Shared.Messaging;
 
@@ -136,7 +137,7 @@ builder.Services.AddSwaggerGen(c =>
 
 var app = builder.Build();
 
-if (app.Environment.IsDevelopment())
+if (SwaggerPolicy.IsEnabled(app.Environment, app.Configuration))
 {
     app.UseSwagger();
     app.UseSwaggerUI();

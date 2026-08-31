@@ -85,41 +85,41 @@ def configure_live_update(image, context, manifests, install_command, build_comm
     )
 
 configure_live_update(
-    'projecty/api-gateway',
+    'projecty/api-gateway:dev',
     'services/api-gateway',
     ['services/api-gateway/Cargo.toml', 'services/api-gateway/Cargo.lock'],
     'cd /workspace && cargo fetch --locked',
     'cd /workspace && cargo build --locked',
 )
 configure_live_update(
-    'projecty/rental-core',
+    'projecty/rental-core:dev',
     'services/rental-core',
     ['services/rental-core/RentalCore.csproj'],
     'cd /workspace && dotnet restore RentalCore.csproj',
     'cd /workspace && dotnet build RentalCore.csproj --no-restore',
 )
 configure_live_update(
-    'projecty/media-guard',
+    'projecty/media-guard:dev',
     'services/media-guard',
     ['services/media-guard/Cargo.toml', 'services/media-guard/Cargo.lock'],
     'cd /workspace && cargo fetch --locked',
     'cd /workspace && cargo build --locked',
 )
 configure_live_update(
-    'projecty/risk-pricing',
+    'projecty/risk-pricing:dev',
     'services/risk-pricing',
     ['services/risk-pricing/pyproject.toml', 'services/risk-pricing/uv.lock'],
     'cd /workspace && python -m pip install --disable-pip-version-check -e .',
 )
 configure_live_update(
-    'projecty/telemetry',
+    'projecty/telemetry:dev',
     'services/telemetry',
     ['services/telemetry/mix.exs', 'services/telemetry/mix.lock'],
     'cd /workspace && mix deps.get',
     'cd /workspace && mix compile',
 )
 configure_live_update(
-    'projecty/console',
+    'projecty/console:dev',
     'services/console',
     ['services/console/package.json', 'services/console/package-lock.json'],
     'cd /workspace && npm install --ignore-scripts',

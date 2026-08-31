@@ -82,6 +82,7 @@ function New-RabbitMqPasswordHash {
 
 $localSuffix = (New-RandomValue -ByteCount 6).ToLowerInvariant()
 $values = [ordered]@{
+    SWAGGER_ENABLED                   = "true"
     AUTH_GATE_POSTGRES_DB             = "AuthGateDB"
     MOTO_HUB_POSTGRES_DB              = "MotoHubDB"
     RIDER_MANAGER_POSTGRES_DB         = "RiderManagerDB"

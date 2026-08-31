@@ -7,6 +7,7 @@ RUN dotnet restore RentalOperations/RentalOperations/RentalOperations.csproj
 FROM restore AS publish
 COPY RentalOperations/ RentalOperations/RentalOperations/
 COPY --from=shared Health/ Shared/Health/
+COPY --from=shared Hosting/ Shared/Hosting/
 RUN dotnet publish RentalOperations/RentalOperations/RentalOperations.csproj \
     --configuration Release \
     --output /app/publish \

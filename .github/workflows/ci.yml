@@ -48,6 +48,7 @@ jobs:
             moto_hub:
               - 'MotoHub/**'
               - 'Shared/Health/**'
+              - 'Shared/Hosting/**'
               - '.github/workflows/ci.yml'
               - '.grype.yaml'
               - '.trivyignore.yaml'
@@ -58,6 +59,7 @@ jobs:
             rental_operations:
               - 'RentalOperations/**'
               - 'Shared/Health/**'
+              - 'Shared/Hosting/**'
               - '.github/workflows/ci.yml'
               - '.grype.yaml'
               - '.trivyignore.yaml'
