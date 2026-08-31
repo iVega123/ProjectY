@@ -59,8 +59,9 @@ public sealed class InMemoryRentalRepository : IRentalRepository
         var now = DateTime.UtcNow;
         return Task.FromResult(_rentals.Values.Any(rental =>
             rental.MotorcycleLicencePlate == licencePlate &&
+            rental.Status == RentalStatus.Active &&
             rental.StartDate <= now &&
-            (rental.EndDate > rental.StartDate ? rental.EndDate : rental.PredictedEndDate) >= now));
+            rental.PredictedEndDate >= now));
     }
 
     public Task UpdateRentalAsync(Rental rental)
@@ -104,6 +105,7 @@ public sealed class InMemoryRentalRepository : IRentalRepository
         InitCost = rental.InitCost,
         FinalCost = rental.FinalCost,
         AdditionalCostsOrSavings = rental.AdditionalCostsOrSavings,
-        StatusMessage = rental.StatusMessage
+        StatusMessage = rental.StatusMessage,
+        Status = rental.Status
     };
 }

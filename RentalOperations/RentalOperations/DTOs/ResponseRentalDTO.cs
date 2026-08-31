@@ -7,7 +7,7 @@
         public string MotocycleLicencePlate { get; set; } = string.Empty;
         public DateTime StartDate { get; set; }
         public DateTime PredictedEndDate { get; set; }
-        public DateTime ActualEndDate { get; set; }
+        public DateTime? ActualEndDate { get; set; }
         public decimal OriginalTotalCost { get; set; }
         public decimal FinalTotalCost { get; set; }
         public decimal AdditionalCostsOrSavings { get; set; }

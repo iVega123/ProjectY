@@ -122,6 +122,12 @@ services:
       - mongo-data:/data/db
     networks:
       - elk
+    healthcheck:
+      test: ["CMD-SHELL", "mongosh --quiet --username \"$${MONGO_INITDB_ROOT_USERNAME}\" --password \"$${MONGO_INITDB_ROOT_PASSWORD}\" --authenticationDatabase admin --eval \"db.adminCommand('ping').ok\""]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
 
   rabbitmq:
     image: rabbitmq:3-management
@@ -294,6 +300,8 @@ services:
       retries: 6
       start_period: 10s
     depends_on:
+      mongodb:
+        condition: service_healthy
       rabbitmq:
         condition: service_healthy
 

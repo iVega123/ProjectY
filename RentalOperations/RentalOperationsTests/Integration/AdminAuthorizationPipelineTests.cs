@@ -83,7 +83,7 @@ public class AdminAuthorizationPipelineTests : IClassFixture<CustomWebApplicatio
         });
         var rentalId = original._id!.Value.ToString();
         using var client = CreateClient("Rider", "rider-b");
-        var actualEndDate = Uri.EscapeDataString(original.EndDate.ToString("O"));
+        var actualEndDate = Uri.EscapeDataString(original.EndDate!.Value.ToString("O"));
 
         var response = await client.PostAsync(
             $"/api/Rental/calculate-final-cost?rentalId={rentalId}&actualEndDate={actualEndDate}",

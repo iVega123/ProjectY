@@ -35,12 +35,12 @@ namespace RentalOperations.Services
             }
 
             var existingRentals = await _repository.GetRentalsByMotorcycleIdAsync(createDto.MotocycleLicencePlate);
-            foreach (var rent in existingRentals)
+            if (existingRentals.Any(rent => RentalPeriod.Overlaps(
+                rent,
+                createDto.StartDate,
+                createDto.PredictedEndDate)))
             {
-                if (createDto.StartDate < rent.EndDate || createDto.PredictedEndDate > rent.StartDate)
-                {
-                    throw new InvalidOperationException("This motorcycle is already rented for the requested period.");
-                }
+                throw new ActiveRentalConflictException(createDto.MotocycleLicencePlate);
             }
 
             var rider = await _riderManagerService.GetRiderByIdAsync(userId);
@@ -83,7 +83,7 @@ namespace RentalOperations.Services
             if (!string.Equals(rental.UserId, userId, StringComparison.Ordinal))
                 throw new UnauthorizedAccessException("The rental belongs to another rider.");
 
-            if (rental.FinalCost > 0)
+            if (rental.Status == RentalStatus.Completed)
                 return _mapper.Map<ResponseRentalDTO>(rental);
 
             var response = _mapper.Map<ResponseRentalDTO>(rental);
@@ -112,8 +112,12 @@ namespace RentalOperations.Services
 
             response.FinalTotalCost = response.OriginalTotalCost + response.AdditionalCostsOrSavings;
 
-            var updateRent = _mapper.Map<Rental>(response);
-            await _repository.UpdateRentalAsync(updateRent);
+            rental.EndDate = actualEndDate;
+            rental.FinalCost = response.FinalTotalCost;
+            rental.AdditionalCostsOrSavings = response.AdditionalCostsOrSavings;
+            rental.StatusMessage = response.StatusMessage;
+            rental.Status = RentalStatus.Completed;
+            await _repository.UpdateRentalAsync(rental);
             return response;
         }
 

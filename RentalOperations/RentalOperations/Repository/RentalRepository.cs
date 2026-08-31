@@ -1,6 +1,7 @@
 ﻿using MongoDB.Bson;
 using MongoDB.Driver;
 using RentalOperations.Data;
+using RentalOperations.Domain;
 using RentalOperations.Model;
 
 namespace RentalOperations.Repository
@@ -16,7 +17,16 @@ namespace RentalOperations.Repository
 
         public async Task<Rental> CreateRentalAsync(Rental rental)
         {
-            await _rentals.InsertOneAsync(rental);
+            try
+            {
+                await _rentals.InsertOneAsync(rental);
+            }
+            catch (MongoWriteException exception)
+                when (exception.WriteError?.Category == ServerErrorCategory.DuplicateKey)
+            {
+                throw new ActiveRentalConflictException(rental.MotorcycleLicencePlate, exception);
+            }
+
             return rental;
         }
 
@@ -41,7 +51,10 @@ namespace RentalOperations.Repository
             var today = DateTime.UtcNow;
             var rentals = await _rentals.Find(r => r.MotorcycleLicencePlate == licencePlate).ToListAsync();
 
-            return rentals.Any(r => r.StartDate <= today && (r.EndDate > r.StartDate ? r.EndDate : r.PredictedEndDate) >= today);
+            return rentals.Any(r =>
+                r.Status == RentalStatus.Active &&
+                r.StartDate <= today &&
+                r.PredictedEndDate >= today);
         }
 
         public async Task UpdateRentalAsync(Rental rental)
