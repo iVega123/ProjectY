@@ -35,11 +35,11 @@ namespace AuthGate.Migrations
                     Id = table.Column<string>(type: "text", nullable: false),
                     Discriminator = table.Column<string>(type: "character varying(21)", maxLength: 21, nullable: false),
                     UserType = table.Column<string>(type: "text", nullable: true),
-                    CNPJ = table.Column<string>(type: "character varying(14)", maxLength: 14, nullable: true),
-                    DataNascimento = table.Column<DateTime>(type: "timestamp with time zone", nullable: true),
-                    NumeroCNH = table.Column<string>(type: "character varying(11)", maxLength: 11, nullable: true),
-                    TipoCNH = table.Column<int>(type: "integer", nullable: true),
-                    ImagemCNH = table.Column<string>(type: "text", nullable: true),
+                    CNPJ = table.Column<string>(type: "character varying(20)", maxLength: 20, nullable: true),
+                    Name = table.Column<string>(type: "text", nullable: true),
+                    DateOfBirth = table.Column<DateTime>(type: "timestamp with time zone", nullable: true),
+                    CNHNumber = table.Column<string>(type: "character varying(11)", maxLength: 11, nullable: true),
+                    CNHType = table.Column<int>(type: "integer", nullable: true),
                     UserName = table.Column<string>(type: "character varying(256)", maxLength: 256, nullable: true),
                     NormalizedUserName = table.Column<string>(type: "character varying(256)", maxLength: 256, nullable: true),
                     Email = table.Column<string>(type: "character varying(256)", maxLength: 256, nullable: true),
@@ -171,8 +171,8 @@ namespace AuthGate.Migrations
                 columns: new[] { "Id", "ConcurrencyStamp", "Name", "NormalizedName" },
                 values: new object[,]
                 {
-                    { "58b203f6-1beb-4647-b7cf-040d012861a0", "2", "Rider", "RIDER" },
-                    { "f034fb12-d12e-4fde-9f0c-0cbd07042014", "1", "Admin", "ADMIN" }
+                    { "00000000-0000-0000-0000-000000000001", "1", "Admin", "ADMIN" },
+                    { "00000000-0000-0000-0000-000000000002", "2", "Rider", "RIDER" }
                 });
 
             migrationBuilder.CreateIndex(
@@ -207,15 +207,15 @@ namespace AuthGate.Migrations
                 column: "NormalizedEmail");
 
             migrationBuilder.CreateIndex(
-                name: "IX_AspNetUsers_CNPJ",
+                name: "IX_AspNetUsers_CNHNumber",
                 table: "AspNetUsers",
-                column: "CNPJ",
+                column: "CNHNumber",
                 unique: true);
 
             migrationBuilder.CreateIndex(
-                name: "IX_AspNetUsers_NumeroCNH",
+                name: "IX_AspNetUsers_CNPJ",
                 table: "AspNetUsers",
-                column: "NumeroCNH",
+                column: "CNPJ",
                 unique: true);
 
             migrationBuilder.CreateIndex(

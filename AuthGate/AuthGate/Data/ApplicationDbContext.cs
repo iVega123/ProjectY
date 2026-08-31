@@ -9,7 +9,6 @@ namespace AuthGate.Data
     {
         public ApplicationDbContext(DbContextOptions<ApplicationDbContext> options) : base(options)
         {
-            Database.EnsureCreated();
         }
         protected override void OnModelCreating(ModelBuilder builder)
         {
@@ -32,8 +31,20 @@ namespace AuthGate.Data
         private static void SeedRoles(ModelBuilder builder)
         {
             builder.Entity<IdentityRole>().HasData(
-                new IdentityRole { Name = "Admin", ConcurrencyStamp = "1", NormalizedName = "ADMIN" },
-                new IdentityRole { Name = "Rider", ConcurrencyStamp = "2", NormalizedName = "RIDER" }
+                new IdentityRole
+                {
+                    Id = "00000000-0000-0000-0000-000000000001",
+                    Name = "Admin",
+                    ConcurrencyStamp = "1",
+                    NormalizedName = "ADMIN"
+                },
+                new IdentityRole
+                {
+                    Id = "00000000-0000-0000-0000-000000000002",
+                    Name = "Rider",
+                    ConcurrencyStamp = "2",
+                    NormalizedName = "RIDER"
+                }
             );
         }
     }

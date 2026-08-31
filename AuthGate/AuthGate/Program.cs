@@ -113,6 +113,11 @@ builder.Services.AddAuthentication(options =>
 
 var app = builder.Build();
 
+if (await DatabaseMigrationCommand.TryRunAsync<ApplicationDbContext>(args, app.Services))
+{
+    return;
+}
+
 if (args.Contains("--bootstrap-admin", StringComparer.Ordinal))
 {
     await AdminBootstrapper.BootstrapAsync(app.Services, app.Configuration, app.Logger);

@@ -12,6 +12,10 @@
   <ItemGroup>
     <PackageReference Include="AutoMapper" Version="16.2.0" />
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.4" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.4">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
     <PackageReference Include="Microsoft.EntityFrameworkCore.InMemory" Version="10.0.4" />
     <PackageReference Include="Microsoft.VisualStudio.Azure.Containers.Tools.Targets" Version="1.19.6" />
     <PackageReference Include="Minio" Version="6.0.2" />
@@ -29,6 +33,7 @@
   <ItemGroup>
     <Compile Include="..\..\Shared\Health\ServiceHealthChecks.cs" Link="Shared\Health\ServiceHealthChecks.cs" />
     <Compile Include="..\..\Shared\Hosting\SwaggerPolicy.cs" Link="Shared\Hosting\SwaggerPolicy.cs" />
+    <Compile Include="..\..\Shared\Hosting\DatabaseMigrationCommand.cs" Link="Shared\Hosting\DatabaseMigrationCommand.cs" />
     <Compile Include="..\..\Shared\Messaging\QueueMessageAuthenticator.cs" Link="Shared\Messaging\QueueMessageAuthenticator.cs" />
   </ItemGroup>
 

@@ -7,7 +7,6 @@ namespace RiderManager.Data
     {
         public ApplicationDbContext(DbContextOptions<ApplicationDbContext> options) : base(options)
         {
-            Database.EnsureCreated();
         }
 
         public DbSet<Rider> Riders { get; set; }
