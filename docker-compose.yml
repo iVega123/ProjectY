@@ -2,7 +2,7 @@ version: '3.7'
 
 services:
   elasticsearch:
-    image: docker.elastic.co/elasticsearch/elasticsearch:7.17.3
+    image: docker.elastic.co/elasticsearch/elasticsearch:9.5.2
     container_name: elasticsearch
     environment:
       - discovery.type=single-node
@@ -14,7 +14,7 @@ services:
       - elk
 
   logstash:
-    image: docker.elastic.co/logstash/logstash:7.17.3
+    image: docker.elastic.co/logstash/logstash:9.5.2
     container_name: logstash
     volumes:
       - ./logstash/config/logstash.yml:/usr/share/logstash/config/logstash.yml
@@ -27,7 +27,7 @@ services:
       - elk
 
   kibana:
-    image: docker.elastic.co/kibana/kibana:7.17.3
+    image: docker.elastic.co/kibana/kibana:9.5.2
     container_name: kibana
     ports:
       - "5601:5601"
@@ -39,7 +39,7 @@ services:
       - elk
 
   postgres:
-    image: postgres:15
+    image: postgres:18
     container_name: postgres
     environment:
       POSTGRES_USER: "${POSTGRES_USER:?Set POSTGRES_USER in .env}"
@@ -56,7 +56,7 @@ services:
       - ./deploy/postgres/init-databases.sh:/docker-entrypoint-initdb.d/10-create-service-databases.sh:ro
 
   pgadmin:
-    image: dpage/pgadmin4:9.13
+    image: dpage/pgadmin4:9.17
     container_name: pgadmin
     environment:
       PGADMIN_DEFAULT_EMAIL: "${PGADMIN_EMAIL:?Set PGADMIN_EMAIL in .env}"
@@ -69,7 +69,7 @@ services:
       - elk
 
   mongodb:
-    image: mongo:8.0
+    image: mongo:8.2
     container_name: mongodb
     ports:
       - "27017:27017"
@@ -82,7 +82,7 @@ services:
       - elk
 
   rabbitmq:
-    image: rabbitmq:3-management
+    image: rabbitmq:4-management
     container_name: rabbitmq
     networks:
       - elk

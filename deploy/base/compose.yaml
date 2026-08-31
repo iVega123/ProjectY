@@ -25,7 +25,7 @@ services:
   # ─────────────────────────────────────────────────────────────────────────
 
   cockroachdb:
-    image: cockroachdb/cockroach:v24.3.5
+    image: cockroachdb/cockroach:v26.3.1
     volumes:
       - cockroach-data:/cockroach/cockroach-data
     networks: [projecty]
@@ -37,7 +37,7 @@ services:
       start_period: 20s
 
   cockroach-init:
-    image: cockroachdb/cockroach:v24.3.5
+    image: cockroachdb/cockroach:v26.3.1
     entrypoint: ["cockroach", "sql"]
     networks: [projecty]
     depends_on:
@@ -45,7 +45,7 @@ services:
         condition: service_healthy
 
   redis:
-    image: redis:7.4-alpine
+    image: redis:8.10-alpine
     volumes:
       - redis-data:/data
     networks: [projecty]
@@ -56,7 +56,7 @@ services:
       retries: 12
 
   rabbitmq:
-    image: rabbitmq:4.0-management-alpine
+    image: rabbitmq:4.3-management-alpine
     volumes:
       - rabbitmq-data:/var/lib/rabbitmq
     networks: [projecty]
@@ -68,7 +68,7 @@ services:
       start_period: 20s
 
   kafka:
-    image: apache/kafka:3.9.0
+    image: apache/kafka:4.3.1
     volumes:
       - kafka-data:/var/lib/kafka/data
     networks: [projecty]
@@ -92,7 +92,7 @@ services:
       start_period: 60s
 
   mongodb:
-    image: mongo:8.0
+    image: mongo:8.2
     volumes:
       - mongo-data:/data/db
     networks: [projecty]
@@ -119,7 +119,7 @@ services:
   # ─────────────────────────────────────────────────────────────────────────
 
   toxiproxy:
-    image: ghcr.io/shopify/toxiproxy:2.11.0
+    image: ghcr.io/shopify/toxiproxy:2.12.0
     networks: [projecty]
     healthcheck:
       test: ["CMD", "/toxiproxy-cli", "list"]
@@ -147,7 +147,7 @@ services:
       start_period: 10s
 
   prometheus:
-    image: prom/prometheus:v3.2.1
+    image: prom/prometheus:v3.14.0
     volumes:
       - prometheus-data:/prometheus
     networks: [projecty]
@@ -162,7 +162,7 @@ services:
       start_period: 10s
 
   tempo:
-    image: grafana/tempo:2.7.1
+    image: grafana/tempo:3.0.3
     volumes:
       - tempo-data:/var/tempo
     networks: [projecty]
@@ -174,7 +174,7 @@ services:
       start_period: 10s
 
   loki:
-    image: grafana/loki:3.4.2
+    image: grafana/loki:3.7.7
     volumes:
       - loki-data:/loki
     networks: [projecty]
@@ -186,7 +186,7 @@ services:
       start_period: 10s
 
   grafana:
-    image: grafana/grafana:11.6.0
+    image: grafana/grafana:13.2.0
     volumes:
       - grafana-data:/var/lib/grafana
     networks: [projecty]
@@ -331,7 +331,7 @@ services:
   # ─────────────────────────────────────────────────────────────────────────
 
   k6:
-    image: grafana/k6:0.57.0
+    image: grafana/k6:2.2.0
     networks: [projecty]
     depends_on:
       api-gateway:
