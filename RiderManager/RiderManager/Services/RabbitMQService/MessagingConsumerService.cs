@@ -2,11 +2,7 @@
 using RabbitMQ.Client;
 using System.Text;
 using RiderManager.Configurations;
-using System.Collections.Concurrent;
 using RiderManager.Entities;
-using System.Text.Json;
-using RiderManager.Managers;
-using RiderManager.DTOs;
 using ProjectY.Shared.Messaging;
 
 namespace RiderManager.Services.RabbitMQService
@@ -21,8 +17,6 @@ namespace RiderManager.Services.RabbitMQService
         private readonly string _riderInfoPoisonQueueName;
         private readonly IServiceProvider _serviceProvider;
         private readonly QueueMessageAuthenticator _messageAuthenticator;
-        private ConcurrentDictionary<string, List<ImagePart>> imagePartsStore = new ConcurrentDictionary<string, List<ImagePart>>();
-        private ConcurrentDictionary<string, int> riderInfoRetryCounts = new ConcurrentDictionary<string, int>();
 
         public MessagingConsumerService(IRabbitMqService mqService,
             ILogger<MessagingConsumerService> logger,
@@ -52,8 +46,7 @@ namespace RiderManager.Services.RabbitMQService
         {
             ConsumeQueueAsync(_riderInfoQueueName, ProcessRiderInfo);
             ConsumeQueueAsync(_imageStreamQueueName, ProcessImageStream);
-            ConsumePoisonQueue(_riderInfoPoisonQueueName);
-            await Task.CompletedTask;
+            await ConsumePoisonQueue(_riderInfoPoisonQueueName);
         }
 
         private void ConsumeQueueAsync(string queueName, Func<string, Task> processMessageFunc)
@@ -87,50 +80,14 @@ namespace RiderManager.Services.RabbitMQService
 
         private async Task ProcessRiderInfo(string message)
         {
-            var riderInfo = _messageAuthenticator.ValidateEnvelope<RiderMQEntity>(
+            var riderInfo = _messageAuthenticator.ValidateMessage<RiderMQEntity>(
                 message,
                 "rider.registration.v1",
                 payload => payload.UserId);
-            string messageId = riderInfo.UserId;
 
-            if (!riderInfoRetryCounts.TryGetValue(messageId, out int currentRetryCount))
-            {
-                currentRetryCount = 0;
-            }
-
-            try
-            {
-                using (var scope = _serviceProvider.CreateScope())
-                {
-                    var riderManager = scope.ServiceProvider.GetRequiredService<IRiderManager>();
-                    await riderManager.AddRiderAsync(new RiderDTO
-                    {
-                        UserId = riderInfo.UserId,
-                        Email = riderInfo.Email,
-                        Name = riderInfo.Name,
-                        CNPJ = riderInfo.CNPJ,
-                        DateOfBirth = riderInfo.DateOfBirth,
-                        CNHNumber = riderInfo.CNHNumber,
-                        CNHType = riderInfo.CNHType
-                    });
-                    riderInfoRetryCounts.TryRemove(messageId, out _);
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError($"Error processing rider info: {ex.Message}", ex);
-                currentRetryCount++;
-                if (currentRetryCount >= 3)
-                {
-                    _logger.LogError($"Max retry attempts exceeded for message {messageId}. Moving to poison queue.");
-                    MoveToPoisonQueue(message, "RiderInfoPoisonQueue");
-                    riderInfoRetryCounts.TryRemove(messageId, out _);
-                }
-                else
-                {
-                    riderInfoRetryCounts[messageId] = currentRetryCount;
-                }
-            }
+            using var scope = _serviceProvider.CreateScope();
+            var handler = scope.ServiceProvider.GetRequiredService<RiderInboxMessageHandler>();
+            await handler.HandleRegistrationAsync(riderInfo);
         }
 
         public async Task ConsumePoisonQueue(string poisonQueueName)
@@ -182,53 +139,14 @@ namespace RiderManager.Services.RabbitMQService
 
         private async Task ProcessImageStream(string message)
         {
-            var imagePart = _messageAuthenticator.ValidateEnvelope<ImagePart>(
+            var imagePart = _messageAuthenticator.ValidateMessage<ImagePart>(
                 message,
                 "rider.cnh-image-part.v1",
                 payload => payload.UserId);
-            List<ImagePart> parts = imagePartsStore.GetOrAdd(imagePart.UserId, new List<ImagePart>());
-            parts.Add(imagePart);
 
-            if (imagePart.EndOfFile)
-            {
-                parts.Sort((x, y) => x.SequenceNumber.CompareTo(y.SequenceNumber));
-
-                using (var memoryStream = new MemoryStream())
-                {
-                    foreach (var part in parts)
-                    {
-                        memoryStream.Write(part.Content, 0, part.Content.Length);
-                    }
-
-                    memoryStream.Position = 0;
-                    await StoreImage(memoryStream, imagePart.FileName, imagePart.UserId);
-                }
-
-                imagePartsStore.TryRemove(imagePart.UserId, out _);
-            }
-        }
-
-        private async Task StoreImage(MemoryStream imageStream, string fileName, string userId)
-        {
-            using (var scope = _serviceProvider.CreateScope())
-            {
-                var riderManager = scope.ServiceProvider.GetRequiredService<IRiderManager>();
-                var toFormFile = ConvertToIFormFile(imageStream, fileName);
-                await riderManager.UpdateRiderImageAsync(userId, toFormFile);
-            }
-        }
-
-        private IFormFile ConvertToIFormFile(MemoryStream memoryStream, string fileName)
-        {
-            memoryStream.Position = 0;
-
-            IFormFile formFile = new FormFile(memoryStream, 0, memoryStream.Length, "name", fileName)
-            {
-                Headers = new HeaderDictionary(),
-                ContentType = "application/octet-stream"
-            };
-
-            return formFile;
+            using var scope = _serviceProvider.CreateScope();
+            var handler = scope.ServiceProvider.GetRequiredService<RiderInboxMessageHandler>();
+            await handler.HandleImagePartAsync(imagePart);
         }
 
         private void MoveToPoisonQueue(string message, string poisonQueueName)

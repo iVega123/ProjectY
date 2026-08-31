@@ -1,8 +1,8 @@
 ﻿using RabbitMQ.Client.Events;
 using RabbitMQ.Client;
 using System.Text;
-using System.Collections.Concurrent;
 using System.Text.Json;
+using System.Security.Cryptography;
 using RentalOperations.Services.RabbitMQService;
 using RentalOperations.Configurations;
 using RentalOperations.Services;
@@ -18,7 +18,6 @@ namespace RentalOperations.Services.RabbitMQService
         private readonly string _licenceUpdateQueueName;
         private readonly string _licenceUpdatePoisonQueueName;
         private readonly IServiceProvider _serviceProvider;
-        private ConcurrentDictionary<string, int> licencePlateRetryCounts = new ConcurrentDictionary<string, int>();
 
         public MessagingConsumerService(IRabbitMqService mqService,
             ILogger<MessagingConsumerService> logger,
@@ -42,12 +41,11 @@ namespace RentalOperations.Services.RabbitMQService
 
         public async Task StartConsuming()
         {
-            ConsumeQueueAsync(_licenceUpdateQueueName, ProcessRiderInfo);
-            ConsumePoisonQueue(_licenceUpdatePoisonQueueName);
-            await Task.CompletedTask;
+            ConsumeQueueAsync(_licenceUpdateQueueName, ProcessLicenceUpdate);
+            await ConsumePoisonQueue(_licenceUpdatePoisonQueueName);
         }
 
-        private void ConsumeQueueAsync(string queueName, Func<string, Task> processMessageFunc)
+        private void ConsumeQueueAsync(string queueName, Func<string, string, Task> processMessageFunc)
         {
             var consumer = new AsyncEventingBasicConsumer(_channel);
             consumer.Received += async (model, ea) =>
@@ -56,7 +54,7 @@ namespace RentalOperations.Services.RabbitMQService
                 var message = Encoding.UTF8.GetString(body);
                 try
                 {
-                    await processMessageFunc(message);
+                    await processMessageFunc(message, GetMessageId(ea.BasicProperties, body));
                     _channel.BasicAck(ea.DeliveryTag, false);
                 }
                 catch (Exception ex)
@@ -71,40 +69,20 @@ namespace RentalOperations.Services.RabbitMQService
         }
 
 
-        private async Task ProcessRiderInfo(string message)
+        private async Task ProcessLicenceUpdate(string message, string messageId)
         {
-            var licenceInfo = JsonSerializer.Deserialize<LicencePlateRabbitMQEntity>(message);
-            string messageId = licenceInfo.newLicencePlate;
+            var licenceInfo = JsonSerializer.Deserialize<LicencePlateRabbitMQEntity>(message)
+                ?? throw new InvalidOperationException("The licence update message is empty.");
 
-            if (!licencePlateRetryCounts.TryGetValue(messageId, out int currentRetryCount))
-            {
-                currentRetryCount = 0;
-            }
-
-            try
-            {
-                using (var scope = _serviceProvider.CreateScope())
-                {
-                    var rentalService = scope.ServiceProvider.GetRequiredService<IRentalService>();
-                    await rentalService.UpdateMotorcycleLicensePlateAsync(licenceInfo.oldLicencePlate, licenceInfo.newLicencePlate);
-                    licencePlateRetryCounts.TryRemove(messageId, out _);
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError($"Error processing rider info: {ex.Message}", ex);
-                currentRetryCount++;
-                if (currentRetryCount >= 3)
-                {
-                    _logger.LogError($"Max retry attempts exceeded for message {messageId}. Moving to poison queue.");
-                    MoveToPoisonQueue(message, _licenceUpdatePoisonQueueName);
-                    licencePlateRetryCounts.TryRemove(messageId, out _);
-                }
-                else
-                {
-                    licencePlateRetryCounts[messageId] = currentRetryCount;
-                }
-            }
+            using var scope = _serviceProvider.CreateScope();
+            var inbox = scope.ServiceProvider.GetRequiredService<MongoInboxProcessor>();
+            var rentalService = scope.ServiceProvider.GetRequiredService<IRentalService>();
+            await inbox.ProcessAsync(
+                messageId,
+                "rental-operations/licence-update/v1",
+                _ => rentalService.UpdateMotorcycleLicensePlateAsync(
+                    licenceInfo.oldLicencePlate,
+                    licenceInfo.newLicencePlate));
         }
 
         public async Task ConsumePoisonQueue(string poisonQueueName)
@@ -121,7 +99,7 @@ namespace RentalOperations.Services.RabbitMQService
 
                 try
                 {
-                    await ProcessRiderInfo(message);
+                    await ProcessLicenceUpdate(message, GetMessageId(ea.BasicProperties, body));
                     _channel.BasicAck(ea.DeliveryTag, false);
                 }
                 catch (Exception ex)
@@ -158,6 +136,11 @@ namespace RentalOperations.Services.RabbitMQService
             _channel.QueueDeclare(queue: poisonQueueName, durable: true, exclusive: false, autoDelete: false);
             _channel.BasicPublish(exchange: "", routingKey: poisonQueueName, basicProperties: null, body: Encoding.UTF8.GetBytes(message));
         }
+
+        private static string GetMessageId(IBasicProperties properties, byte[] body)
+            => string.IsNullOrWhiteSpace(properties.MessageId)
+                ? Convert.ToHexString(SHA256.HashData(body))
+                : properties.MessageId;
 
         public void Dispose()
         {

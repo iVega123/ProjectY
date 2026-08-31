@@ -15,6 +15,8 @@ public sealed class QueueMessageEnvelope
     public required string Signature { get; init; }
 }
 
+public sealed record AuthenticatedQueueMessage<T>(string MessageId, T Payload);
+
 public sealed class QueueMessageAuthenticationException : Exception
 {
     public QueueMessageAuthenticationException(string message)
@@ -76,6 +78,12 @@ public sealed class QueueMessageAuthenticator
     }
 
     public T ValidateEnvelope<T>(string serializedEnvelope, string expectedMessageType, Func<T, string> getClaimedUserId)
+        => ValidateMessage(serializedEnvelope, expectedMessageType, getClaimedUserId).Payload;
+
+    public AuthenticatedQueueMessage<T> ValidateMessage<T>(
+        string serializedEnvelope,
+        string expectedMessageType,
+        Func<T, string> getClaimedUserId)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(serializedEnvelope);
         ArgumentException.ThrowIfNullOrWhiteSpace(expectedMessageType);
@@ -122,7 +130,7 @@ public sealed class QueueMessageAuthenticator
             throw new QueueMessageAuthenticationException("The payload user identity does not match the signed subject.");
         }
 
-        return payload;
+        return new AuthenticatedQueueMessage<T>(envelope.MessageId, payload);
     }
 
     private static void ValidateMetadata(QueueMessageEnvelope envelope, string expectedMessageType)
