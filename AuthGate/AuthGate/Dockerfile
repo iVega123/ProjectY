@@ -7,6 +7,7 @@ RUN dotnet restore AuthGate/AuthGate/AuthGate.csproj
 FROM restore AS publish
 COPY AuthGate/ AuthGate/AuthGate/
 COPY --from=shared Health/ Shared/Health/
+COPY --from=shared Hosting/ Shared/Hosting/
 COPY --from=shared Messaging/ Shared/Messaging/
 RUN dotnet publish AuthGate/AuthGate/AuthGate.csproj \
     --configuration Release \
