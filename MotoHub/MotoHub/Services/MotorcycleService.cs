@@ -55,15 +55,15 @@ namespace MotoHub.Services
 
             existingMotorcycle.LicensePlate = newLicencePlate;
 
-            _repository.Update(existingMotorcycle);
-
             LicencePlateRabbitMQEntity licencePlateRabbitMQEntity = new LicencePlateRabbitMQEntity()
             {
+                AggregateId = existingMotorcycle.Id,
                 newLicencePlate = newLicencePlate,
                 oldLicencePlate = licensePlate,
             };
 
             _messagingPublisherService.PublishLicenceUpdate(licencePlateRabbitMQEntity);
+            _repository.Update(existingMotorcycle);
         }
 
         public async Task<OperationResult> DeleteMotorcycle(string licensePlate)

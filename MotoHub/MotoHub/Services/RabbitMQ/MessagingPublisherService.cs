@@ -1,36 +1,32 @@
-﻿using MotoHub.Configurations;
+using MotoHub.Configurations;
+using MotoHub.Data;
 using MotoHub.Entities;
-using RabbitMQ.Client;
-using System.Text;
+using ProjectY.Shared.Messaging;
 using System.Text.Json;
 
-namespace MotoHub.Services.RabbitMQ
+namespace MotoHub.Services.RabbitMQ;
+
+public sealed class MessagingPublisherService : IMessagingPublisherService
 {
-    public class MessagingPublisherService : IMessagingPublisherService
+    private readonly ApplicationDbContext _context;
+    private readonly RabbitMQOptions _rabbitmqOptions;
+
+    public MessagingPublisherService(ApplicationDbContext context, RabbitMQOptions rabbitMQOptions)
     {
-        private readonly IConnection _connection;
-        private readonly IModel _channel;
-        private readonly RabbitMQOptions _rabbitmqOptions;
+        _context = context;
+        _rabbitmqOptions = rabbitMQOptions;
+    }
 
-        public MessagingPublisherService(IConnection connection, RabbitMQOptions rabbitMQOptions)
+    public void PublishLicenceUpdate(LicencePlateRabbitMQEntity licenceUpdate)
+    {
+        _context.OutboxMessages.Add(new OutboxMessage
         {
-            _connection = connection;
-            _channel = _connection.CreateModel();
-            _rabbitmqOptions = rabbitMQOptions;
-        }
-
-        public void PublishLicenceUpdate(LicencePlateRabbitMQEntity licenceUpdate)
-        {
-            _channel.QueueDeclare(_rabbitmqOptions.LicenceUpdateQueueName, false, false);
-
-            var message = JsonSerializer.Serialize(licenceUpdate);
-            var body = Encoding.UTF8.GetBytes(message);
-
-            _channel.BasicPublish(exchange: "",
-                                  routingKey: _rabbitmqOptions.LicenceUpdateQueueName,
-                                  basicProperties: null,
-                                  body: body);
-        }
-
+            AggregateType = "motorcycle",
+            AggregateId = licenceUpdate.AggregateId,
+            AggregateSequence = 0,
+            EventType = "motorcycle.licence-plate-updated.v1",
+            Destination = _rabbitmqOptions.LicenceUpdateQueueName,
+            Payload = JsonSerializer.Serialize(licenceUpdate)
+        });
     }
 }

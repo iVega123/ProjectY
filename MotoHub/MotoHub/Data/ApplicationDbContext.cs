@@ -1,5 +1,6 @@
 ﻿using Microsoft.EntityFrameworkCore;
 using MotoHub.Models;
+using ProjectY.Shared.Messaging;
 
 namespace MotoHub.Data
 {
@@ -10,12 +11,14 @@ namespace MotoHub.Data
         }
 
         public DbSet<Motorcycle> Motorcycles { get; set; }
+        public DbSet<OutboxMessage> OutboxMessages => Set<OutboxMessage>();
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             modelBuilder.Entity<Motorcycle>()
                 .HasIndex(m => m.LicensePlate)
                 .IsUnique();
+            modelBuilder.ConfigureOutbox();
         }
     }
 }

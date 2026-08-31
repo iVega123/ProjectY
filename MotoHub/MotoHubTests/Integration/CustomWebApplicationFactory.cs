@@ -5,6 +5,7 @@ using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Hosting;
 using Moq;
 using MotoHub.CrossCutting;
 using MotoHub.Data;
@@ -22,6 +23,7 @@ namespace MotoHubTests.Integration
         {
             builder.ConfigureServices(services =>
             {
+                services.RemoveAll<IHostedService>();
 
                 var serviceDescriptor = services.FirstOrDefault(descriptor =>
                 descriptor.ServiceType == typeof(IRentalOperationService));
@@ -74,7 +76,12 @@ namespace MotoHubTests.Integration
                     {"Jwt:SigningKey", JwtKey},
                     {"Jwt:Issuer", JwtIssuer},
                     {"Jwt:Audience", JwtAudience},
-                    {"MotoHubApiKey", "" }
+                    {"MotoHubApiKey", "" },
+                    {"RabbitMQ:HostName", "unused"},
+                    {"RabbitMQ:VirtualHost", "unused"},
+                    {"RabbitMQ:UserName", "unused"},
+                    {"RabbitMQ:Password", "unused"},
+                    {"RabbitMQ:LicenceUpdateQueueName", "licence-update-test"}
                 };
 
                 configBuilder.Sources.Clear();

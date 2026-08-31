@@ -130,16 +130,19 @@ namespace MotoHubTests.Unit.Services
 
             var mockMessagingPublisherService = new Mock<IMessagingPublisherService>();
             mockMessagingPublisherService.Setup(p => p.PublishLicenceUpdate(It.Is<LicencePlateRabbitMQEntity>(m =>
-                m.newLicencePlate == newLicensePlate && m.oldLicencePlate == existingLicensePlate)))
+                m.AggregateId == existingMotorcycle.Id &&
+                m.newLicencePlate == newLicensePlate &&
+                m.oldLicencePlate == existingLicensePlate)))
                 .Verifiable("Message was not published correctly");
 
-            var service = new MotorcycleService(mockRepository.Object, mockMapper.Object, mockMessagingPublish.Object, mockCrossCutting.Object);
+            var service = new MotorcycleService(mockRepository.Object, mockMapper.Object, mockMessagingPublisherService.Object, mockCrossCutting.Object);
 
             // Act
             await service.UpdateMotorcycleAsync(existingLicensePlate, newLicensePlate);
 
             // Assert
             mockRepository.Verify();
+            mockMessagingPublisherService.Verify();
 
             Assert.Equal(newLicensePlate, existingMotorcycle.LicensePlate);
         }

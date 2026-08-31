@@ -4,6 +4,9 @@ global:
   external_labels:
     cluster: projecty-local
 
+rule_files:
+  - /etc/prometheus/rules/*.yml
+
 scrape_configs:
   # Métricas RED derivadas dos traces pelo connector spanmetrics.
   - job_name: otel-collector
@@ -24,6 +27,10 @@ scrape_configs:
         labels: { service: risk-pricing, language: python }
       - targets: ["telemetry:4000"]
         labels: { service: telemetry, language: elixir }
+      - targets: ["auth-gate:8080"]
+        labels: { service: auth-gate, language: dotnet }
+      - targets: ["moto-hub:8100"]
+        labels: { service: moto-hub, language: dotnet }
     # Um serviço fora do ar não deve derrubar o scrape dos outros.
     honor_labels: true
 
