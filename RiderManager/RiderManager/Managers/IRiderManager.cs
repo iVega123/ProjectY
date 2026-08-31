@@ -7,7 +7,7 @@ namespace RiderManager.Managers
         Task AddRiderAsync(RiderDTO riderDto);
         Task UpdateRiderAsync(string userId, RiderDTO riderDto);
         Task DeleteRiderAsync(string userId);
-        Task UpdateRiderImageAsync(string userId, IFormFile cnhFile);
+        Task UpdateRiderImageAsync(string userId, IFormFile cnhFile, string? objectName = null);
         Task<IEnumerable<RiderResponseDTO>> GetAllRidersAsync();
         Task<RiderResponseDTO> GetRiderByUserIdAsync(string userId);
     }

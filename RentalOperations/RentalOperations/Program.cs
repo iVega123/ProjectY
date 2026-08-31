@@ -54,6 +54,12 @@ builder.Services
 builder.Services.AddSingleton<MongoDbContext>(sp =>
     new MongoDbContext(mongoDbSettings["ConnectionString"], mongoDbSettings["DatabaseName"]));
 builder.Services.AddHostedService<MongoRentalIndexInitializer>();
+builder.Services.AddSingleton(
+    builder.Configuration.GetSection("Messaging:Inbox").Get<MongoInboxOptions>()
+        ?? new MongoInboxOptions());
+builder.Services.AddSingleton(TimeProvider.System);
+builder.Services.AddSingleton<MongoInboxProcessor>();
+builder.Services.AddHostedService<MongoInboxInitializer>();
 builder.Services.AddAuthentication(options =>
 {
     options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;

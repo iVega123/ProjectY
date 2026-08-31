@@ -19,7 +19,7 @@ namespace RiderManager.Services.MinioStorageService
             _configuration = configuration;
         }
 
-        public async Task<string> UploadFileAsync(IFormFile file)
+        public async Task<string> UploadFileAsync(IFormFile file, string? objectName = null)
         {
             var bucketKey = _configuration.GetSection("MinIO").Get<MinIOOptions>()?.BucketName ?? throw new InvalidOperationException("JwtKey is not set in the configuration.");
 
@@ -36,7 +36,7 @@ namespace RiderManager.Services.MinioStorageService
                 throw new InvalidOperationException("Invalid file type. Only PNG and BMP files are allowed.");
             }
 
-            string uniqueFileName = $"{DateTime.UtcNow:yyyyMMddHHmmssfff}{extension}";
+            string uniqueFileName = objectName ?? $"{DateTime.UtcNow:yyyyMMddHHmmssfff}{extension}";
             string contentType = file.ContentType;
 
             using (var fileStream = file.OpenReadStream())

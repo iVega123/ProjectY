@@ -54,9 +54,9 @@ namespace RiderManager.Managers
             await _riderService.DeleteRiderAsync(userId);
         }
 
-        public async Task UpdateRiderImageAsync(string userId, IFormFile cnhFile)
+        public async Task UpdateRiderImageAsync(string userId, IFormFile cnhFile, string? objectName = null)
         {
-            var filePath = await _minioFileStorageService.UploadFileAsync(cnhFile);
+            var filePath = await _minioFileStorageService.UploadFileAsync(cnhFile, objectName);
             var link = await _minioFileStorageService.GetPresignedUrlAsync(filePath, userId);
             await _preSignedUrlService.StorePresignedUrlAsync(link);
             return;
