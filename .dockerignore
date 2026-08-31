@@ -1,0 +1,17 @@
+**
+!AuthGate/
+!AuthGate/AuthGate/
+!AuthGate/AuthGate/**
+!MotoHub/
+!MotoHub/MotoHub/
+!MotoHub/MotoHub/**
+!RentalOperations/
+!RentalOperations/RentalOperations/
+!RentalOperations/RentalOperations/**
+!RiderManager/
+!RiderManager/RiderManager/
+!RiderManager/RiderManager/**
+!Shared/
+!Shared/**
+**/bin/
+**/obj/

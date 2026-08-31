@@ -114,10 +114,8 @@ services:
 
   auth-gate:
     build:
-      context: ./AuthGate
-      dockerfile: AuthGate/Dockerfile
-      additional_contexts:
-        shared: ./Shared
+      context: .
+      dockerfile: AuthGate/AuthGate/Dockerfile
     container_name: auth-gate
     ports:
       - "8080:8080"
@@ -144,10 +142,8 @@ services:
   
   rider-manager:
     build:
-      context: ./RiderManager
-      dockerfile: RiderManager/Dockerfile
-      additional_contexts:
-        shared: ./Shared
+      context: .
+      dockerfile: RiderManager/RiderManager/Dockerfile
     container_name: rider-manager
     ports:
       - "8000:8000"
@@ -178,10 +174,8 @@ services:
 
   moto-hub:
     build:
-      context: ./MotoHub
-      dockerfile: MotoHub/Dockerfile
-      additional_contexts:
-        shared: ./Shared
+      context: .
+      dockerfile: MotoHub/MotoHub/Dockerfile
     container_name: moto-hub
     ports:
       - "8100:8100"
@@ -207,10 +201,8 @@ services:
   
   rental-operations:
     build:
-      context: ./RentalOperations
-      dockerfile: RentalOperations/Dockerfile
-      additional_contexts:
-        shared: ./Shared
+      context: .
+      dockerfile: RentalOperations/RentalOperations/Dockerfile
     container_name: rental-operations
     ports:
       - "8200:8200"

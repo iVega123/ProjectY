@@ -38,6 +38,7 @@ jobs:
             auth_gate:
               - 'AuthGate/**'
               - 'Shared/**'
+              - '.dockerignore'
               - '.github/workflows/ci.yml'
               - '.grype.yaml'
               - '.trivyignore.yaml'
@@ -49,6 +50,7 @@ jobs:
               - 'MotoHub/**'
               - 'Shared/Health/**'
               - 'Shared/Hosting/**'
+              - '.dockerignore'
               - '.github/workflows/ci.yml'
               - '.grype.yaml'
               - '.trivyignore.yaml'
@@ -60,6 +62,7 @@ jobs:
               - 'RentalOperations/**'
               - 'Shared/Health/**'
               - 'Shared/Hosting/**'
+              - '.dockerignore'
               - '.github/workflows/ci.yml'
               - '.grype.yaml'
               - '.trivyignore.yaml'
@@ -70,6 +73,7 @@ jobs:
             rider_manager:
               - 'RiderManager/**'
               - 'Shared/**'
+              - '.dockerignore'
               - '.github/workflows/ci.yml'
               - '.grype.yaml'
               - '.trivyignore.yaml'
@@ -97,7 +101,6 @@ jobs:
             local context="$4"
             local dockerfile="$5"
             local repository="$6"
-            local build_contexts="${7:-}"
             matrix=$(jq --compact-output \
               --arg service "$service" \
               --arg solution "$solution" \
@@ -109,22 +112,21 @@ jobs:
               --arg context "$context" \
               --arg dockerfile "$dockerfile" \
               --arg repository "$repository" \
-              --arg build_contexts "$build_contexts" \
-              '.include += [{service: $service, image: $image, context: $context, dockerfile: $dockerfile, repository: $repository, build_contexts: $build_contexts}]' \
+              '.include += [{service: $service, image: $image, context: $context, dockerfile: $dockerfile, repository: $repository}]' \
               <<< "$image_matrix")
           }
 
           if [[ "$AUTH_GATE_CHANGED" == "true" ]]; then
-            add_service "AuthGate" "AuthGate/AuthGate.sln" "auth-gate" "AuthGate" "AuthGate/AuthGate/Dockerfile" "ghcr.io/ivega123/projecty/auth-gate" "shared=./Shared"
+            add_service "AuthGate" "AuthGate/AuthGate.sln" "auth-gate" "." "AuthGate/AuthGate/Dockerfile" "ghcr.io/ivega123/projecty/auth-gate"
           fi
           if [[ "$MOTO_HUB_CHANGED" == "true" ]]; then
-            add_service "MotoHub" "MotoHub/MotoHub.sln" "moto-hub" "MotoHub" "MotoHub/MotoHub/Dockerfile" "ghcr.io/ivega123/projecty/moto-hub" "shared=./Shared"
+            add_service "MotoHub" "MotoHub/MotoHub.sln" "moto-hub" "." "MotoHub/MotoHub/Dockerfile" "ghcr.io/ivega123/projecty/moto-hub"
           fi
           if [[ "$RENTAL_OPERATIONS_CHANGED" == "true" ]]; then
-            add_service "RentalOperations" "RentalOperations/RentalOperations.sln" "rental-operations" "RentalOperations" "RentalOperations/RentalOperations/Dockerfile" "ghcr.io/ivega123/projecty/rental-operations" "shared=./Shared"
+            add_service "RentalOperations" "RentalOperations/RentalOperations.sln" "rental-operations" "." "RentalOperations/RentalOperations/Dockerfile" "ghcr.io/ivega123/projecty/rental-operations"
           fi
           if [[ "$RIDER_MANAGER_CHANGED" == "true" ]]; then
-            add_service "RiderManager" "RiderManager/RiderManager.sln" "rider-manager" "RiderManager" "RiderManager/RiderManager/Dockerfile" "ghcr.io/ivega123/projecty/rider-manager" "shared=./Shared"
+            add_service "RiderManager" "RiderManager/RiderManager.sln" "rider-manager" "." "RiderManager/RiderManager/Dockerfile" "ghcr.io/ivega123/projecty/rider-manager"
           fi
 
           echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
@@ -202,7 +204,6 @@ jobs:
         with:
           context: ${{ matrix.context }}
           file: ${{ matrix.dockerfile }}
-          build-contexts: ${{ matrix.build_contexts }}
           platforms: linux/amd64
           tags: projecty/${{ matrix.image }}:ci-${{ github.sha }}
           outputs: type=oci,dest=artifacts/${{ matrix.image }}-oci,tar=false,oci-mediatypes=true
