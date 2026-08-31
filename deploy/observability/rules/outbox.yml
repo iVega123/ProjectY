@@ -1,0 +1,20 @@
+groups:
+  - name: projecty-outbox
+    rules:
+      - alert: ProjectYOutboxBacklog
+        expr: projecty_outbox_depth > 100
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Outbox backlog in {{ $labels.service }}"
+          description: "The transactional outbox has {{ $value }} unpublished events."
+
+      - alert: ProjectYOutboxStalled
+        expr: projecty_outbox_depth > 0 and projecty_outbox_oldest_age_seconds > 300
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Outbox relay stalled in {{ $labels.service }}"
+          description: "The oldest unpublished event has been waiting for more than five minutes."

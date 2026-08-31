@@ -39,6 +39,14 @@
     <Compile Include="..\..\Shared\Hosting\SwaggerPolicy.cs" Link="Shared\Hosting\SwaggerPolicy.cs" />
     <Compile Include="..\..\Shared\Hosting\DatabaseMigrationCommand.cs" Link="Shared\Hosting\DatabaseMigrationCommand.cs" />
     <Compile Include="..\..\Shared\Messaging\QueueMessageAuthenticator.cs" Link="Shared\Messaging\QueueMessageAuthenticator.cs" />
+    <Compile Include="..\..\Shared\Messaging\IOutboxTransport.cs" Link="Shared\Messaging\IOutboxTransport.cs" />
+    <Compile Include="..\..\Shared\Messaging\IRabbitMqConnectionProvider.cs" Link="Shared\Messaging\IRabbitMqConnectionProvider.cs" />
+    <Compile Include="..\..\Shared\Messaging\OutboxMessage.cs" Link="Shared\Messaging\OutboxMessage.cs" />
+    <Compile Include="..\..\Shared\Messaging\OutboxMetricsEndpoint.cs" Link="Shared\Messaging\OutboxMetricsEndpoint.cs" />
+    <Compile Include="..\..\Shared\Messaging\OutboxModelBuilderExtensions.cs" Link="Shared\Messaging\OutboxModelBuilderExtensions.cs" />
+    <Compile Include="..\..\Shared\Messaging\OutboxRelay.cs" Link="Shared\Messaging\OutboxRelay.cs" />
+    <Compile Include="..\..\Shared\Messaging\OutboxRelayOptions.cs" Link="Shared\Messaging\OutboxRelayOptions.cs" />
+    <Compile Include="..\..\Shared\Messaging\RabbitMqOutboxTransport.cs" Link="Shared\Messaging\RabbitMqOutboxTransport.cs" />
   </ItemGroup>
   
 </Project>

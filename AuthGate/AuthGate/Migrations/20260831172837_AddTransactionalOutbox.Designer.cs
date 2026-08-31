@@ -3,6 +3,7 @@ using System;
 using AuthGate.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace AuthGate.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260831172837_AddTransactionalOutbox")]
+    partial class AddTransactionalOutbox
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -262,12 +265,6 @@ namespace AuthGate.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)");
 
-                    b.Property<Guid?>("ClaimToken")
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTime?>("ClaimedUntilUtc")
-                        .HasColumnType("timestamp with time zone");
-
                     b.Property<string>("Destination")
                         .IsRequired()
                         .HasMaxLength(200)
@@ -302,8 +299,7 @@ namespace AuthGate.Migrations
 
                     b.HasIndex("AggregateType", "AggregateId", "AggregateSequence");
 
-                    b.HasIndex("PublishedAtUtc", "ClaimedUntilUtc", "NextAttemptAtUtc", "OccurredAtUtc")
-                        .HasDatabaseName("IX_OutboxMessages_PendingClaim");
+                    b.HasIndex("PublishedAtUtc", "NextAttemptAtUtc", "OccurredAtUtc");
 
                     b.ToTable("OutboxMessages", (string)null);
                 });

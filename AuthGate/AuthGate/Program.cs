@@ -7,7 +7,6 @@ using Microsoft.IdentityModel.Tokens;
 using Serilog;
 using System.Text;
 using AuthGate.Configurations;
-using RabbitMQ.Client;
 using AuthGate.Services.RabbitMQ;
 using AuthGate.Services.File;
 using AuthGate.Services;
@@ -47,30 +46,18 @@ if (!isTesting)
 Log.Logger = loggerConfig.CreateLogger();
 builder.Host.UseSerilog();
 
-var rabbitMQConfig = builder.Configuration.GetSection("RabbitMQ").Get<RabbitMQOptions>();
+var rabbitMQConfig = builder.Configuration.GetSection("RabbitMQ").Get<RabbitMQOptions>()
+    ?? throw new InvalidOperationException("RabbitMQ configuration is missing.");
 builder.Services.AddSingleton<RabbitMQOptions>(rabbitMQConfig);
 var postgresConnection = new NpgsqlConnectionStringBuilder(
     builder.Configuration.GetConnectionString("Postgresql") ?? "Host=postgres;Port=5432");
 builder.Services
     .AddProjectYHealthChecks()
     .AddTcpDependency("postgres", postgresConnection.Host ?? "postgres", postgresConnection.Port)
-    .AddTcpDependency("rabbitmq", rabbitMQConfig?.HostName ?? "rabbitmq", 5672);
+    .AddTcpDependency("rabbitmq", rabbitMQConfig.HostName, 5672);
 builder.Services.AddSingleton(new QueueMessageAuthenticator(
     builder.Configuration["Messaging:SigningKey"]
         ?? throw new InvalidOperationException("Messaging:SigningKey is not configured.")));
-
-builder.Services.AddSingleton<IConnection>(sp =>
-{
-    var rabbitMQOptions = sp.GetRequiredService<RabbitMQOptions>();
-    var factory = new ConnectionFactory()
-    {
-        HostName = rabbitMQOptions.HostName,
-        VirtualHost = rabbitMQOptions.VirtualHost,
-        UserName = rabbitMQOptions.UserName,
-        Password = rabbitMQOptions.Password
-    };
-    return factory.CreateConnection();
-});
 
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
@@ -79,6 +66,17 @@ builder.Services.AddSwaggerGen();
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
     options.UseNpgsql(builder.Configuration.GetConnectionString("Postgresql")));
 builder.Services.AddScoped<IMessagingPublisherService, MessagingPublisherService>();
+builder.Services.AddSingleton(new OutboxRelayOptions
+{
+    ServiceName = "auth-gate",
+    HostName = rabbitMQConfig.HostName,
+    VirtualHost = rabbitMQConfig.VirtualHost,
+    UserName = rabbitMQConfig.UserName,
+    Password = rabbitMQConfig.Password
+});
+builder.Services.AddSingleton<IOutboxTransport, RabbitMqOutboxTransport>();
+builder.Services.AddSingleton<IRabbitMqConnectionProvider, RabbitMqConnectionProvider>();
+builder.Services.AddHostedService<OutboxRelay<ApplicationDbContext>>();
 builder.Services.AddScoped<IFileValidationService, FileValidationService>();
 
 builder.Services.AddIdentity<ApplicationUser, IdentityRole>(options =>
@@ -137,6 +135,7 @@ app.UseAuthorization();
 
 app.MapControllers();
 app.MapProjectYHealthChecks();
+app.MapOutboxMetrics<ApplicationDbContext>("auth-gate");
 
 app.Run();
 

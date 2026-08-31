@@ -2,6 +2,7 @@
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using AuthGate.Model;
+using ProjectY.Shared.Messaging;
 
 namespace AuthGate.Data
 {
@@ -10,6 +11,9 @@ namespace AuthGate.Data
         public ApplicationDbContext(DbContextOptions<ApplicationDbContext> options) : base(options)
         {
         }
+
+        public DbSet<OutboxMessage> OutboxMessages => Set<OutboxMessage>();
+
         protected override void OnModelCreating(ModelBuilder builder)
         {
             base.OnModelCreating(builder);
@@ -27,6 +31,7 @@ namespace AuthGate.Data
                 .IsUnique();
 
             SeedRoles(builder);
+            builder.ConfigureOutbox();
         }
         private static void SeedRoles(ModelBuilder builder)
         {

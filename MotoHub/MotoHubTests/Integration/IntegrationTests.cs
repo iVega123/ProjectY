@@ -1,7 +1,12 @@
 ﻿using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.IdentityModel.Tokens;
+using Microsoft.EntityFrameworkCore;
+using MotoHub.Data;
 using MotoHub.DTOs;
+using MotoHub.Models;
+using MotoHub.Services;
 using Newtonsoft.Json;
 using System.IdentityModel.Tokens.Jwt;
 using System.Net;
@@ -19,6 +24,35 @@ namespace MotoHubTests.Integration
         public IntegrationTests(CustomWebApplicationFactory<Program> factory)
         {
             _factory = factory;
+        }
+
+        [Fact]
+        public async Task Update_CommitsMotorcycleAndOutboxMessageTogether()
+        {
+            using var scope = _factory.Services.CreateScope();
+            var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+            var repositoryContext = scope.ServiceProvider.GetRequiredService<IApplicationDbContext>();
+            Assert.Same(context, repositoryContext);
+
+            var motorcycle = new Motorcycle
+            {
+                Id = Guid.NewGuid().ToString(),
+                LicensePlate = $"OUT-{Guid.NewGuid():N}",
+                Model = "Transactional outbox",
+                Year = 2026,
+                RegistrationDate = DateTime.UtcNow
+            };
+            context.Motorcycles.Add(motorcycle);
+            await context.SaveChangesAsync();
+
+            var service = scope.ServiceProvider.GetRequiredService<IMotorcycleService>();
+            var newLicencePlate = $"NEW-{Guid.NewGuid():N}";
+            await service.UpdateMotorcycleAsync(motorcycle.LicensePlate, newLicencePlate);
+
+            var message = Assert.Single(context.OutboxMessages.Local);
+            Assert.Equal(motorcycle.Id, message.AggregateId);
+            Assert.Equal(newLicencePlate, motorcycle.LicensePlate);
+            Assert.Equal(1, await context.OutboxMessages.CountAsync(item => item.Id == message.Id));
         }
 
         [Fact]
