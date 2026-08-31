@@ -96,7 +96,7 @@ builder.Services.AddAuthentication(options =>
 });
 
 builder.Services.AddControllers();
-builder.Services.AddAutoMapper(typeof(Program));
+builder.Services.AddAutoMapper(_ => { }, typeof(Program));
 builder.Services.AddHttpClient();
 builder.Services.AddScoped<IApplicationDbContext, ApplicationDbContext>();
 builder.Services.AddScoped<IMotorcycleRepository, MotorcycleRepository>();
