@@ -1,0 +1,280 @@
+x-restart: &restart
+  restart: unless-stopped
+
+x-otel-env: &otel-env
+  OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+  OTEL_EXPORTER_OTLP_PROTOCOL: grpc
+  OTEL_TRACES_SAMPLER: parentbased_traceidratio
+  OTEL_TRACES_SAMPLER_ARG: "1.0"
+
+networks:
+  projecty:
+    driver: bridge
+
+services:
+  cockroachdb:
+    <<: *restart
+    command: start-single-node --insecure --http-addr=0.0.0.0:8080
+    environment:
+      COCKROACH_HEALTH_URL: postgresql://root@localhost:26257/defaultdb?sslmode=disable
+    ports:
+      - "26257:26257"
+      - "26080:8080"
+
+  cockroach-init:
+    profiles: ["init"]
+    command: ["--insecure", "--host=cockroachdb:26257", "--file=/sql/001_init.sql"]
+    volumes:
+      - ./db/cockroach:/sql:ro
+
+  redis:
+    <<: *restart
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
+    ports:
+      - "6379:6379"
+
+  rabbitmq:
+    <<: *restart
+    volumes:
+      - ./rabbitmq/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf:ro
+      - ../.rabbitmq-definitions.json:/etc/rabbitmq/definitions.json:ro
+
+  kafka:
+    <<: *restart
+    environment:
+      KAFKA_NODE_ID: "1"
+      KAFKA_PROCESS_ROLES: "broker,controller"
+      KAFKA_LISTENERS: "PLAINTEXT://:9092,CONTROLLER://:9093"
+      KAFKA_ADVERTISED_LISTENERS: "PLAINTEXT://kafka:9092"
+      KAFKA_CONTROLLER_LISTENER_NAMES: "CONTROLLER"
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: "CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT"
+      KAFKA_INTER_BROKER_LISTENER_NAME: "PLAINTEXT"
+      KAFKA_CONTROLLER_QUORUM_VOTERS: "1@kafka:9093"
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "1"
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: "1"
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: "1"
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: "0"
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      CLUSTER_ID: "5L6g3nShT-eMCtK--X86sw"
+    ports:
+      - "9092:9092"
+
+  cassandra:
+    <<: *restart
+    profiles: ["full"]
+    environment:
+      CASSANDRA_CLUSTER_NAME: projecty
+      CASSANDRA_DC: dev
+      CASSANDRA_ENDPOINT_SNITCH: GossipingPropertyFileSnitch
+      HEAP_NEWSIZE: 128M
+      MAX_HEAP_SIZE: 1G
+    ports:
+      - "9042:9042"
+    volumes:
+      - ./db/cassandra:/schema:ro
+
+  mongodb:
+    <<: *restart
+    profiles: ["full"]
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: "${MONGO_USER:?Set MONGO_USER in .env}"
+      MONGO_INITDB_ROOT_PASSWORD: "${MONGO_PASSWORD:?Set MONGO_PASSWORD in .env}"
+    ports:
+      - "27018:27017"
+
+  minio:
+    <<: *restart
+    profiles: ["full"]
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: "${MINIO_USER:?Set MINIO_USER in .env}"
+      MINIO_ROOT_PASSWORD: "${MINIO_PASSWORD:?Set MINIO_PASSWORD in .env}"
+    ports:
+      - "9010:9000"
+      - "9011:9001"
+
+  toxiproxy:
+    <<: *restart
+    command: ["-host=0.0.0.0", "-config=/config/toxiproxy.json"]
+    ports:
+      - "8474:8474"
+      - "21257:21257"
+      - "26379:26379"
+      - "29092:29092"
+    volumes:
+      - ./chaos/toxiproxy.json:/config/toxiproxy.json:ro
+
+  otel-collector:
+    <<: *restart
+    build:
+      context: ./observability
+      dockerfile: otel-collector.Dockerfile
+    command: ["--config=/etc/otel/config.yaml"]
+    ports:
+      - "4317:4317"
+      - "4318:4318"
+      - "8889:8889"
+    volumes:
+      - ./observability/otel-collector.yaml:/etc/otel/config.yaml:ro
+
+  prometheus:
+    <<: *restart
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=6h
+      - --web.enable-lifecycle
+      - --web.enable-remote-write-receiver
+      - --enable-feature=exemplar-storage
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+
+  tempo:
+    <<: *restart
+    command: ["-config.file=/etc/tempo/tempo.yaml"]
+    ports:
+      - "3200:3200"
+    volumes:
+      - ./observability/tempo.yaml:/etc/tempo/tempo.yaml:ro
+
+  loki:
+    <<: *restart
+    command: ["-config.file=/etc/loki/loki.yaml"]
+    ports:
+      - "3100:3100"
+    volumes:
+      - ./observability/loki.yaml:/etc/loki/loki.yaml:ro
+
+  grafana:
+    <<: *restart
+    environment:
+      GF_SECURITY_ADMIN_USER: "${GRAFANA_USER:?Set GRAFANA_USER in .env}"
+      GF_SECURITY_ADMIN_PASSWORD: "${GRAFANA_PASSWORD:?Set GRAFANA_PASSWORD in .env}"
+      GF_USERS_DEFAULT_THEME: system
+      GF_FEATURE_TOGGLES_ENABLE: traceqlEditor,traceToMetrics
+      GF_INSTALL_PLUGINS: ""
+    ports:
+      - "3001:3000"
+    volumes:
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+
+  api-gateway:
+    <<: *restart
+    build:
+      context: ../services/api-gateway
+      dockerfile: Dockerfile
+    environment:
+      <<: *otel-env
+      OTEL_SERVICE_NAME: api-gateway
+      GATEWAY_BIND: 0.0.0.0:8090
+      GATEWAY_REDIS_URL: redis://toxiproxy:26379
+      GATEWAY_RATE_LIMIT_RPS: "50"
+      GATEWAY_UPSTREAM_RENTAL: http://rental-core:8091
+      GATEWAY_UPSTREAM_MEDIA: http://media-guard:8092
+      GATEWAY_UPSTREAM_RISK: http://risk-pricing:8093
+      GATEWAY_UPSTREAM_TELEMETRY: http://telemetry:4000
+      RUST_LOG: info,api_gateway=debug
+    ports:
+      - "8090:8090"
+
+  rental-core:
+    <<: *restart
+    build:
+      context: ../services/rental-core
+      dockerfile: Dockerfile
+    environment:
+      <<: *otel-env
+      OTEL_SERVICE_NAME: rental-core
+      ASPNETCORE_ENVIRONMENT: Development
+      Swagger__Enabled: "${SWAGGER_ENABLED:-true}"
+      ASPNETCORE_URLS: http://+:8091
+      ConnectionStrings__Cockroach: "Host=toxiproxy;Port=21257;Database=projecty;Username=root;SSL Mode=Disable"
+      Messaging__Kafka__BootstrapServers: "toxiproxy:29092"
+      Messaging__RabbitMq__Host: "toxiproxy"
+      Messaging__RabbitMq__Port: "25672"
+      Messaging__RabbitMq__Username: "${RENTAL_CORE_RABBITMQ_USER:?Set RENTAL_CORE_RABBITMQ_USER in .env}"
+      Messaging__RabbitMq__Password: "${RENTAL_CORE_RABBITMQ_PASSWORD:?Set RENTAL_CORE_RABBITMQ_PASSWORD in .env}"
+      Messaging__RabbitMq__VirtualHost: projecty
+      Redis__Url: toxiproxy:26379
+    ports:
+      - "8091:8091"
+
+  media-guard:
+    <<: *restart
+    profiles: ["full"]
+    build:
+      context: ../services/media-guard
+      dockerfile: Dockerfile
+    environment:
+      <<: *otel-env
+      OTEL_SERVICE_NAME: media-guard
+      MEDIA_BIND: 0.0.0.0:8092
+      MEDIA_RABBITMQ_URL: "amqp://${MEDIA_GUARD_RABBITMQ_USER:?Set MEDIA_GUARD_RABBITMQ_USER in .env}:${MEDIA_GUARD_RABBITMQ_PASSWORD:?Set MEDIA_GUARD_RABBITMQ_PASSWORD in .env}@toxiproxy:25672/projecty"
+      MEDIA_S3_ENDPOINT: http://minio:9000
+      MEDIA_S3_BUCKET: projecty-media
+      MEDIA_MAX_BYTES: "8388608"
+      RUST_LOG: info,media_guard=debug
+    ports:
+      - "8092:8092"
+
+  risk-pricing:
+    <<: *restart
+    profiles: ["full"]
+    build:
+      context: ../services/risk-pricing
+      dockerfile: Dockerfile
+    environment:
+      <<: *otel-env
+      OTEL_SERVICE_NAME: risk-pricing
+      RISK_BIND_HOST: 0.0.0.0
+      RISK_BIND_PORT: "8093"
+      RISK_KAFKA_BOOTSTRAP: toxiproxy:29092
+    ports:
+      - "8093:8093"
+
+  telemetry:
+    <<: *restart
+    profiles: ["full"]
+    build:
+      context: ../services/telemetry
+      dockerfile: Dockerfile
+    environment:
+      <<: *otel-env
+      OTEL_SERVICE_NAME: telemetry
+      PORT: "4000"
+      CASSANDRA_HOSTS: cassandra
+      KAFKA_BOOTSTRAP: toxiproxy:29092
+    ports:
+      - "4000:4000"
+
+  console:
+    <<: *restart
+    profiles: ["full"]
+    build:
+      context: ../services/console
+      dockerfile: Dockerfile
+    environment:
+      <<: *otel-env
+      OTEL_SERVICE_NAME: console
+      NODE_ENV: development
+      PORT: "3000"
+      GATEWAY_URL: http://api-gateway:8090
+      TELEMETRY_WS_URL: ws://localhost:4000/socket
+      GRAFANA_URL: http://localhost:3001
+    ports:
+      - "3000:3000"
+
+  k6:
+    profiles: ["load"]
+    command: ["run", "--out", "experimental-prometheus-rw", "/scripts/rental-flow.js"]
+    environment:
+      K6_PROMETHEUS_RW_SERVER_URL: http://prometheus:9090/api/v1/write
+      K6_PROMETHEUS_RW_TREND_STATS: "p(95),p(99),min,max"
+      BASE_URL: http://api-gateway:8090
+      VUS: "${K6_VUS:-20}"
+      DURATION: "${K6_DURATION:-30s}"
+    volumes:
+      - ../load/k6:/scripts:ro

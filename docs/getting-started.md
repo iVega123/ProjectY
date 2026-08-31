@@ -93,10 +93,18 @@ depends on the network connection and Docker cache.
 
 | Service | Local URL |
 |---|---|
-| Auth Gate | <http://localhost:8080/swagger> |
-| Rider Manager | <http://localhost:8000/swagger> |
-| MotoHub | <http://localhost:8100/swagger> |
-| Rental Operations | <http://localhost:8200/swagger> |
+| Auth Gate | <http://localhost:8080> |
+| Rider Manager | <http://localhost:8000> |
+| MotoHub | <http://localhost:8100> |
+| Rental Operations | <http://localhost:8200> |
+
+The audited baseline Compose stack runs every application in `Production`, so
+Swagger and the developer exception page are disabled. Local IDE launch
+profiles use `Development`; their `appsettings.Development.json` files enable
+Swagger explicitly. Both conditions are required: setting `Swagger:Enabled`
+alone never exposes Swagger from a `Production` process. Set
+`SWAGGER_ENABLED=false` in `.env` to disable Swagger in the self-hosted
+development overlay without editing its Compose files.
 
 Only the HTTP endpoints above are documented as usable. The compose file also
 publishes ports that older documentation described as HTTPS, but it configures
@@ -136,6 +144,67 @@ The command creates the `Admin` role when needed, creates or promotes the
 configured account, and exits. The `finally` block removes both plaintext
 values from the shell even if bootstrap fails.
 
+## Verify health probes
+
+Each application exposes three separate endpoints:
+
+| Endpoint | Question | Dependency failure |
+|---|---|---|
+| `/health/live` | Is the process responding? | Stays healthy |
+| `/health/ready` | Can required infrastructure be reached? | Becomes unhealthy |
+| `/health/startup` | Has application startup completed? | Unchanged after startup |
+
+Compose uses `/health/ready` for container health. The probe command runs through
+the application assembly itself, so the chiseled images do not need a shell,
+`curl`, or `wget`.
+
+Manual readiness drill:
+
+```bash
+docker compose up --build -d
+curl --fail http://localhost:8000/health/live
+curl --fail http://localhost:8000/health/ready
+curl --fail http://localhost:8000/health/startup
+
+docker compose stop rabbitmq
+curl --fail http://localhost:8000/health/live
+curl --fail http://localhost:8000/health/ready # expected to fail with HTTP 503
+
+docker compose start rabbitmq
+```
+
+The process remains live while RabbitMQ is unavailable, but readiness removes it
+from rotation. Inter-service HTTP upstreams are deliberately excluded from
+readiness: a circuit breaker opening for one upstream must not disable unrelated
+routes served by the same process.
+
+## Verify startup gates
+
+The modernization Compose graph waits for real health instead of elapsed time.
+Tempo and Loki become healthy first, followed by the OpenTelemetry Collector,
+Prometheus, and Grafana. Application services wait for a healthy collector and
+for each infrastructure dependency they use through Toxiproxy.
+
+The observability portion can be exercised before the modernization service
+builds land:
+
+```bash
+docker compose --env-file .env -f deploy/overlays/selfhost/compose.yaml up --build -d \
+  tempo loki otel-collector prometheus grafana toxiproxy
+docker compose --env-file .env -f deploy/overlays/selfhost/compose.yaml ps
+
+# Dependents must retain their container IDs and return to all-green.
+docker compose --env-file .env -f deploy/overlays/selfhost/compose.yaml ps -q \
+  otel-collector prometheus grafana
+docker compose --env-file .env -f deploy/overlays/selfhost/compose.yaml restart loki
+docker compose --env-file .env -f deploy/overlays/selfhost/compose.yaml ps -q \
+  otel-collector prometheus grafana
+```
+
+The IDs before and after the Loki restart must match. Compose health conditions
+gate initial startup only; they do not cascade a dependency restart into healthy
+dependents. No fixed delay is used in the self-hosted Compose overlay.
+
 ## Stop the stack
 
 Press `Ctrl+C` in the attached Compose session, then run:
@@ -153,9 +222,8 @@ Named volumes are retained so local database contents survive the restart.
   contains no committed secret defaults.
 - Supporting databases, queues, object storage, and observability tools publish
   host ports with development settings.
-- There are no reliable health gates; startup currently depends on fixed waits.
-- The modernization topology in `deploy/compose.yaml` is not runnable until its
-  referenced services land.
+- The modernization topology in `deploy/overlays/selfhost/compose.yaml` is not
+  runnable until its referenced services land.
 
 Use the [audit correction order](AUDITORIA-ARQUITETURA-SEGURANCA.md)
 and the [modernization epics](https://github.com/iVega123/ProjectY/issues?q=is%3Aissue%20state%3Aopen%20label%3Aepic)

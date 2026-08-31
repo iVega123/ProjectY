@@ -38,6 +38,7 @@ jobs:
             auth_gate:
               - 'AuthGate/**'
               - 'Shared/**'
+              - '.dockerignore'
               - '.github/workflows/ci.yml'
               - '.grype.yaml'
               - '.trivyignore.yaml'
@@ -47,6 +48,9 @@ jobs:
               - 'NuGet.config'
             moto_hub:
               - 'MotoHub/**'
+              - 'Shared/Health/**'
+              - 'Shared/Hosting/**'
+              - '.dockerignore'
               - '.github/workflows/ci.yml'
               - '.grype.yaml'
               - '.trivyignore.yaml'
@@ -56,6 +60,9 @@ jobs:
               - 'NuGet.config'
             rental_operations:
               - 'RentalOperations/**'
+              - 'Shared/Health/**'
+              - 'Shared/Hosting/**'
+              - '.dockerignore'
               - '.github/workflows/ci.yml'
               - '.grype.yaml'
               - '.trivyignore.yaml'
@@ -66,6 +73,7 @@ jobs:
             rider_manager:
               - 'RiderManager/**'
               - 'Shared/**'
+              - '.dockerignore'
               - '.github/workflows/ci.yml'
               - '.grype.yaml'
               - '.trivyignore.yaml'
@@ -90,8 +98,9 @@ jobs:
             local service="$1"
             local solution="$2"
             local image="$3"
-            local dockerfile="$4"
-            local repository="$5"
+            local context="$4"
+            local dockerfile="$5"
+            local repository="$6"
             matrix=$(jq --compact-output \
               --arg service "$service" \
               --arg solution "$solution" \
@@ -100,23 +109,24 @@ jobs:
             image_matrix=$(jq --compact-output \
               --arg service "$service" \
               --arg image "$image" \
+              --arg context "$context" \
               --arg dockerfile "$dockerfile" \
               --arg repository "$repository" \
-              '.include += [{service: $service, image: $image, dockerfile: $dockerfile, repository: $repository}]' \
+              '.include += [{service: $service, image: $image, context: $context, dockerfile: $dockerfile, repository: $repository}]' \
               <<< "$image_matrix")
           }
 
           if [[ "$AUTH_GATE_CHANGED" == "true" ]]; then
-            add_service "AuthGate" "AuthGate/AuthGate.sln" "auth-gate" "AuthGate/AuthGate/Dockerfile" "ghcr.io/ivega123/projecty/auth-gate"
+            add_service "AuthGate" "AuthGate/AuthGate.sln" "auth-gate" "." "AuthGate/AuthGate/Dockerfile" "ghcr.io/ivega123/projecty/auth-gate"
           fi
           if [[ "$MOTO_HUB_CHANGED" == "true" ]]; then
-            add_service "MotoHub" "MotoHub/MotoHub.sln" "moto-hub" "MotoHub/MotoHub/Dockerfile" "ghcr.io/ivega123/projecty/moto-hub"
+            add_service "MotoHub" "MotoHub/MotoHub.sln" "moto-hub" "." "MotoHub/MotoHub/Dockerfile" "ghcr.io/ivega123/projecty/moto-hub"
           fi
           if [[ "$RENTAL_OPERATIONS_CHANGED" == "true" ]]; then
-            add_service "RentalOperations" "RentalOperations/RentalOperations.sln" "rental-operations" "RentalOperations/RentalOperations/Dockerfile" "ghcr.io/ivega123/projecty/rental-operations"
+            add_service "RentalOperations" "RentalOperations/RentalOperations.sln" "rental-operations" "." "RentalOperations/RentalOperations/Dockerfile" "ghcr.io/ivega123/projecty/rental-operations"
           fi
           if [[ "$RIDER_MANAGER_CHANGED" == "true" ]]; then
-            add_service "RiderManager" "RiderManager/RiderManager.sln" "rider-manager" "RiderManager/RiderManager/Dockerfile" "ghcr.io/ivega123/projecty/rider-manager"
+            add_service "RiderManager" "RiderManager/RiderManager.sln" "rider-manager" "." "RiderManager/RiderManager/Dockerfile" "ghcr.io/ivega123/projecty/rider-manager"
           fi
 
           echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
@@ -192,7 +202,7 @@ jobs:
         id: build
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
-          context: .
+          context: ${{ matrix.context }}
           file: ${{ matrix.dockerfile }}
           platforms: linux/amd64
           tags: projecty/${{ matrix.image }}:ci-${{ github.sha }}

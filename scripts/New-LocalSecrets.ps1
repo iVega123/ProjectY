@@ -2,13 +2,21 @@
 
 [CmdletBinding()]
 param(
-    [string]$OutputPath = (Join-Path $PSScriptRoot "..\.env"),
-    [string]$RabbitMqDefinitionsPath = (Join-Path $PSScriptRoot "..\.rabbitmq-definitions.json"),
+    [string]$OutputPath,
+    [string]$RabbitMqDefinitionsPath,
     [switch]$Force
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+
+if ([string]::IsNullOrWhiteSpace($OutputPath)) {
+    $OutputPath = Join-Path $PSScriptRoot "..\.env"
+}
+
+if ([string]::IsNullOrWhiteSpace($RabbitMqDefinitionsPath)) {
+    $RabbitMqDefinitionsPath = Join-Path $PSScriptRoot "..\.rabbitmq-definitions.json"
+}
 
 $resolvedOutputPath = [System.IO.Path]::GetFullPath($OutputPath)
 $resolvedDefinitionsPath = [System.IO.Path]::GetFullPath($RabbitMqDefinitionsPath)
@@ -74,6 +82,7 @@ function New-RabbitMqPasswordHash {
 
 $localSuffix = (New-RandomValue -ByteCount 6).ToLowerInvariant()
 $values = [ordered]@{
+    SWAGGER_ENABLED                   = "true"
     AUTH_GATE_POSTGRES_DB             = "AuthGateDB"
     MOTO_HUB_POSTGRES_DB              = "MotoHubDB"
     RIDER_MANAGER_POSTGRES_DB         = "RiderManagerDB"

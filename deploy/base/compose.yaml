@@ -1,0 +1,340 @@
+# ProjectY — canonical Compose application model.
+#
+# Environment-specific build contexts, host ports, bind mounts, runtime modes,
+# and restart policies belong to an overlay under deploy/overlays/.
+networks:
+  projecty:
+
+volumes:
+  cockroach-data:
+  redis-data:
+  rabbitmq-data:
+  kafka-data:
+  cassandra-data:
+  mongo-data:
+  minio-data:
+  grafana-data:
+  prometheus-data:
+  tempo-data:
+  loki-data:
+
+services:
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Dados
+  # ─────────────────────────────────────────────────────────────────────────
+
+  cockroachdb:
+    image: cockroachdb/cockroach:v24.3.5
+    volumes:
+      - cockroach-data:/cockroach/cockroach-data
+    networks: [projecty]
+    healthcheck:
+      test: ["CMD-SHELL", "cockroach sql --url=\"$${COCKROACH_HEALTH_URL}\" --execute 'SELECT 1' >/dev/null 2>&1"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+
+  cockroach-init:
+    image: cockroachdb/cockroach:v24.3.5
+    entrypoint: ["cockroach", "sql"]
+    networks: [projecty]
+    depends_on:
+      cockroachdb:
+        condition: service_healthy
+
+  redis:
+    image: redis:7.4-alpine
+    volumes:
+      - redis-data:/data
+    networks: [projecty]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  rabbitmq:
+    image: rabbitmq:4.0-management-alpine
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    networks: [projecty]
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "check_running"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 20s
+
+  kafka:
+    image: apache/kafka:3.9.0
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    networks: [projecty]
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 10s
+      retries: 15
+      start_period: 25s
+
+  cassandra:
+    image: cassandra:5.0
+    volumes:
+      - cassandra-data:/var/lib/cassandra
+    networks: [projecty]
+    healthcheck:
+      test: ["CMD-SHELL", "cqlsh -e 'DESCRIBE KEYSPACES' >/dev/null 2>&1"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 60s
+
+  mongodb:
+    image: mongo:8.0
+    volumes:
+      - mongo-data:/data/db
+    networks: [projecty]
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+
+  minio:
+    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+    volumes:
+      - minio-data:/data
+    networks: [projecty]
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Injeção de falhas — todo acesso a dependência passa por aqui
+  # ─────────────────────────────────────────────────────────────────────────
+
+  toxiproxy:
+    image: ghcr.io/shopify/toxiproxy:2.11.0
+    networks: [projecty]
+    healthcheck:
+      test: ["CMD", "/toxiproxy-cli", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Observabilidade — pilha Grafana (LGTM)
+  # ─────────────────────────────────────────────────────────────────────────
+
+  otel-collector:
+    image: projecty/otel-collector:dev
+    networks: [projecty]
+    depends_on:
+      tempo:
+        condition: service_healthy
+      loki:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/busybox", "wget", "--spider", "-q", "http://localhost:13133/"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+
+  prometheus:
+    image: prom/prometheus:v3.2.1
+    volumes:
+      - prometheus-data:/prometheus
+    networks: [projecty]
+    depends_on:
+      otel-collector:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/bin/wget", "--spider", "-q", "http://localhost:9090/-/ready"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+
+  tempo:
+    image: grafana/tempo:2.7.1
+    volumes:
+      - tempo-data:/var/tempo
+    networks: [projecty]
+    healthcheck:
+      test: ["CMD", "/usr/bin/wget", "--spider", "-q", "http://localhost:3200/ready"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+
+  loki:
+    image: grafana/loki:3.4.2
+    volumes:
+      - loki-data:/loki
+    networks: [projecty]
+    healthcheck:
+      test: ["CMD", "/busybox/wget", "--spider", "-q", "http://localhost:3100/ready"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+
+  grafana:
+    image: grafana/grafana:11.6.0
+    volumes:
+      - grafana-data:/var/lib/grafana
+    networks: [projecty]
+    depends_on:
+      prometheus:
+        condition: service_healthy
+      tempo:
+        condition: service_healthy
+      loki:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/usr/bin/wget", "--spider", "-q", "http://localhost:3000/api/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Serviços — núcleo
+  # ─────────────────────────────────────────────────────────────────────────
+
+  api-gateway:
+    image: projecty/api-gateway:dev
+    networks: [projecty]
+    depends_on:
+      redis:
+        condition: service_healthy
+      toxiproxy:
+        condition: service_healthy
+      otel-collector:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/app/api-gateway", "--healthcheck"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 10s
+
+  rental-core:
+    image: projecty/rental-core:dev
+    networks: [projecty]
+    depends_on:
+      cockroach-init:
+        condition: service_completed_successfully
+      cockroachdb:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      toxiproxy:
+        condition: service_healthy
+      otel-collector:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8091/health/ready >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Serviços — perfil full
+  # ─────────────────────────────────────────────────────────────────────────
+
+  media-guard:
+    image: projecty/media-guard:dev
+    networks: [projecty]
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      toxiproxy:
+        condition: service_healthy
+      otel-collector:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/app/media-guard", "--healthcheck"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 10s
+
+  risk-pricing:
+    image: projecty/risk-pricing:dev
+    networks: [projecty]
+    depends_on:
+      kafka:
+        condition: service_healthy
+      toxiproxy:
+        condition: service_healthy
+      otel-collector:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8093/health/ready').status==200 else 1)\""]
+      interval: 10s
+      timeout: 5s
+      retries: 8
+      start_period: 15s
+
+  telemetry:
+    image: projecty/telemetry:dev
+    networks: [projecty]
+    depends_on:
+      cassandra:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      toxiproxy:
+        condition: service_healthy
+      otel-collector:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:4000/health/ready >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 25s
+
+  console:
+    image: projecty/console:dev
+    networks: [projecty]
+    depends_on:
+      api-gateway:
+        condition: service_healthy
+      telemetry:
+        condition: service_healthy
+      otel-collector:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/api/health >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Carga — perfil load, acionado por botão no Tilt
+  # ─────────────────────────────────────────────────────────────────────────
+
+  k6:
+    image: grafana/k6:0.57.0
+    networks: [projecty]
+    depends_on:
+      api-gateway:
+        condition: service_healthy
+      prometheus:
+        condition: service_healthy

@@ -1,6 +1,9 @@
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
+using MongoDB.Driver;
+using ProjectY.Shared.Health;
+using ProjectY.Shared.Hosting;
 using RentalOperations.Configurations;
 using RentalOperations.CrossCutting.Services;
 using RentalOperations.Data;
@@ -11,6 +14,11 @@ using RentalOperations.Services.RabbitMQService;
 using Serilog;
 using Serilog.Sinks.Elasticsearch;
 using System.Text;
+
+if (await HealthProbeCommand.TryRunAsync(args))
+{
+    return;
+}
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -38,6 +46,11 @@ builder.Services.AddSingleton<RabbitMQOptions>(rabbitMQConfig);
 builder.Services.Configure<RabbitMQOptions>(builder.Configuration.GetSection("RabbitMQ"));
 
 var mongoDbSettings = builder.Configuration.GetSection("MongoDbSettings");
+var mongoUrl = new MongoUrl(mongoDbSettings["ConnectionString"] ?? "mongodb://mongodb:27017");
+builder.Services
+    .AddProjectYHealthChecks()
+    .AddTcpDependency("mongodb", mongoUrl.Server.Host, mongoUrl.Server.Port)
+    .AddTcpDependency("rabbitmq", rabbitMQConfig?.HostName ?? "rabbitmq", 5672);
 builder.Services.AddSingleton<MongoDbContext>(sp =>
     new MongoDbContext(mongoDbSettings["ConnectionString"], mongoDbSettings["DatabaseName"]));
 builder.Services.AddAuthentication(options =>
@@ -107,7 +120,7 @@ builder.Services.AddScoped<IRentalService, RentalService>();
 
 var app = builder.Build();
 
-if (app.Environment.IsDevelopment())
+if (SwaggerPolicy.IsEnabled(app.Environment, app.Configuration))
 {
     app.UseSwagger();
     app.UseSwaggerUI();
@@ -119,6 +132,7 @@ app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapControllers();
+app.MapProjectYHealthChecks();
 
 app.Run();
 

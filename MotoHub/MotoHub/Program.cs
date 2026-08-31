@@ -14,6 +14,14 @@ using Serilog.Sinks.Elasticsearch;
 using MotoHub.Configurations;
 using MotoHub.Services.RabbitMQ;
 using MotoHub.CrossCutting;
+using Npgsql;
+using ProjectY.Shared.Health;
+using ProjectY.Shared.Hosting;
+
+if (await HealthProbeCommand.TryRunAsync(args))
+{
+    return;
+}
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -44,6 +52,12 @@ builder.Host.UseSerilog();
 
 var rabbitMQConfig = builder.Configuration.GetSection("RabbitMQ").Get<RabbitMQOptions>();
 builder.Services.AddSingleton<RabbitMQOptions>(rabbitMQConfig);
+var postgresConnection = new NpgsqlConnectionStringBuilder(
+    builder.Configuration.GetConnectionString("Postgresql") ?? "Host=postgres;Port=5432");
+builder.Services
+    .AddProjectYHealthChecks()
+    .AddTcpDependency("postgres", postgresConnection.Host ?? "postgres", postgresConnection.Port)
+    .AddTcpDependency("rabbitmq", rabbitMQConfig?.HostName ?? "rabbitmq", 5672);
 
 builder.Services.AddSingleton<IConnection>(sp =>
 {
@@ -119,7 +133,7 @@ builder.Services.AddSwaggerGen(c =>
 
 var app = builder.Build();
 
-if (app.Environment.IsDevelopment())
+if (SwaggerPolicy.IsEnabled(app.Environment, app.Configuration))
 {
     app.UseSwagger();
     app.UseSwaggerUI();
@@ -132,6 +146,7 @@ app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapControllers();
+app.MapProjectYHealthChecks();
 
 app.Run();
 

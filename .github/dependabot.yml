@@ -1,0 +1,32 @@
+version: 2
+
+updates:
+  - package-ecosystem: docker-compose
+    directories:
+      - "/"
+      - "/deploy/base"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: America/Manaus
+    groups:
+      container-images:
+        patterns:
+          - "*"
+
+  - package-ecosystem: docker
+    directories:
+      - "/AuthGate/AuthGate"
+      - "/MotoHub/MotoHub"
+      - "/RentalOperations/RentalOperations"
+      - "/RiderManager/RiderManager"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: America/Manaus
+    groups:
+      dotnet-base-images:
+        patterns:
+          - "mcr.microsoft.com/dotnet/*"
