@@ -53,6 +53,7 @@ builder.Services
     .AddTcpDependency("rabbitmq", rabbitMQConfig?.HostName ?? "rabbitmq", 5672);
 builder.Services.AddSingleton<MongoDbContext>(sp =>
     new MongoDbContext(mongoDbSettings["ConnectionString"], mongoDbSettings["DatabaseName"]));
+builder.Services.AddHostedService<MongoRentalIndexInitializer>();
 builder.Services.AddAuthentication(options =>
 {
     options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;

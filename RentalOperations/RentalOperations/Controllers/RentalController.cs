@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 using RentalOperations.DTOs;
 using RentalOperations.Services;
 using RentalOperations.Filters;
+using RentalOperations.Domain;
 using System.Security.Claims;
 
 namespace RentalOperations.Controllers
@@ -32,6 +33,15 @@ namespace RentalOperations.Controllers
                 }
                 await _rentalService.CreateRentalAsync(createDto, userIdClaim.Value);
                 return Ok("Created with Success!");
+            }
+            catch (ActiveRentalConflictException ex)
+            {
+                return Conflict(new ProblemDetails
+                {
+                    Status = StatusCodes.Status409Conflict,
+                    Title = "Active rental conflict",
+                    Detail = ex.Message
+                });
             }
             catch (Exception ex)
             {

@@ -20,7 +20,8 @@ namespace RentalOperations.Model
         public DateTime StartDate { get; set; }
 
         [BsonElement("endDate")]
-        public DateTime EndDate { get; set; }
+        [BsonIgnoreIfNull]
+        public DateTime? EndDate { get; set; }
 
         [BsonElement("predictedEndDate")]
         public DateTime PredictedEndDate { get; set; }
@@ -36,6 +37,10 @@ namespace RentalOperations.Model
 
         [BsonElement("statusMessage")]
         public string StatusMessage { get; set; } = string.Empty;
+
+        [BsonElement("status")]
+        [BsonRepresentation(BsonType.String)]
+        public RentalStatus Status { get; set; } = RentalStatus.Active;
 
         public Rental()
         {

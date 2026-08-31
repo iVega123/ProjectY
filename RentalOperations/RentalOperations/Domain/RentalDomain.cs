@@ -7,7 +7,7 @@ namespace RentalOperations.Domain
         public string MotocycleLicencePlate { get; private set; } = string.Empty;
         public string UserId { get; private set; } = string.Empty;
         public DateTime StartDate { get; private set; }
-        public DateTime EndDate { get; private set; }
+        public DateTime? EndDate { get; private set; }
         public DateTime PredictedEndDate { get; private set; }
         public decimal TotalCost { get; private set; }
 
@@ -22,7 +22,7 @@ namespace RentalOperations.Domain
                 MotocycleLicencePlate = dto.MotocycleLicencePlate,
                 UserId = userId,
                 StartDate = dto.StartDate,
-                EndDate = DateTime.MinValue,
+                EndDate = null,
                 PredictedEndDate = dto.PredictedEndDate,
                 TotalCost = CalculateTotalCost(dto.StartDate, dto.PredictedEndDate)
             };
