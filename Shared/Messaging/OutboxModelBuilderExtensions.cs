@@ -21,6 +21,12 @@ public static class OutboxModelBuilderExtensions
             item.AggregateId,
             item.AggregateSequence
         });
-        message.HasIndex(item => new { item.PublishedAtUtc, item.NextAttemptAtUtc, item.OccurredAtUtc });
+        message.HasIndex(item => new
+        {
+            item.PublishedAtUtc,
+            item.ClaimedUntilUtc,
+            item.NextAttemptAtUtc,
+            item.OccurredAtUtc
+        }).HasDatabaseName("IX_OutboxMessages_PendingClaim");
     }
 }

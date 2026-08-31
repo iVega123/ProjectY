@@ -85,6 +85,55 @@ public sealed class OutboxRelayTests : IAsyncLifetime
         }
     }
 
+    [Fact]
+    [Trait("Category", "Integration")]
+    public async Task ConcurrentRelays_ClaimOnlyOneHeadMessagePerAggregate()
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddDbContext<ApplicationDbContext>(options =>
+            options.UseNpgsql(_database.GetConnectionString()));
+        var transport = new BlockingOutboxTransport();
+        services.AddSingleton<IOutboxTransport>(transport);
+        services.AddSingleton(new OutboxRelayOptions
+        {
+            ServiceName = "moto-hub-test",
+            HostName = "unused",
+            VirtualHost = "unused",
+            UserName = "unused",
+            Password = "unused",
+            BatchSize = 1,
+            ClaimLeaseDuration = TimeSpan.FromMinutes(1)
+        });
+        services.AddTransient<OutboxRelay<ApplicationDbContext>>();
+        await using var provider = services.BuildServiceProvider();
+
+        await using (var scope = provider.CreateAsyncScope())
+        {
+            var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+            await context.Database.MigrateAsync();
+            context.OutboxMessages.AddRange(
+                Message(sequence: 0, eventType: "motorcycle.first.v1"),
+                Message(sequence: 1, eventType: "motorcycle.second.v1"));
+            await context.SaveChangesAsync();
+        }
+
+        var firstRelay = provider.GetRequiredService<OutboxRelay<ApplicationDbContext>>();
+        var secondRelay = provider.GetRequiredService<OutboxRelay<ApplicationDbContext>>();
+        var firstDispatch = firstRelay.DispatchOnceAsync();
+        await transport.FirstPublishStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.Equal(0, await secondRelay.DispatchOnceAsync().WaitAsync(TimeSpan.FromSeconds(5)));
+        Assert.Equal(1, transport.PublishCalls);
+
+        transport.ReleaseFirstPublish();
+        Assert.Equal(1, await firstDispatch);
+        Assert.Equal(1, await secondRelay.DispatchOnceAsync());
+        Assert.Equal(
+            ["motorcycle.first.v1", "motorcycle.second.v1"],
+            transport.PublishedEventTypes);
+    }
+
     private static OutboxMessage Message(long sequence, string eventType) => new()
     {
         AggregateType = "motorcycle",
@@ -111,4 +160,30 @@ internal sealed class RecoverableOutboxTransport : IOutboxTransport
         Published.Add(message);
         return Task.CompletedTask;
     }
+}
+
+internal sealed class BlockingOutboxTransport : IOutboxTransport
+{
+    private readonly TaskCompletionSource<bool> _releaseFirstPublish = new(
+        TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly System.Collections.Concurrent.ConcurrentQueue<string> _publishedEventTypes = new();
+    private int _publishCalls;
+
+    public TaskCompletionSource<bool> FirstPublishStarted { get; } = new(
+        TaskCreationOptions.RunContinuationsAsynchronously);
+    public int PublishCalls => Volatile.Read(ref _publishCalls);
+    public string[] PublishedEventTypes => _publishedEventTypes.ToArray();
+
+    public async Task PublishAsync(OutboxMessage message, CancellationToken cancellationToken)
+    {
+        var call = Interlocked.Increment(ref _publishCalls);
+        _publishedEventTypes.Enqueue(message.EventType);
+        if (call == 1)
+        {
+            FirstPublishStarted.TrySetResult(true);
+            await _releaseFirstPublish.Task.WaitAsync(cancellationToken);
+        }
+    }
+
+    public void ReleaseFirstPublish() => _releaseFirstPublish.TrySetResult(true);
 }

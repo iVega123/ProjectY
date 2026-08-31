@@ -13,5 +13,7 @@ public sealed class OutboxMessage
     public DateTime? PublishedAtUtc { get; set; }
     public int PublishAttempts { get; set; }
     public DateTime? NextAttemptAtUtc { get; set; }
+    public Guid? ClaimToken { get; set; }
+    public DateTime? ClaimedUntilUtc { get; set; }
     public string? LastError { get; set; }
 }

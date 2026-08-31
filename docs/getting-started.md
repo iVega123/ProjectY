@@ -79,6 +79,10 @@ required before the first Compose startup.
 RabbitMQ does not publish its AMQP or management ports to the host. To inspect
 it locally, run management commands inside the container or attach a temporary
 tool to the Compose network instead of adding a permanent host port mapping.
+The generated definitions declare the rider and licence-update queues as
+durable. When upgrading a stack that created those queues as non-durable,
+restart RabbitMQ before the application services so the old queues disappear;
+RabbitMQ cannot change queue durability in place.
 
 Then start the stack:
 

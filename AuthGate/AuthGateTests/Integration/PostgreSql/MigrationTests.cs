@@ -28,7 +28,7 @@ public sealed class MigrationTests : IAsyncLifetime
         await context.Database.MigrateAsync();
 
         Assert.Empty(await context.Database.GetPendingMigrationsAsync());
-        Assert.Equal(2, (await context.Database.GetAppliedMigrationsAsync()).Count());
+        Assert.Equal(3, (await context.Database.GetAppliedMigrationsAsync()).Count());
         Assert.Equal(2, await context.Roles.CountAsync());
     }
 }

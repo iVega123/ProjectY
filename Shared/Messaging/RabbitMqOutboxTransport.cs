@@ -22,7 +22,7 @@ public sealed class RabbitMqOutboxTransport : IOutboxTransport
 
         using var connection = _connectionProvider.Create();
         using var channel = connection.CreateModel();
-        channel.QueueDeclare(message.Destination, durable: false, exclusive: false, autoDelete: false);
+        channel.QueueDeclare(message.Destination, durable: true, exclusive: false, autoDelete: false);
         channel.ConfirmSelect();
 
         var properties = channel.CreateBasicProperties();

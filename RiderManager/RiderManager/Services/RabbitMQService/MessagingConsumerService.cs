@@ -43,8 +43,8 @@ namespace RiderManager.Services.RabbitMQService
 
         private void InitializeQueues()
         {
-            _channel.QueueDeclare(queue: _riderInfoQueueName, durable: false, exclusive: false);
-            _channel.QueueDeclare(queue: _imageStreamQueueName, durable: false, exclusive: false);
+            _channel.QueueDeclare(queue: _riderInfoQueueName, durable: true, exclusive: false, autoDelete: false);
+            _channel.QueueDeclare(queue: _imageStreamQueueName, durable: true, exclusive: false, autoDelete: false);
             _channel.BasicQos(prefetchSize: 0, prefetchCount: 1, global: false);
         }
 

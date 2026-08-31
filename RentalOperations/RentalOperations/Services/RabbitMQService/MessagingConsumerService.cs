@@ -36,7 +36,7 @@ namespace RentalOperations.Services.RabbitMQService
 
         private void InitializeQueues()
         {
-            _channel.QueueDeclare(queue: _licenceUpdateQueueName, durable: false, exclusive: false);
+            _channel.QueueDeclare(queue: _licenceUpdateQueueName, durable: true, exclusive: false, autoDelete: false);
             _channel.BasicQos(prefetchSize: 0, prefetchCount: 1, global: false);
         }
 

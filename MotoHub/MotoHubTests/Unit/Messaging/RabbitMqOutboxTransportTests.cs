@@ -37,6 +37,12 @@ public sealed class RabbitMqOutboxTransportTests
 
         await transport.PublishAsync(message, CancellationToken.None);
 
+        channel.Verify(item => item.QueueDeclare(
+            message.Destination,
+            true,
+            false,
+            false,
+            It.IsAny<IDictionary<string, object>>()), Times.Once);
         channel.Verify(item => item.ConfirmSelect(), Times.Once);
         channel.Verify(item => item.WaitForConfirmsOrDie(options.ConfirmationTimeout), Times.Once);
         channel.Verify(item => item.BasicPublish(
