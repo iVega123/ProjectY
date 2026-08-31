@@ -36,15 +36,11 @@ public sealed class ActiveRentalApiTests : IAsyncLifetime
         var rentals = new MongoClient(_database.GetConnectionString())
             .GetDatabase(DatabaseName)
             .GetCollection<BsonDocument>("Rentals");
-        await rentals.InsertOneAsync(new BsonDocument
-        {
-            ["MotorcycleLicencePlate"] = "LEGACY-0001",
-            ["userId"] = "legacy-rider",
-            ["startDate"] = DateTime.UtcNow.Date.AddDays(-7),
-            ["endDate"] = DateTime.MinValue,
-            ["predictedEndDate"] = DateTime.UtcNow.Date.AddDays(7),
-            ["initCost"] = 210m
-        });
+        await rentals.InsertManyAsync(
+        [
+            CreateLegacyOpenRental("legacy-rider-1", DateTime.UtcNow.Date.AddDays(-14)),
+            CreateLegacyOpenRental("legacy-rider-2", DateTime.UtcNow.Date.AddDays(-7))
+        ]);
         _factory = new MongoRentalApiFactory(_database.GetConnectionString(), DatabaseName);
     }
 
@@ -90,11 +86,17 @@ public sealed class ActiveRentalApiTests : IAsyncLifetime
         Assert.Equal(1, activeRentals);
         Assert.Null(persisted.EndDate);
 
-        var legacyRental = await rentals.Find(rental =>
+        var legacyRentals = await rentals.Find(rental =>
                 rental.MotorcycleLicencePlate == "LEGACY-0001")
-            .SingleAsync();
-        Assert.Equal(RentalStatus.Active, legacyRental.Status);
-        Assert.Null(legacyRental.EndDate);
+            .SortBy(rental => rental.StartDate)
+            .ToListAsync();
+        Assert.Equal(2, legacyRentals.Count);
+        Assert.Equal(RentalStatus.Active, legacyRentals[0].Status);
+        Assert.Equal(RentalStatus.Quarantined, legacyRentals[1].Status);
+        Assert.Equal(
+            MongoRentalIndexInitializer.LegacyDuplicateQuarantineMessage,
+            legacyRentals[1].StatusMessage);
+        Assert.All(legacyRentals, rental => Assert.Null(rental.EndDate));
 
         var indexes = await (await rentals.Indexes.ListAsync()).ToListAsync();
         Assert.Contains(indexes, index =>
@@ -136,6 +138,16 @@ public sealed class ActiveRentalApiTests : IAsyncLifetime
             CreateToken("Rider", "rider-1"));
         return client;
     }
+
+    private static BsonDocument CreateLegacyOpenRental(string userId, DateTime startDate) => new()
+    {
+        ["MotorcycleLicencePlate"] = "LEGACY-0001",
+        ["userId"] = userId,
+        ["startDate"] = startDate,
+        ["endDate"] = DateTime.MinValue,
+        ["predictedEndDate"] = DateTime.UtcNow.Date.AddDays(7),
+        ["initCost"] = 210m
+    };
 
     private static string CreateToken(string role, string userId)
     {

@@ -47,10 +47,12 @@ public sealed class RentalPeriodTests
         Assert.False(overlaps);
     }
 
-    [Fact]
-    public void Overlaps_WhenExistingRentalWasCancelled_ReturnsFalse()
+    [Theory]
+    [InlineData(RentalStatus.Cancelled)]
+    [InlineData(RentalStatus.Quarantined)]
+    public void Overlaps_WhenExistingRentalIsUnavailableForScheduling_ReturnsFalse(RentalStatus status)
     {
-        var rental = CreateRental(RentalStatus.Cancelled);
+        var rental = CreateRental(status);
 
         var overlaps = RentalPeriod.Overlaps(rental, ExistingStart, ExistingEnd);
 

@@ -9,7 +9,7 @@ public static class RentalPeriod
         DateTime requestedStart,
         DateTime requestedEnd)
     {
-        if (rental.Status == RentalStatus.Cancelled)
+        if (rental.Status is RentalStatus.Cancelled or RentalStatus.Quarantined)
         {
             return false;
         }
