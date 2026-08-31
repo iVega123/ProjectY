@@ -5,7 +5,6 @@ updates:
     directories:
       - "/"
       - "/deploy/base"
-    target-branch: epic/5-local-development-loop
     schedule:
       interval: weekly
       day: monday
@@ -22,7 +21,6 @@ updates:
       - "/MotoHub/MotoHub"
       - "/RentalOperations/RentalOperations"
       - "/RiderManager/RiderManager"
-    target-branch: epic/5-local-development-loop
     schedule:
       interval: weekly
       day: monday
