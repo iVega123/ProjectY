@@ -4,6 +4,7 @@ using Microsoft.OpenApi.Models;
 using MongoDB.Driver;
 using ProjectY.Shared.Health;
 using ProjectY.Shared.Hosting;
+using ProjectY.Shared.Idempotency;
 using RentalOperations.Configurations;
 using RentalOperations.CrossCutting.Services;
 using RentalOperations.Data;
@@ -40,6 +41,7 @@ Log.Logger = new LoggerConfiguration()
 
 builder.Services.Configure<RiderManagerSettings>(builder.Configuration.GetSection("RiderManagerSettings"));
 builder.Services.Configure<MotoHubSettings>(builder.Configuration.GetSection("MotoHubSettings"));
+builder.Services.AddProjectYIdempotency(builder.Configuration, "rental-operations");
 
 var rabbitMQConfig = builder.Configuration.GetSection("RabbitMQ").Get<RabbitMQOptions>();
 builder.Services.AddSingleton<RabbitMQOptions>(rabbitMQConfig);
@@ -86,6 +88,7 @@ builder.Services.AddScoped<AdminAuthorizationFilter>();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(c =>
 {
+    c.OperationFilter<IdempotencyKeyOperationFilter>();
     c.SwaggerDoc("v1", new OpenApiInfo { Title = "RentalOperations", Version = "v1" });
 
     // Configuração do esquema de segurança JWT no Swagger
@@ -137,6 +140,7 @@ app.UseHttpsRedirection();
 
 app.UseAuthentication();
 app.UseAuthorization();
+app.UseProjectYIdempotency();
 
 app.MapControllers();
 app.MapProjectYHealthChecks();

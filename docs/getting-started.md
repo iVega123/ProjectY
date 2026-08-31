@@ -32,6 +32,7 @@ starting.
 | Logstash | `5000` |
 | Kibana | `5601` |
 | PostgreSQL | `5432` |
+| Redis | `6379` |
 | pgAdmin | `5050` |
 | MongoDB | `27017` |
 | MinIO | `9000`, `9001` |
