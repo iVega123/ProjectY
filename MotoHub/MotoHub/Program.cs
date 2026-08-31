@@ -133,6 +133,11 @@ builder.Services.AddSwaggerGen(c =>
 
 var app = builder.Build();
 
+if (await DatabaseMigrationCommand.TryRunAsync<ApplicationDbContext>(args, app.Services))
+{
+    return;
+}
+
 if (SwaggerPolicy.IsEnabled(app.Environment, app.Configuration))
 {
     app.UseSwagger();

@@ -86,6 +86,12 @@ Then start the stack:
 docker compose up --build
 ```
 
+PostgreSQL must become healthy before the one-shot AuthGate, MotoHub, and
+RiderManager migration containers run. Each application starts only after its
+migration container exits successfully. See
+[PostgreSQL migration operations](database-migrations.md) for baseline adoption,
+schema changes, and rollback.
+
 The first build downloads the service and infrastructure images, so its duration
 depends on the network connection and Docker cache.
 

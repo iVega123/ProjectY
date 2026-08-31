@@ -30,6 +30,9 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v6
 
+      - name: Validate legacy Compose model
+        run: docker compose --file docker-compose.yml config --quiet --no-interpolate
+
       - name: Detect relevant paths
         id: filter
         uses: dorny/paths-filter@v3

@@ -17,7 +17,7 @@ namespace AuthGate.Migrations
         {
 #pragma warning disable 612, 618
             modelBuilder
-                .HasAnnotation("ProductVersion", "8.0.4")
+                .HasAnnotation("ProductVersion", "10.0.4")
                 .HasAnnotation("Relational:MaxIdentifierLength", 63);
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
@@ -50,14 +50,14 @@ namespace AuthGate.Migrations
                     b.HasData(
                         new
                         {
-                            Id = "06ee79b8-d618-44d6-96ce-95263fea0173",
+                            Id = "00000000-0000-0000-0000-000000000001",
                             ConcurrencyStamp = "1",
                             Name = "Admin",
                             NormalizedName = "ADMIN"
                         },
                         new
                         {
-                            Id = "689fe083-2735-4518-a9c0-ffe5e57f08d5",
+                            Id = "00000000-0000-0000-0000-000000000002",
                             ConcurrencyStamp = "2",
                             Name = "Rider",
                             NormalizedName = "RIDER"
@@ -258,26 +258,30 @@ namespace AuthGate.Migrations
                 {
                     b.HasBaseType("AuthGate.Model.ApplicationUser");
 
+                    b.Property<string>("CNHNumber")
+                        .IsRequired()
+                        .HasMaxLength(11)
+                        .HasColumnType("character varying(11)");
+
+                    b.Property<int>("CNHType")
+                        .HasColumnType("integer");
+
                     b.Property<string>("CNPJ")
                         .IsRequired()
                         .HasMaxLength(20)
                         .HasColumnType("character varying(20)");
 
-                    b.Property<DateTime>("DataNascimento")
+                    b.Property<DateTime>("DateOfBirth")
                         .HasColumnType("timestamp with time zone");
 
-                    b.Property<string>("NumeroCNH")
+                    b.Property<string>("Name")
                         .IsRequired()
-                        .HasMaxLength(11)
-                        .HasColumnType("character varying(11)");
+                        .HasColumnType("text");
 
-                    b.Property<int>("TipoCNH")
-                        .HasColumnType("integer");
-
-                    b.HasIndex("CNPJ")
+                    b.HasIndex("CNHNumber")
                         .IsUnique();
 
-                    b.HasIndex("NumeroCNH")
+                    b.HasIndex("CNPJ")
                         .IsUnique();
 
                     b.HasDiscriminator().HasValue("RiderUser");
