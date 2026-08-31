@@ -13,3 +13,5 @@
 !RiderManager/RiderManager/**
 !Shared/
 !Shared/**
+**/bin/
+**/obj/
