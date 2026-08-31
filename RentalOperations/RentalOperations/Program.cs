@@ -73,7 +73,7 @@ builder.Services.AddAuthentication(options =>
     };
 });
 builder.Services.AddControllers();
-builder.Services.AddAutoMapper(typeof(Program));
+builder.Services.AddAutoMapper(_ => { }, typeof(Program));
 builder.Services.AddScoped<AuthorizationFilter>();
 builder.Services.AddScoped<AdminAuthorizationFilter>();
 builder.Services.AddEndpointsApiExplorer();
