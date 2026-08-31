@@ -10,6 +10,7 @@ namespace RiderManager.Services.RabbitMQService
     public class MessagingConsumerService : IMessagingConsumerService, IDisposable
     {
         private readonly IModel _channel;
+        private readonly IModel _retryChannel;
         private readonly ILogger<MessagingConsumerService> _logger;
         private readonly IConnection _connection;
         private readonly string _riderInfoQueueName;
@@ -17,12 +18,14 @@ namespace RiderManager.Services.RabbitMQService
         private readonly string _riderInfoPoisonQueueName;
         private readonly IServiceProvider _serviceProvider;
         private readonly QueueMessageAuthenticator _messageAuthenticator;
+        private readonly BoundedRabbitMqRetryRouter _retryRouter;
 
         public MessagingConsumerService(IRabbitMqService mqService,
             ILogger<MessagingConsumerService> logger,
             RabbitMQOptions options,
             IServiceProvider serviceProvider,
-            QueueMessageAuthenticator messageAuthenticator)
+            QueueMessageAuthenticator messageAuthenticator,
+            BoundedRabbitMqRetryRouter retryRouter)
         {
             _connection = mqService.CreateChannel();
             _logger = logger;
@@ -30,26 +33,32 @@ namespace RiderManager.Services.RabbitMQService
             _imageStreamQueueName = options.ImageStreamQueueName;
             _riderInfoPoisonQueueName = options.RiderPoisonStreamQueueName;
             _channel = _connection.CreateModel();
+            _retryChannel = _connection.CreateModel();
             InitializeQueues();
             _serviceProvider = serviceProvider;
             _messageAuthenticator = messageAuthenticator;
+            _retryRouter = retryRouter;
         }
 
         private void InitializeQueues()
         {
             _channel.QueueDeclare(queue: _riderInfoQueueName, durable: true, exclusive: false, autoDelete: false);
             _channel.QueueDeclare(queue: _imageStreamQueueName, durable: true, exclusive: false, autoDelete: false);
+            _channel.QueueDeclare(queue: _riderInfoPoisonQueueName, durable: true, exclusive: false, autoDelete: false);
             _channel.BasicQos(prefetchSize: 0, prefetchCount: 1, global: false);
         }
 
-        public async Task StartConsuming()
+        public Task StartConsuming()
         {
-            ConsumeQueueAsync(_riderInfoQueueName, ProcessRiderInfo);
+            ConsumeQueueAsync(_riderInfoQueueName, ProcessRiderInfo, _riderInfoPoisonQueueName);
             ConsumeQueueAsync(_imageStreamQueueName, ProcessImageStream);
-            await ConsumePoisonQueue(_riderInfoPoisonQueueName);
+            return Task.CompletedTask;
         }
 
-        private void ConsumeQueueAsync(string queueName, Func<string, Task> processMessageFunc)
+        private void ConsumeQueueAsync(
+            string queueName,
+            Func<string, Task> processMessageFunc,
+            string? poisonQueueName = null)
         {
             var consumer = new AsyncEventingBasicConsumer(_channel);
             consumer.Received += async (model, ea) =>
@@ -68,8 +77,43 @@ namespace RiderManager.Services.RabbitMQService
                 }
                 catch (Exception ex)
                 {
-                    _channel.BasicNack(ea.DeliveryTag, false, true);
-                    _logger.LogError($"Error processing message: {ex.Message}", ex);
+                    if (poisonQueueName is null)
+                    {
+                        _channel.BasicNack(ea.DeliveryTag, false, true);
+                        _logger.LogError(ex, "Error processing message from {QueueName}; delivery requeued.", queueName);
+                        return;
+                    }
+
+                    try
+                    {
+                        var route = _retryRouter.RouteFailure(
+                            _retryChannel,
+                            queueName,
+                            poisonQueueName,
+                            ea.BasicProperties,
+                            ea.Body);
+                        _channel.BasicAck(ea.DeliveryTag, false);
+                        if (route == FailureRoute.Retry)
+                        {
+                            _logger.LogWarning(
+                                ex,
+                                "Registration failed; delivery was republished for a bounded retry.");
+                        }
+                        else
+                        {
+                            _logger.LogWarning(
+                                ex,
+                                "Registration failed permanently; delivery was quarantined in {PoisonQueueName}.",
+                                poisonQueueName);
+                        }
+                    }
+                    catch (Exception routingException)
+                    {
+                        _channel.BasicNack(ea.DeliveryTag, false, true);
+                        _logger.LogError(
+                            routingException,
+                            "Could not route failed registration; original delivery was requeued.");
+                    }
                 }
             };
 
@@ -90,53 +134,6 @@ namespace RiderManager.Services.RabbitMQService
             await handler.HandleRegistrationAsync(riderInfo);
         }
 
-        public async Task ConsumePoisonQueue(string poisonQueueName)
-        {
-            var consumer = new EventingBasicConsumer(_channel);
-            consumer.Received += async (model, ea) =>
-            {
-                var retriesHeader = ea.BasicProperties.Headers?.ContainsKey("x-retries") ?? false
-                    ? Convert.ToInt32(ea.BasicProperties.Headers["x-retries"])
-                    : 0;
-
-                var body = ea.Body.ToArray();
-                var message = Encoding.UTF8.GetString(body);
-
-                try
-                {
-                    await ProcessRiderInfo(message);
-                    _channel.BasicAck(ea.DeliveryTag, false);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError($"Error processing poison message: {ex.Message}", ex);
-                    if (retriesHeader < 3)
-                    {
-                        ScheduleRetry(message, retriesHeader + 1);
-                    }
-                    else
-                    {
-                        _logger.LogError($"Message {ea.BasicProperties.MessageId} dropped after 3 retries.");
-                    }
-                    _channel.BasicNack(ea.DeliveryTag, false, false);
-                }
-            };
-
-            _channel.BasicConsume(queue: poisonQueueName, autoAck: false, consumer: consumer);
-        }
-
-        private void ScheduleRetry(string message, int retryCount)
-        {
-            var delay = (int)Math.Pow(2, retryCount) * 1000; // Exponential backoff, e.g., 2s, 4s, 8s
-            var properties = _channel.CreateBasicProperties();
-            properties.Headers = new Dictionary<string, object> { { "x-retries", retryCount } };
-            properties.Expiration = delay.ToString();
-
-            _channel.QueueDeclare($"retry-poison-{retryCount}", durable: true, exclusive: false, autoDelete: false);
-            _channel.BasicPublish("", $"retry-poison-{retryCount}", properties, Encoding.UTF8.GetBytes(message));
-        }
-
-
         private async Task ProcessImageStream(string message)
         {
             var imagePart = _messageAuthenticator.ValidateMessage<ImagePart>(
@@ -149,16 +146,12 @@ namespace RiderManager.Services.RabbitMQService
             await handler.HandleImagePartAsync(imagePart);
         }
 
-        private void MoveToPoisonQueue(string message, string poisonQueueName)
-        {
-            _channel.QueueDeclare(queue: poisonQueueName, durable: true, exclusive: false, autoDelete: false);
-            _channel.BasicPublish(exchange: "", routingKey: poisonQueueName, basicProperties: null, body: Encoding.UTF8.GetBytes(message));
-        }
-
         public void Dispose()
         {
             _channel?.Close();
             _channel?.Dispose();
+            _retryChannel?.Close();
+            _retryChannel?.Dispose();
             _logger.LogInformation("RabbitMQ channel closed.");
         }
     }

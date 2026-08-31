@@ -103,6 +103,7 @@ builder.Services.AddScoped<IRiderService, RiderService>();
 builder.Services.AddScoped<IRiderRepository, RiderRepository>();
 builder.Services.AddSingleton<IRabbitMqService, RabbitMqService>();
 builder.Services.AddSingleton<IMessagingConsumerService, MessagingConsumerService>();
+builder.Services.AddSingleton<BoundedRabbitMqRetryRouter>();
 builder.Services.AddHostedService<ConsumerHostedService>();
 builder.Services.AddScoped<IRiderInboxProcessor, RiderInboxProcessor>();
 builder.Services.AddScoped<RiderInboxMessageHandler>();
