@@ -13,7 +13,7 @@ healthy:
 - `moto-hub-migrations`
 - `rider-manager-migrations`
 
-Each container starts the corresponding application with `--migrate` and exits
+Each container starts the corresponding application with `--migrate=true` and exits
 after `Database.MigrateAsync()` completes. Application containers depend on a
 successful migration exit, so a failed migration prevents incompatible code
 from starting.

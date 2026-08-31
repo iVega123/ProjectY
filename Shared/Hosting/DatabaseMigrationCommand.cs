@@ -5,13 +5,18 @@ namespace ProjectY.Shared.Hosting;
 
 public static class DatabaseMigrationCommand
 {
+    public const string Argument = "--migrate=true";
+
+    public static bool IsRequested(IEnumerable<string> args) =>
+        args.Contains(Argument, StringComparer.OrdinalIgnoreCase);
+
     public static async Task<bool> TryRunAsync<TContext>(
         string[] args,
         IServiceProvider services,
         CancellationToken cancellationToken = default)
         where TContext : DbContext
     {
-        if (!args.Contains("--migrate", StringComparer.Ordinal))
+        if (!IsRequested(args))
         {
             return false;
         }

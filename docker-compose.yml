@@ -159,7 +159,7 @@ services:
     build:
       context: .
       dockerfile: AuthGate/AuthGate/Dockerfile
-    command: ["--migrate"]
+    command: ["--migrate=true"]
     networks:
       - elk
     environment: *auth-gate-environment
@@ -196,7 +196,7 @@ services:
     build:
       context: .
       dockerfile: RiderManager/RiderManager/Dockerfile
-    command: ["--migrate"]
+    command: ["--migrate=true"]
     networks:
       - elk
     environment: *rider-manager-environment
@@ -233,7 +233,7 @@ services:
     build:
       context: .
       dockerfile: MotoHub/MotoHub/Dockerfile
-    command: ["--migrate"]
+    command: ["--migrate=true"]
     networks:
       - elk
     environment: *moto-hub-environment
