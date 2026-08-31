@@ -1,14 +1,12 @@
 FROM mcr.microsoft.com/dotnet/sdk:8.0 AS restore
 WORKDIR /src
 
-COPY AuthGate/AuthGate.csproj AuthGate/AuthGate/
+COPY AuthGate/AuthGate/AuthGate.csproj AuthGate/AuthGate/
 RUN dotnet restore AuthGate/AuthGate/AuthGate.csproj
 
 FROM restore AS publish
-COPY AuthGate/ AuthGate/AuthGate/
-COPY --from=shared Health/ Shared/Health/
-COPY --from=shared Hosting/ Shared/Hosting/
-COPY --from=shared Messaging/ Shared/Messaging/
+COPY AuthGate/AuthGate/ AuthGate/AuthGate/
+COPY Shared/ Shared/
 RUN dotnet publish AuthGate/AuthGate/AuthGate.csproj \
     --configuration Release \
     --output /app/publish \

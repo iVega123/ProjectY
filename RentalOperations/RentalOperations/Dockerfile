@@ -1,13 +1,12 @@
 FROM mcr.microsoft.com/dotnet/sdk:8.0 AS restore
 WORKDIR /src
 
-COPY RentalOperations/RentalOperations.csproj RentalOperations/RentalOperations/
+COPY RentalOperations/RentalOperations/RentalOperations.csproj RentalOperations/RentalOperations/
 RUN dotnet restore RentalOperations/RentalOperations/RentalOperations.csproj
 
 FROM restore AS publish
-COPY RentalOperations/ RentalOperations/RentalOperations/
-COPY --from=shared Health/ Shared/Health/
-COPY --from=shared Hosting/ Shared/Hosting/
+COPY RentalOperations/RentalOperations/ RentalOperations/RentalOperations/
+COPY Shared/ Shared/
 RUN dotnet publish RentalOperations/RentalOperations/RentalOperations.csproj \
     --configuration Release \
     --output /app/publish \

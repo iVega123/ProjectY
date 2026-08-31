@@ -1,14 +1,12 @@
 FROM mcr.microsoft.com/dotnet/sdk:8.0 AS restore
 WORKDIR /src
 
-COPY RiderManager/RiderManager.csproj RiderManager/RiderManager/
+COPY RiderManager/RiderManager/RiderManager.csproj RiderManager/RiderManager/
 RUN dotnet restore RiderManager/RiderManager/RiderManager.csproj
 
 FROM restore AS publish
-COPY RiderManager/ RiderManager/RiderManager/
-COPY --from=shared Health/ Shared/Health/
-COPY --from=shared Hosting/ Shared/Hosting/
-COPY --from=shared Messaging/ Shared/Messaging/
+COPY RiderManager/RiderManager/ RiderManager/RiderManager/
+COPY Shared/ Shared/
 RUN dotnet publish RiderManager/RiderManager/RiderManager.csproj \
     --configuration Release \
     --output /app/publish \

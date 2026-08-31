@@ -1,13 +1,12 @@
 FROM mcr.microsoft.com/dotnet/sdk:8.0 AS restore
 WORKDIR /src
 
-COPY MotoHub/MotoHub.csproj MotoHub/MotoHub/
+COPY MotoHub/MotoHub/MotoHub.csproj MotoHub/MotoHub/
 RUN dotnet restore MotoHub/MotoHub/MotoHub.csproj
 
 FROM restore AS publish
-COPY MotoHub/ MotoHub/MotoHub/
-COPY --from=shared Health/ Shared/Health/
-COPY --from=shared Hosting/ Shared/Hosting/
+COPY MotoHub/MotoHub/ MotoHub/MotoHub/
+COPY Shared/ Shared/
 RUN dotnet publish MotoHub/MotoHub/MotoHub.csproj \
     --configuration Release \
     --output /app/publish \

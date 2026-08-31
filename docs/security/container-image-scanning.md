@@ -6,16 +6,16 @@ builds all four. References in `deploy/overlays/selfhost/compose.yaml` whose
 build contexts do not yet exist are outside this gate until their Dockerfiles
 are added.
 
-Each current image uses its service directory as the primary build context. All four
-receive `Shared/` as a separate, read-only BuildKit named context, so the repository
-root and `.git/` are never sent to any build. The equivalent
-standalone commands are:
+Each current image uses the repository root as its build context, and the root
+`.dockerignore` limits that context to the four application projects and `Shared/`.
+This makes the Dockerfiles self-contained for Visual Studio and command-line builds
+without sending `.git/` or local secrets. The equivalent standalone commands are:
 
 ```bash
-docker build --build-context shared=./Shared -f AuthGate/AuthGate/Dockerfile -t projecty/auth-gate AuthGate
-docker build --build-context shared=./Shared -f MotoHub/MotoHub/Dockerfile -t projecty/moto-hub MotoHub
-docker build --build-context shared=./Shared -f RentalOperations/RentalOperations/Dockerfile -t projecty/rental-operations RentalOperations
-docker build --build-context shared=./Shared -f RiderManager/RiderManager/Dockerfile -t projecty/rider-manager RiderManager
+docker build -f AuthGate/AuthGate/Dockerfile -t projecty/auth-gate .
+docker build -f MotoHub/MotoHub/Dockerfile -t projecty/moto-hub .
+docker build -f RentalOperations/RentalOperations/Dockerfile -t projecty/rental-operations .
+docker build -f RiderManager/RiderManager/Dockerfile -t projecty/rider-manager .
 ```
 
 Local Linux/amd64 measurements after the chiseled-runtime rewrite:
