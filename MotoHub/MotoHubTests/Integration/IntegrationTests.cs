@@ -76,7 +76,7 @@ namespace MotoHubTests.Integration
         {
             // Arrange
             var client = _factory.CreateClient();
-            var motorcycle = new MotorcycleDTO { LicensePlate = "ABC123", Model = "Honda", Year = 2020 };
+            var motorcycle = new MotorcycleDTO { LicensePlate = $"CREATE-{Guid.NewGuid():N}", Model = "Honda", Year = 2020 };
 
             var token = GenerateJwtToken();
 
@@ -97,9 +97,14 @@ namespace MotoHubTests.Integration
         {
             // Arrange
             var client = _factory.CreateClient();
-            var licensePlate = "ABC123";
+            var licensePlate = $"GET-{Guid.NewGuid():N}";
             var token = GenerateJwtToken();
             client.DefaultRequestHeaders.Add("Authorization", $"Bearer {token}");
+
+            var createResponse = await client.PostAsJsonAsync(
+                "/api/motorcycles",
+                new MotorcycleDTO { LicensePlate = licensePlate, Model = "Honda", Year = 2020 });
+            createResponse.EnsureSuccessStatusCode();
 
             // Act
             var response = await client.GetAsync($"/api/motorcycles/{licensePlate}");
@@ -174,10 +179,15 @@ namespace MotoHubTests.Integration
         {
             // Arrange
             var client = _factory.CreateClient();
-            var licensePlate = "ABC123";
+            var licensePlate = $"DELETE-{Guid.NewGuid():N}";
 
             var token = GenerateJwtToken();
             client.DefaultRequestHeaders.Add("Authorization", $"Bearer {token}");
+
+            var createResponse = await client.PostAsJsonAsync(
+                "/api/motorcycles",
+                new MotorcycleDTO { LicensePlate = licensePlate, Model = "Honda", Year = 2020 });
+            createResponse.EnsureSuccessStatusCode();
 
             // Act
             var response = await client.DeleteAsync($"/api/motorcycles/{licensePlate}");

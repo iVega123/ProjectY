@@ -58,6 +58,10 @@ namespace RentalOperations.Services
             {
                 throw new ArgumentException("Motorcycle does not exist.");
             }
+            if (motorcycle.retiredAtUtc is not null)
+            {
+                throw new MotorcycleRetiredException(createDto.MotocycleLicencePlate);
+            }
 
             var rentalDomain = RentalDomain.Create(createDto, userId);
             var rental = new Rental
@@ -70,6 +74,22 @@ namespace RentalOperations.Services
                 InitCost = rentalDomain.TotalCost
             };
 
+            var rentalId = rental._id!.Value.ToString();
+            var claimResult = await _repository.TryClaimRentalAsync(
+                rental.MotorcycleLicencePlate,
+                rentalId);
+            if (claimResult == MotorcycleClaimResult.Retired)
+            {
+                throw new MotorcycleRetiredException(rental.MotorcycleLicencePlate);
+            }
+            if (claimResult == MotorcycleClaimResult.ActiveRental)
+            {
+                throw new ActiveRentalConflictException(rental.MotorcycleLicencePlate);
+            }
+
+            // The claim is deliberately retained if MongoDB reports an ambiguous
+            // insert failure. Startup reconciliation can repair a stale claim; releasing
+            // it here could let retirement win after the rental was actually committed.
             await _repository.CreateRentalAsync(rental);
         }
 
@@ -84,7 +104,12 @@ namespace RentalOperations.Services
                 throw new UnauthorizedAccessException("The rental belongs to another rider.");
 
             if (rental.Status == RentalStatus.Completed)
+            {
+                await _repository.ReleaseRentalClaimAsync(
+                    rental.MotorcycleLicencePlate,
+                    rental._id!.Value.ToString());
                 return _mapper.Map<ResponseRentalDTO>(rental);
+            }
 
             var response = _mapper.Map<ResponseRentalDTO>(rental);
             response.ActualEndDate = actualEndDate;
@@ -118,6 +143,9 @@ namespace RentalOperations.Services
             rental.StatusMessage = response.StatusMessage;
             rental.Status = RentalStatus.Completed;
             await _repository.UpdateRentalAsync(rental);
+            await _repository.ReleaseRentalClaimAsync(
+                rental.MotorcycleLicencePlate,
+                rental._id!.Value.ToString());
             return response;
         }
 
@@ -136,6 +164,12 @@ namespace RentalOperations.Services
         public async Task<bool> IsMotorcycleCurrentlyRentedAsync(string licencePlate)
         {
             return await _repository.IsMotorcycleCurrentlyRentedAsync(licencePlate);
+        }
+
+        public async Task<bool> TryRetireMotorcycleAsync(string licencePlate)
+        {
+            var result = await _repository.TryClaimRetirementAsync(licencePlate);
+            return result is MotorcycleClaimResult.Acquired or MotorcycleClaimResult.Retired;
         }
 
         private decimal DetermineDailyRate(int days)

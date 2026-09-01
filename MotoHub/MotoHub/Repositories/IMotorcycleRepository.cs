@@ -8,7 +8,8 @@ namespace MotoHub.Repositories
         Motorcycle? GetById(string id);
         void Add(Motorcycle motorcycle);
         void Update(Motorcycle motorcycle);
-        void Delete(string id);
+        Task<bool> RetireAsync(string id, DateTime retiredAtUtc, string reason);
+        Task EnsureHistoricalReferenceAsync(string licensePlate, DateTime retiredAtUtc);
         bool LicensePlateExists(string licensePlate);
         Task<Motorcycle?> GetByLicensePlateAsync(string licensePlate);
     }

@@ -1,4 +1,5 @@
 using MongoDB.Bson;
+using RentalOperations.Domain;
 using RentalOperations.Model;
 using RentalOperations.Repository;
 using System.Collections.Concurrent;
@@ -8,6 +9,7 @@ namespace RentalOperationsTests.Integration;
 public sealed class InMemoryRentalRepository : IRentalRepository
 {
     private readonly ConcurrentDictionary<ObjectId, Rental> _rentals = new();
+    private readonly ConcurrentDictionary<string, (MotorcycleClaimKind Kind, string? RentalId)> _claims = new();
 
     public InMemoryRentalRepository()
     {
@@ -91,6 +93,42 @@ public sealed class InMemoryRentalRepository : IRentalRepository
     public Task DeleteRentalAsync(string id)
     {
         _rentals.TryRemove(ObjectId.Parse(id), out _);
+        return Task.CompletedTask;
+    }
+
+    public Task<MotorcycleClaimResult> TryClaimRentalAsync(string licencePlate, string rentalId)
+    {
+        if (_claims.TryAdd(licencePlate, (MotorcycleClaimKind.ActiveRental, rentalId)))
+        {
+            return Task.FromResult(MotorcycleClaimResult.Acquired);
+        }
+
+        var existing = _claims[licencePlate];
+        return Task.FromResult(existing.Kind == MotorcycleClaimKind.Retired
+            ? MotorcycleClaimResult.Retired
+            : existing.RentalId == rentalId
+                ? MotorcycleClaimResult.Acquired
+                : MotorcycleClaimResult.ActiveRental);
+    }
+
+    public Task<MotorcycleClaimResult> TryClaimRetirementAsync(string licencePlate)
+    {
+        if (_claims.TryAdd(licencePlate, (MotorcycleClaimKind.Retired, null)))
+        {
+            return Task.FromResult(MotorcycleClaimResult.Acquired);
+        }
+
+        return Task.FromResult(_claims[licencePlate].Kind == MotorcycleClaimKind.Retired
+            ? MotorcycleClaimResult.Retired
+            : MotorcycleClaimResult.ActiveRental);
+    }
+
+    public Task ReleaseRentalClaimAsync(string licencePlate, string rentalId)
+    {
+        _claims.TryRemove(
+            new KeyValuePair<string, (MotorcycleClaimKind Kind, string? RentalId)>(
+                licencePlate,
+                (MotorcycleClaimKind.ActiveRental, rentalId)));
         return Task.CompletedTask;
     }
 

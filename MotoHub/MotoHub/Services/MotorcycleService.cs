@@ -33,7 +33,7 @@ namespace MotoHub.Services
             return _mapper.Map<IEnumerable<MotorcycleDTO>>(motorcycles);
         }
 
-        public async Task<MotorcycleDTO> GetMotorcycleByLicensePlateAsync(string licensePlate)
+        public async Task<MotorcycleDTO?> GetMotorcycleByLicensePlateAsync(string licensePlate)
         {
             var motorcycle = await _repository.GetByLicensePlateAsync(licensePlate);
             return _mapper.Map<MotorcycleDTO>(motorcycle);
@@ -49,6 +49,11 @@ namespace MotoHub.Services
         {
             var existingMotorcycle = await _repository.GetByLicensePlateAsync(licensePlate);
             if (existingMotorcycle == null)
+            {
+                return;
+            }
+
+            if (existingMotorcycle.RetiredAtUtc is not null)
             {
                 return;
             }
@@ -72,18 +77,43 @@ namespace MotoHub.Services
             if (existingMotorcycle == null)
                 return OperationResult.Fail($"Motorcycle with plate {licensePlate} not found.");
 
-            var isRented = await _rentalOperationService.GetRentalsByMotorcycleLicencePlateAsync(licensePlate);
-            if (isRented)
-                return OperationResult.Fail("Motorcycle is currently rented and cannot be deleted.");
+            if (existingMotorcycle.RetiredAtUtc is not null)
+                return OperationResult.Ok("Motorcycle was already retired.");
 
             try
             {
-                _repository.Delete(existingMotorcycle.Id);
-                return OperationResult.Ok("Motorcycle successfully deleted.");
+                var retirementReserved = await _rentalOperationService.TryRetireMotorcycleAsync(licensePlate);
+                if (!retirementReserved)
+                    return OperationResult.Fail(
+                        "Motorcycle has an active rental and cannot be retired.",
+                        StatusCodes.Status409Conflict);
+
+                var retired = await _repository.RetireAsync(
+                    existingMotorcycle.Id,
+                    DateTime.UtcNow,
+                    MotorcycleRetirementReasons.RequestedByAdministrator);
+                return retired
+                    ? OperationResult.Ok("Motorcycle successfully retired.")
+                    : OperationResult.Ok("Motorcycle was already retired.");
             }
             catch (Exception ex)
             {
-                return OperationResult.Fail("Failed to delete the motorcycle due to an unexpected error." + ex.Message);
+                // The RentalOperations retirement marker is intentionally retained on an
+                // ambiguous failure. A retry can finish the soft delete without allowing a
+                // rental to slip through the cross-service commit window.
+                return OperationResult.Fail("Failed to retire the motorcycle due to an unexpected error. " + ex.Message);
+            }
+        }
+
+        public async Task EnsureHistoricalReferencesAsync(IEnumerable<string> licensePlates)
+        {
+            var retiredAtUtc = DateTime.UtcNow;
+            foreach (var licensePlate in licensePlates
+                         .Where(plate => !string.IsNullOrWhiteSpace(plate))
+                         .Select(plate => plate.Trim())
+                         .Distinct(StringComparer.Ordinal))
+            {
+                await _repository.EnsureHistoricalReferenceAsync(licensePlate, retiredAtUtc);
             }
         }
 

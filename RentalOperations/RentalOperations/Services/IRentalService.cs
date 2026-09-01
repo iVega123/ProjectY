@@ -10,6 +10,7 @@ namespace RentalOperations.Services
         Task<List<ResponseRentalDTO>> GetRentalsByUserIdAsync(string userId);
         Task UpdateMotorcycleLicensePlateAsync(string oldLicensePlate, string newLicensePlate);
         Task<bool> IsMotorcycleCurrentlyRentedAsync(string licencePlate);
+        Task<bool> TryRetireMotorcycleAsync(string licencePlate);
     }
 }
 

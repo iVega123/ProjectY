@@ -36,5 +36,34 @@ namespace MotoHub.CrossCutting
                 throw new Exception($"Unable to obtain motorcycle data: {e.Message}", e);
             }
         }
+
+        public async Task<bool> TryRetireMotorcycleAsync(string licensePlate)
+        {
+            try
+            {
+                var response = await _httpClient.PostAsync(
+                    $"api/Rental/motorcycle-retirements/{Uri.EscapeDataString(licensePlate)}",
+                    content: null);
+                if (response.IsSuccessStatusCode)
+                {
+                    return true;
+                }
+
+                if (response.StatusCode == System.Net.HttpStatusCode.Conflict)
+                {
+                    return false;
+                }
+
+                var errorContent = await response.Content.ReadAsStringAsync();
+                throw new HttpRequestException(
+                    $"Request failed with status {response.StatusCode}: {errorContent}");
+            }
+            catch (HttpRequestException exception)
+            {
+                throw new Exception(
+                    $"Unable to reserve motorcycle retirement: {exception.Message}",
+                    exception);
+            }
+        }
     }
 }

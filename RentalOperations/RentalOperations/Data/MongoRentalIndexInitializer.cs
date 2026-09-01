@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Hosting;
 using MongoDB.Bson;
 using MongoDB.Driver;
+using RentalOperations.CrossCutting.Services;
 using RentalOperations.Model;
 
 namespace RentalOperations.Data;
@@ -10,12 +11,16 @@ public sealed class MongoRentalIndexInitializer : IHostedService
     public const string ActiveRentalIndexName = "ux_rentals_one_active_per_motorcycle";
     public const string LegacyDuplicateQuarantineMessage =
         "Quarantined during active-rental index migration: duplicate open rental; review required.";
+    public const string RetiredMotorcycleQuarantineMessage =
+        "Quarantined during motorcycle-reference migration: motorcycle was already retired.";
 
     private readonly MongoDbContext _context;
+    private readonly IServiceScopeFactory _scopeFactory;
 
-    public MongoRentalIndexInitializer(MongoDbContext context)
+    public MongoRentalIndexInitializer(MongoDbContext context, IServiceScopeFactory scopeFactory)
     {
         _context = context;
+        _scopeFactory = scopeFactory;
     }
 
     public async Task StartAsync(CancellationToken cancellationToken)
@@ -36,6 +41,8 @@ public sealed class MongoRentalIndexInitializer : IHostedService
             });
 
         await rentals.Indexes.CreateOneAsync(index, cancellationToken: cancellationToken);
+        await ReconcileMotorcycleClaimsAsync(cancellationToken);
+        await EnsureHistoricalMotorcycleReferencesAsync(cancellationToken);
     }
 
     private async Task ClassifyLegacyRentalsAsync(CancellationToken cancellationToken)
@@ -94,6 +101,118 @@ public sealed class MongoRentalIndexInitializer : IHostedService
 
             await rentals.UpdateManyAsync(filter, update, cancellationToken: cancellationToken);
         }
+    }
+
+    private async Task ReconcileMotorcycleClaimsAsync(CancellationToken cancellationToken)
+    {
+        var rentals = _context.Database.GetCollection<Rental>("Rentals");
+        var claims = _context.Database.GetCollection<MotorcycleClaim>("MotorcycleClaims");
+        await RemoveStaleRentalClaimsAsync(rentals, claims, cancellationToken);
+        var activeRentals = await rentals
+            .Find(rental => rental.Status == RentalStatus.Active)
+            .ToListAsync(cancellationToken);
+
+        foreach (var rental in activeRentals)
+        {
+            var rentalId = rental._id!.Value.ToString();
+            try
+            {
+                await claims.InsertOneAsync(new MotorcycleClaim
+                {
+                    MotorcycleLicencePlate = rental.MotorcycleLicencePlate,
+                    Kind = MotorcycleClaimKind.ActiveRental,
+                    RentalId = rentalId,
+                    CreatedAtUtc = DateTime.UtcNow
+                }, cancellationToken: cancellationToken);
+            }
+            catch (MongoWriteException exception)
+                when (exception.WriteError?.Category == ServerErrorCategory.DuplicateKey)
+            {
+                var existing = await claims
+                    .Find(claim => claim.MotorcycleLicencePlate == rental.MotorcycleLicencePlate)
+                    .FirstOrDefaultAsync(cancellationToken);
+                if (existing?.Kind == MotorcycleClaimKind.Retired)
+                {
+                    await rentals.UpdateOneAsync(
+                        candidate => candidate._id == rental._id &&
+                                     candidate.Status == RentalStatus.Active,
+                        Builders<Rental>.Update
+                            .Set(candidate => candidate.Status, RentalStatus.Quarantined)
+                            .Set(candidate => candidate.StatusMessage, RetiredMotorcycleQuarantineMessage),
+                        cancellationToken: cancellationToken);
+                }
+                else if (existing?.Kind == MotorcycleClaimKind.ActiveRental &&
+                         existing.RentalId != rentalId)
+                {
+                    var claimedRentalIsActive = ObjectId.TryParse(existing.RentalId, out var claimedRentalId) &&
+                        await rentals.Find(candidate =>
+                                candidate._id == claimedRentalId &&
+                                candidate.Status == RentalStatus.Active)
+                            .AnyAsync(cancellationToken);
+                    if (!claimedRentalIsActive)
+                    {
+                        await claims.ReplaceOneAsync(
+                            claim => claim.MotorcycleLicencePlate == rental.MotorcycleLicencePlate &&
+                                     claim.Kind == MotorcycleClaimKind.ActiveRental &&
+                                     claim.RentalId == existing.RentalId,
+                            new MotorcycleClaim
+                            {
+                                MotorcycleLicencePlate = rental.MotorcycleLicencePlate,
+                                Kind = MotorcycleClaimKind.ActiveRental,
+                                RentalId = rentalId,
+                                CreatedAtUtc = DateTime.UtcNow
+                            },
+                            cancellationToken: cancellationToken);
+                    }
+                }
+            }
+        }
+    }
+
+    private static async Task RemoveStaleRentalClaimsAsync(
+        IMongoCollection<Rental> rentals,
+        IMongoCollection<MotorcycleClaim> claims,
+        CancellationToken cancellationToken)
+    {
+        var staleBeforeUtc = DateTime.UtcNow.AddMinutes(-5);
+        var staleCandidates = await claims.Find(claim =>
+                claim.Kind == MotorcycleClaimKind.ActiveRental &&
+                claim.CreatedAtUtc < staleBeforeUtc)
+            .ToListAsync(cancellationToken);
+
+        foreach (var claim in staleCandidates)
+        {
+            var hasActiveRental = ObjectId.TryParse(claim.RentalId, out var rentalId) &&
+                await rentals.Find(rental =>
+                        rental._id == rentalId &&
+                        rental.Status == RentalStatus.Active)
+                    .AnyAsync(cancellationToken);
+            if (!hasActiveRental)
+            {
+                await claims.DeleteOneAsync(candidate =>
+                    candidate.MotorcycleLicencePlate == claim.MotorcycleLicencePlate &&
+                    candidate.Kind == MotorcycleClaimKind.ActiveRental &&
+                    candidate.RentalId == claim.RentalId &&
+                    candidate.CreatedAtUtc == claim.CreatedAtUtc,
+                    cancellationToken);
+            }
+        }
+    }
+
+    private async Task EnsureHistoricalMotorcycleReferencesAsync(CancellationToken cancellationToken)
+    {
+        var rentals = _context.Database.GetCollection<Rental>("Rentals");
+        var licensePlates = await rentals
+            .Distinct<string>("MotorcycleLicencePlate", FilterDefinition<Rental>.Empty)
+            .ToListAsync(cancellationToken);
+        if (licensePlates.Count == 0)
+        {
+            return;
+        }
+
+        using var scope = _scopeFactory.CreateScope();
+        var motorcycleService = scope.ServiceProvider.GetRequiredService<IMotorcycleService>();
+        await motorcycleService.EnsureHistoricalReferencesAsync(licensePlates);
     }
 
     public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;

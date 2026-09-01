@@ -92,10 +92,20 @@ namespace MotoHub.Controllers
             }
             else
             {
-
-                return BadRequest(result.Message);
+                return result.StatusCode is { } statusCode
+                    ? StatusCode(statusCode, result.Message)
+                    : BadRequest(result.Message);
             }
 
+        }
+
+        [ServiceFilter(typeof(AdminAuthorizationFilter))]
+        [HttpPost("historical-references")]
+        public async Task<IActionResult> EnsureHistoricalReferences(
+            [FromBody] HistoricalMotorcycleReferencesRequest request)
+        {
+            await _motorcycleService.EnsureHistoricalReferencesAsync(request.LicensePlates);
+            return NoContent();
         }
     }
 }

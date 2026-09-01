@@ -43,6 +43,15 @@ namespace RentalOperations.Controllers
                     Detail = ex.Message
                 });
             }
+            catch (MotorcycleRetiredException ex)
+            {
+                return Conflict(new ProblemDetails
+                {
+                    Status = StatusCodes.Status409Conflict,
+                    Title = "Motorcycle retired",
+                    Detail = ex.Message
+                });
+            }
             catch (Exception ex)
             {
                 return BadRequest(ex.Message);
@@ -130,6 +139,21 @@ namespace RentalOperations.Controllers
             {
                 return BadRequest($"Error checking rental status: {ex.Message}");
             }
+        }
+
+        [ServiceFilter(typeof(AuthorizationFilter))]
+        [HttpPost("motorcycle-retirements/{licencePlate}")]
+        public async Task<IActionResult> TryRetireMotorcycle(string licencePlate)
+        {
+            var acquired = await _rentalService.TryRetireMotorcycleAsync(licencePlate);
+            return acquired
+                ? NoContent()
+                : Conflict(new ProblemDetails
+                {
+                    Status = StatusCodes.Status409Conflict,
+                    Title = "Active rental conflict",
+                    Detail = $"Motorcycle {licencePlate} has an active rental."
+                });
         }
     }
 }

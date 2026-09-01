@@ -328,6 +328,8 @@ services:
     depends_on:
       mongodb:
         condition: service_healthy
+      moto-hub:
+        condition: service_healthy
       rabbitmq:
         condition: service_healthy
       redis:
