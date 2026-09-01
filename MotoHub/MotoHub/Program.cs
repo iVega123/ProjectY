@@ -17,6 +17,7 @@ using Npgsql;
 using ProjectY.Shared.Health;
 using ProjectY.Shared.Hosting;
 using ProjectY.Shared.Messaging;
+using ProjectY.Shared.Idempotency;
 
 if (await HealthProbeCommand.TryRunAsync(args))
 {
@@ -53,6 +54,7 @@ builder.Host.UseSerilog();
 var rabbitMQConfig = builder.Configuration.GetSection("RabbitMQ").Get<RabbitMQOptions>()
     ?? throw new InvalidOperationException("RabbitMQ configuration is missing.");
 builder.Services.AddSingleton<RabbitMQOptions>(rabbitMQConfig);
+builder.Services.AddProjectYIdempotency(builder.Configuration, "moto-hub");
 var postgresConnection = new NpgsqlConnectionStringBuilder(
     builder.Configuration.GetConnectionString("Postgresql") ?? "Host=postgres;Port=5432");
 builder.Services
@@ -107,6 +109,7 @@ builder.Services.AddScoped<IRentalOperationService, RentalOperationService>();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(c =>
 {
+    c.OperationFilter<IdempotencyKeyOperationFilter>();
     c.SwaggerDoc("v1", new OpenApiInfo { Title = "MotoHub", Version = "v1" });
     var securityScheme = new OpenApiSecurityScheme
     {
@@ -147,8 +150,8 @@ if (SwaggerPolicy.IsEnabled(app.Environment, app.Configuration))
 app.UseHttpsRedirection();
 
 app.UseAuthentication();
-
 app.UseAuthorization();
+app.UseProjectYIdempotency();
 
 app.MapControllers();
 app.MapProjectYHealthChecks();

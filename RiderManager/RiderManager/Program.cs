@@ -22,6 +22,7 @@ using ProjectY.Shared.Health;
 using ProjectY.Shared.Hosting;
 using Serilog.Sinks.Elasticsearch;
 using ProjectY.Shared.Messaging;
+using ProjectY.Shared.Idempotency;
 
 if (await HealthProbeCommand.TryRunAsync(args))
 {
@@ -51,6 +52,7 @@ builder.Services
 builder.Services.AddSingleton(new QueueMessageAuthenticator(
     builder.Configuration["Messaging:SigningKey"]
         ?? throw new InvalidOperationException("Messaging:SigningKey is not configured.")));
+builder.Services.AddProjectYIdempotency(builder.Configuration, "rider-manager");
 
 
 var applicationName = builder.Configuration["ApplicationName"];
@@ -117,6 +119,7 @@ builder.Services.AddScoped<IPresignedUrlService, PresignedUrlService>();
 builder.Services.AddScoped<IRiderManager, RidersManager>();
 builder.Services.AddSwaggerGen(c =>
 {
+    c.OperationFilter<IdempotencyKeyOperationFilter>();
     c.SwaggerDoc("v1", new OpenApiInfo { Title = "RiderManager", Version = "v1" });
 
     // Configuração do esquema de segurança JWT no Swagger
@@ -159,8 +162,8 @@ if (SwaggerPolicy.IsEnabled(app.Environment, app.Configuration))
 app.UseHttpsRedirection();
 
 app.UseAuthentication();
-
 app.UseAuthorization();
+app.UseProjectYIdempotency();
 
 app.MapControllers();
 app.MapProjectYHealthChecks();

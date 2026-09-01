@@ -31,6 +31,7 @@
     <PackageReference Include="Serilog.Sinks.Elasticsearch" Version="10.0.0" />
     <PackageReference Include="Serilog.Sinks.Http" Version="9.0.0" />
     <PackageReference Include="Serilog.Sinks.InMemory" Version="0.11.0" />
+    <PackageReference Include="StackExchange.Redis" Version="3.1.31" />
     <PackageReference Include="Swashbuckle.AspNetCore" Version="6.5.0" />
   </ItemGroup>
 
@@ -47,6 +48,7 @@
     <Compile Include="..\..\Shared\Messaging\OutboxRelay.cs" Link="Shared\Messaging\OutboxRelay.cs" />
     <Compile Include="..\..\Shared\Messaging\OutboxRelayOptions.cs" Link="Shared\Messaging\OutboxRelayOptions.cs" />
     <Compile Include="..\..\Shared\Messaging\RabbitMqOutboxTransport.cs" Link="Shared\Messaging\RabbitMqOutboxTransport.cs" />
+    <Compile Include="..\..\Shared\Idempotency\*.cs" Link="Shared\Idempotency\%(Filename)%(Extension)" />
   </ItemGroup>
   
 </Project>

@@ -15,6 +15,7 @@ using ProjectY.Shared.Health;
 using ProjectY.Shared.Hosting;
 using Serilog.Sinks.Elasticsearch;
 using ProjectY.Shared.Messaging;
+using ProjectY.Shared.Idempotency;
 
 if (await HealthProbeCommand.TryRunAsync(args))
 {
@@ -58,10 +59,11 @@ builder.Services
 builder.Services.AddSingleton(new QueueMessageAuthenticator(
     builder.Configuration["Messaging:SigningKey"]
         ?? throw new InvalidOperationException("Messaging:SigningKey is not configured.")));
+builder.Services.AddProjectYIdempotency(builder.Configuration, "auth-gate");
 
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen();
+builder.Services.AddSwaggerGen(options => options.OperationFilter<IdempotencyKeyOperationFilter>());
 
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
     options.UseNpgsql(builder.Configuration.GetConnectionString("Postgresql")));
@@ -132,6 +134,7 @@ app.UseHttpsRedirection();
 
 app.UseAuthentication();
 app.UseAuthorization();
+app.UseProjectYIdempotency();
 
 app.MapControllers();
 app.MapProjectYHealthChecks();

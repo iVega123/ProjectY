@@ -74,6 +74,8 @@ isolated local environment.
 
 Database-backed tests use the shared
 [PostgreSQL Testcontainers pattern](docs/testing/testcontainers-postgres.md).
+State-changing API retries follow the shared
+[`Idempotency-Key` contract](docs/api/idempotency.md).
 
 ### Modernization development loop
 

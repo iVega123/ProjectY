@@ -7,6 +7,7 @@ x-auth-gate-environment: &auth-gate-environment
   RabbitMQ__UserName: "${AUTH_GATE_RABBITMQ_USER:?Set AUTH_GATE_RABBITMQ_USER in .env}"
   RabbitMQ__Password: "${AUTH_GATE_RABBITMQ_PASSWORD:?Set AUTH_GATE_RABBITMQ_PASSWORD in .env}"
   Messaging__SigningKey: "${RIDER_EVENTS_SIGNING_KEY:?Set RIDER_EVENTS_SIGNING_KEY in .env}"
+  Redis__ConnectionString: "redis:6379"
   Jwt__SigningKeys__AuthGate: "${AUTH_GATE_JWT_SIGNING_KEY:?Set AUTH_GATE_JWT_SIGNING_KEY in .env}"
   Jwt__SigningKeys__MotoHub: "${MOTO_HUB_JWT_SIGNING_KEY:?Set MOTO_HUB_JWT_SIGNING_KEY in .env}"
   Jwt__SigningKeys__RiderManager: "${RIDER_MANAGER_JWT_SIGNING_KEY:?Set RIDER_MANAGER_JWT_SIGNING_KEY in .env}"
@@ -20,6 +21,7 @@ x-rider-manager-environment: &rider-manager-environment
   RabbitMQ__UserName: "${RIDER_MANAGER_RABBITMQ_USER:?Set RIDER_MANAGER_RABBITMQ_USER in .env}"
   RabbitMQ__Password: "${RIDER_MANAGER_RABBITMQ_PASSWORD:?Set RIDER_MANAGER_RABBITMQ_PASSWORD in .env}"
   Messaging__SigningKey: "${RIDER_EVENTS_SIGNING_KEY:?Set RIDER_EVENTS_SIGNING_KEY in .env}"
+  Redis__ConnectionString: "redis:6379"
   MinIO__AccessKey: "${MINIO_USER:?Set MINIO_USER in .env}"
   MinIO__SecretKey: "${MINIO_PASSWORD:?Set MINIO_PASSWORD in .env}"
   Jwt__SigningKey: "${RIDER_MANAGER_JWT_SIGNING_KEY:?Set RIDER_MANAGER_JWT_SIGNING_KEY in .env}"
@@ -32,6 +34,7 @@ x-moto-hub-environment: &moto-hub-environment
   ConnectionStrings__Postgresql: "Host=postgres;Port=5432;Database=${MOTO_HUB_POSTGRES_DB:?Set MOTO_HUB_POSTGRES_DB in .env};Username=${POSTGRES_USER:?Set POSTGRES_USER in .env};Password=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}"
   RabbitMQ__UserName: "${MOTO_HUB_RABBITMQ_USER:?Set MOTO_HUB_RABBITMQ_USER in .env}"
   RabbitMQ__Password: "${MOTO_HUB_RABBITMQ_PASSWORD:?Set MOTO_HUB_RABBITMQ_PASSWORD in .env}"
+  Redis__ConnectionString: "redis:6379"
   Jwt__SigningKey: "${MOTO_HUB_JWT_SIGNING_KEY:?Set MOTO_HUB_JWT_SIGNING_KEY in .env}"
   MotoHubApiKey: "${MOTO_HUB_API_KEY:?Set MOTO_HUB_API_KEY in .env}"
   RentalOperationsSettings__ApiKey: "${RENTAL_OPERATIONS_API_KEY:?Set RENTAL_OPERATIONS_API_KEY in .env}"
@@ -96,6 +99,22 @@ services:
       timeout: 5s
       retries: 12
       start_period: 10s
+
+  redis:
+    image: redis:7.4-alpine
+    container_name: redis
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "always"]
+    ports:
+      - "6379:6379"
+    networks:
+      - elk
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
 
   pgadmin:
     image: dpage/pgadmin4:9.13
@@ -196,6 +215,8 @@ services:
         condition: service_completed_successfully
       rabbitmq:
         condition: service_healthy
+      redis:
+        condition: service_healthy
   
   rider-manager-migrations:
     image: projecty/rider-manager:dev
@@ -232,6 +253,8 @@ services:
       rider-manager-migrations:
         condition: service_completed_successfully
       rabbitmq:
+        condition: service_healthy
+      redis:
         condition: service_healthy
 
   moto-hub-migrations:
@@ -270,6 +293,8 @@ services:
         condition: service_completed_successfully
       rabbitmq:
         condition: service_healthy
+      redis:
+        condition: service_healthy
   
   rental-operations:
     build:
@@ -289,6 +314,7 @@ services:
       MongoDbSettings__DatabaseName: "${MONGO_DB:?Set MONGO_DB in .env}"
       RabbitMQ__UserName: "${RENTAL_OPERATIONS_RABBITMQ_USER:?Set RENTAL_OPERATIONS_RABBITMQ_USER in .env}"
       RabbitMQ__Password: "${RENTAL_OPERATIONS_RABBITMQ_PASSWORD:?Set RENTAL_OPERATIONS_RABBITMQ_PASSWORD in .env}"
+      Redis__ConnectionString: "redis:6379"
       Jwt__SigningKey: "${RENTAL_OPERATIONS_JWT_SIGNING_KEY:?Set RENTAL_OPERATIONS_JWT_SIGNING_KEY in .env}"
       RentalOperationsApiKey: "${RENTAL_OPERATIONS_API_KEY:?Set RENTAL_OPERATIONS_API_KEY in .env}"
       RiderManagerSettings__ApiKey: "${RIDER_MANAGER_API_KEY:?Set RIDER_MANAGER_API_KEY in .env}"
@@ -304,6 +330,8 @@ services:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
+      redis:
+        condition: service_healthy
 
 networks:
   elk:
@@ -311,6 +339,7 @@ networks:
 
 volumes:
   postgres-data:
+  redis-data:
   mongo-data:
   rabbitmq-data:
   minio-data:
