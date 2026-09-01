@@ -31,8 +31,11 @@ is what separates a decision from a preference.
 Records 0000–0005 are the design trail and read in sequence. ADR 0008 belongs
 to that trail but was written later, after review showed the trust-boundary
 decision was implied everywhere and recorded nowhere; read it after 0001.
-Records 0006 and 0007 are remediation decisions taken while closing individual
-findings, and read on their own. Numbers are never reused or reassigned.
+Records 0006, 0007, 0010 and 0011 are decisions taken while closing individual
+findings or building a specific piece, and read on their own. ADR 0012 refines
+0001 by separating technology role from service inventory; ADR 0013 supersedes
+the signing half of 0006. Numbers are never reused or reassigned — 0011 was
+renumbered once, from a 0008 that collided with an existing record.
 ADR 0009 is the executable consistency contract and refines the shorter
 outbox/inbox statement in ADR 0003.
 ADR 0010 applies that contract to the cross-database motorcycle-retirement race.

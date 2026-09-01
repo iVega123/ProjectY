@@ -30,6 +30,13 @@ next to the code.**
 | Transactional store | Postgres-compatible | Serializable isolation, and a partial unique index that makes double-booking impossible in the database |
 | Time series | Cassandra | Write-heavy, partition-scoped reads, data that ages out — the canonical case |
 | Coordination | Redis | Rate limiting, token revocation, idempotency keys, distributed locks — shared low-latency state, not "the cache" |
+| Identity | Go | The exception: no workload argument. Adopted for the OIDC and OAuth2 ecosystem, and stated as an ecosystem choice in ADR 0012 rather than dressed as a workload one |
+| Rider records | .NET 10 | Regulatory documents kept in their own store and behind their own IAM role, so a compromise of rentals does not reach CNPJ and CNH |
+
+**This table assigns technology to workload; it is not the service inventory.**
+Reading it as one is how the identity and rider domains went unassigned — see
+ADR 0012, which adds `identity` and `rider-core` and records why `identity` is
+the single entry here justified by ecosystem rather than by workload.
 
 The command-versus-event split is the decision most likely to be challenged, so
 it is made visible in naming: commands are `cmd.*` queues, events are
