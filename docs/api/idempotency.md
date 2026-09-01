@@ -26,8 +26,9 @@ used in Redis keys.
 Pending claims and successful responses remain protected for 24 hours. Using
 the full retention TTL for in-flight work prevents a second replica from
 claiming a long-running or ambiguously failed request. The duration and maximum
-key length are configurable through the `Idempotency` configuration section. The baseline Compose stack stores
-Redis data in an append-only, persistent volume.
+key length are configurable through the `Idempotency` configuration section.
+The Compose stacks store Redis data in an append-only, persistent volume and
+fsync every idempotency write before Redis acknowledges it.
 
 Example against RentalOperations:
 
