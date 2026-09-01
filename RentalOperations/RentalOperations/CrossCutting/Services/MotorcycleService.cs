@@ -37,5 +37,18 @@ namespace RentalOperations.CrossCutting.Services
                 throw new Exception($"Unable to obtain motorcycle data: {e.Message}", e);
             }
         }
+
+        public async Task EnsureHistoricalReferencesAsync(IEnumerable<string> licensePlates)
+        {
+            var response = await _httpClient.PostAsJsonAsync(
+                "api/Motorcycles/historical-references",
+                new { LicensePlates = licensePlates });
+            if (!response.IsSuccessStatusCode)
+            {
+                var errorContent = await response.Content.ReadAsStringAsync();
+                throw new HttpRequestException(
+                    $"Historical motorcycle reconciliation failed with status {response.StatusCode}: {errorContent}");
+            }
+        }
     }
 }

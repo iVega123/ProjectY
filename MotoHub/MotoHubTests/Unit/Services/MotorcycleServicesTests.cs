@@ -1,4 +1,5 @@
 ﻿using AutoMapper;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Moq;
 using MotoHub.CrossCutting;
@@ -148,7 +149,7 @@ namespace MotoHubTests.Unit.Services
         }
 
         [Fact]
-        public void DeleteMotorcycle_ExistingMotorcycle_DeletesMotorcycle()
+        public async Task DeleteMotorcycle_ExistingMotorcycle_RetiresMotorcycle()
         {
             // Arrange
             var existingLicensePlate = "ABC123";
@@ -159,14 +160,58 @@ namespace MotoHubTests.Unit.Services
             var mockCrossCutting = new Mock<IRentalOperationService>();
             mockRepository.Setup(repo => repo.GetByLicensePlateAsync(existingLicensePlate))
                           .ReturnsAsync(existingMotorcycle);
+            mockCrossCutting.Setup(service => service.TryRetireMotorcycleAsync(existingLicensePlate))
+                .ReturnsAsync(true);
+            mockRepository.Setup(repo => repo.RetireAsync(
+                    existingMotorcycle.Id,
+                    It.IsAny<DateTime>(),
+                    MotorcycleRetirementReasons.RequestedByAdministrator))
+                .ReturnsAsync(true);
 
             var service = new MotorcycleService(mockRepository.Object, Mock.Of<IMapper>(), mockMessagingPublish.Object, mockCrossCutting.Object);
 
             // Act
-            service.DeleteMotorcycle(existingLicensePlate);
+            var result = await service.DeleteMotorcycle(existingLicensePlate);
 
             // Assert
-            mockRepository.Verify(repo => repo.Delete(existingMotorcycle.Id), Times.Once);
+            Assert.True(result.Success);
+            mockRepository.Verify(repo => repo.RetireAsync(
+                existingMotorcycle.Id,
+                It.IsAny<DateTime>(),
+                MotorcycleRetirementReasons.RequestedByAdministrator), Times.Once);
+        }
+
+        [Fact]
+        public async Task DeleteMotorcycle_WhenRentalClaimWins_ReturnsConflictWithoutRetiring()
+        {
+            const string licensePlate = "BUSY-0001";
+            var motorcycle = new Motorcycle
+            {
+                Id = Guid.NewGuid().ToString(),
+                LicensePlate = licensePlate,
+                Model = "Busy",
+                Year = 2026
+            };
+            var repository = new Mock<IMotorcycleRepository>();
+            repository.Setup(candidate => candidate.GetByLicensePlateAsync(licensePlate))
+                .ReturnsAsync(motorcycle);
+            var rentalOperations = new Mock<IRentalOperationService>();
+            rentalOperations.Setup(service => service.TryRetireMotorcycleAsync(licensePlate))
+                .ReturnsAsync(false);
+            var service = new MotorcycleService(
+                repository.Object,
+                Mock.Of<IMapper>(),
+                Mock.Of<IMessagingPublisherService>(),
+                rentalOperations.Object);
+
+            var result = await service.DeleteMotorcycle(licensePlate);
+
+            Assert.False(result.Success);
+            Assert.Equal(StatusCodes.Status409Conflict, result.StatusCode);
+            repository.Verify(candidate => candidate.RetireAsync(
+                It.IsAny<string>(),
+                It.IsAny<DateTime>(),
+                It.IsAny<string>()), Times.Never);
         }
 
         [Fact]
@@ -234,7 +279,7 @@ namespace MotoHubTests.Unit.Services
         }
 
         [Fact]
-        public void DeleteMotorcycle_NonExistingMotorcycle_DoesNotDelete()
+        public async Task DeleteMotorcycle_NonExistingMotorcycle_DoesNotRetire()
         {
             // Arrange
             var nonExistingLicensePlate = "XYZ789";
@@ -248,10 +293,13 @@ namespace MotoHubTests.Unit.Services
             var service = new MotorcycleService(mockRepository.Object, Mock.Of<IMapper>(), mockMessagingPublish.Object, mockCrossCutting.Object);
 
             // Act
-            service.DeleteMotorcycle(nonExistingLicensePlate);
+            await service.DeleteMotorcycle(nonExistingLicensePlate);
 
             // Assert
-            mockRepository.Verify(repo => repo.Delete(It.IsAny<string>()), Times.Never);
+            mockRepository.Verify(repo => repo.RetireAsync(
+                It.IsAny<string>(),
+                It.IsAny<DateTime>(),
+                It.IsAny<string>()), Times.Never);
         }
     }
 }

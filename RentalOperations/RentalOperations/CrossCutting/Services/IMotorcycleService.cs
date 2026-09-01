@@ -5,5 +5,6 @@ namespace RentalOperations.CrossCutting.Services
     public interface IMotorcycleService
     {
         Task<Motorcycle> GetMotorcycleByIdAsync(string motorcycleId);
+        Task EnsureHistoricalReferencesAsync(IEnumerable<string> licensePlates);
     }
 }

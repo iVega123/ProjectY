@@ -124,6 +124,24 @@ public sealed class ActiveRentalApiTests : IAsyncLifetime
         Assert.Equal(1, await rentals.CountDocumentsAsync(
             rental => rental.MotorcycleLicencePlate == request.MotocycleLicencePlate &&
                       rental.Status == RentalStatus.Active));
+        Assert.Contains("LEGACY-0001", _factory!.MotorcycleService.HistoricalReferences);
+    }
+
+    [Fact]
+    public async Task RiderCannotCreatePermanentMotorcycleRetirementClaim()
+    {
+        using var client = CreateAuthenticatedClient();
+
+        var response = await client.PostAsync(
+            "/api/Rental/motorcycle-retirements/ADMIN-ONLY-0001",
+            content: null);
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        var claims = new MongoClient(_database.GetConnectionString())
+            .GetDatabase(DatabaseName)
+            .GetCollection<MotorcycleClaim>("MotorcycleClaims");
+        Assert.Equal(0, await claims.CountDocumentsAsync(claim =>
+            claim.MotorcycleLicencePlate == "ADMIN-ONLY-0001"));
     }
 
     private HttpClient CreateAuthenticatedClient()
@@ -175,6 +193,7 @@ internal sealed class MongoRentalApiFactory : WebApplicationFactory<Program>
     public const string JwtKey = "test-only-key-with-at-least-32-bytes";
     private readonly string _connectionString;
     private readonly string _databaseName;
+    public StubMotorcycleService MotorcycleService { get; } = new();
 
     public MongoRentalApiFactory(string connectionString, string databaseName)
     {
@@ -211,7 +230,7 @@ internal sealed class MongoRentalApiFactory : WebApplicationFactory<Program>
                 provider.GetRequiredService<RentalRepository>(),
                 provider.GetRequiredService<ConcurrentCreateGate>()));
             services.AddSingleton<IRiderManagerService, StubRiderManagerService>();
-            services.AddSingleton<IMotorcycleService, StubMotorcycleService>();
+            services.AddSingleton<IMotorcycleService>(MotorcycleService);
             services.AddHostedService<MongoRentalIndexInitializer>();
 
             services.PostConfigure<JwtBearerOptions>(
@@ -261,7 +280,6 @@ internal sealed class SynchronizingRentalRepository : IRentalRepository
 
     public async Task<Rental> CreateRentalAsync(Rental rental)
     {
-        await _gate.WaitAsync();
         return await _repository.CreateRentalAsync(rental);
     }
 
@@ -282,6 +300,24 @@ internal sealed class SynchronizingRentalRepository : IRentalRepository
         _repository.UpdateLicensePlateForAllRentalsAsync(oldLicensePlate, newLicensePlate);
 
     public Task DeleteRentalAsync(string id) => _repository.DeleteRentalAsync(id);
+
+    public Task<RentalOperations.Domain.MotorcycleClaimResult> TryClaimRentalAsync(
+        string licencePlate,
+        string rentalId) => TryClaimRentalAfterGateAsync(licencePlate, rentalId);
+
+    private async Task<RentalOperations.Domain.MotorcycleClaimResult> TryClaimRentalAfterGateAsync(
+        string licencePlate,
+        string rentalId)
+    {
+        await _gate.WaitAsync();
+        return await _repository.TryClaimRentalAsync(licencePlate, rentalId);
+    }
+
+    public Task<RentalOperations.Domain.MotorcycleClaimResult> TryClaimRetirementAsync(
+        string licencePlate) => _repository.TryClaimRetirementAsync(licencePlate);
+
+    public Task ReleaseRentalClaimAsync(string licencePlate, string rentalId) =>
+        _repository.ReleaseRentalClaimAsync(licencePlate, rentalId);
 }
 
 internal sealed class StubRiderManagerService : IRiderManagerService
@@ -296,10 +332,22 @@ internal sealed class StubRiderManagerService : IRiderManagerService
 
 internal sealed class StubMotorcycleService : IMotorcycleService
 {
+    public System.Collections.Concurrent.ConcurrentBag<string> HistoricalReferences { get; } = new();
+
     public Task<Motorcycle> GetMotorcycleByIdAsync(string motorcycleId) => Task.FromResult(new Motorcycle
     {
         licensePlate = motorcycleId,
         model = "Concurrency test",
         year = 2026
     });
+
+    public Task EnsureHistoricalReferencesAsync(IEnumerable<string> licensePlates)
+    {
+        foreach (var licensePlate in licensePlates)
+        {
+            HistoricalReferences.Add(licensePlate);
+        }
+
+        return Task.CompletedTask;
+    }
 }
