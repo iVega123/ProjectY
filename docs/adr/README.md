@@ -19,6 +19,7 @@ is what separates a decision from a preference.
 | [0006](0006-secret-loading-and-jwt-boundaries.md) | Secret loading and JWT trust boundaries | How finding C3 was closed |
 | [0007](0007-authenticated-queue-boundary.md) | Authenticate domain-writing queue messages | How finding C5 was closed |
 | [0008](0008-single-trust-boundary.md) | One trust boundary, at the edge | Why domain services stop parsing tokens, and what is traded for it |
+| [0009](0009-exactly-once-effect.md) | Exactly-once effect is layered and bounded | Which layer provides each guarantee, how it fails, and what is deliberately not promised |
 
 ## Reading order
 
@@ -27,6 +28,8 @@ to that trail but was written later, after review showed the trust-boundary
 decision was implied everywhere and recorded nowhere; read it after 0001.
 Records 0006 and 0007 are remediation decisions taken while closing individual
 findings, and read on their own. Numbers are never reused or reassigned.
+ADR 0009 is the executable consistency contract and refines the shorter
+outbox/inbox statement in ADR 0003.
 
 The full findings list, with remediation status and the commit that closed each
 one, lives in

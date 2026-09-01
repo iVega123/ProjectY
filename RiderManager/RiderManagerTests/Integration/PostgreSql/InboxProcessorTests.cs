@@ -35,6 +35,7 @@ public sealed class InboxProcessorTests : IAsyncLifetime
 
     [Fact]
     [Trait("Category", "Integration")]
+    [Trait("Guarantee", "ADR-0009#transactional-inbox")]
     public async Task SameMessageProcessedConcurrently_ProducesOneDatabaseEffect()
     {
         var messageId = Guid.NewGuid().ToString("D");
@@ -52,6 +53,7 @@ public sealed class InboxProcessorTests : IAsyncLifetime
 
     [Fact]
     [Trait("Category", "Integration")]
+    [Trait("Guarantee", "ADR-0009#transactional-inbox")]
     public async Task ImageRedelivery_UsesInboxAndCallsIdempotentUploadOnce()
     {
         var manager = new Mock<IRiderManager>();
@@ -83,6 +85,7 @@ public sealed class InboxProcessorTests : IAsyncLifetime
 
     [Fact]
     [Trait("Category", "Integration")]
+    [Trait("Guarantee", "ADR-0009#retention-boundaries")]
     public async Task RetentionSweep_DeletesOnlyExpiredInboxRows()
     {
         await using (var seed = new ApplicationDbContext(_options))
