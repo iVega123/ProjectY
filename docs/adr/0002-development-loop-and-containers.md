@@ -25,7 +25,7 @@ variants living as overlays rather than branches.**
 - `local_resource` owns migrations, schema creation and topic creation — setup
   steps that live in README prose are steps nobody runs.
 
-Three invariants hold for all six images: multi-stage build leaving the
+Three invariants hold for all eight images (six here plus `identity` and `rider-core` from ADR 0012): multi-stage build leaving the
 toolchain behind, a non-root user in the final image, and an exec-form
 `ENTRYPOINT`.
 
