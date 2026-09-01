@@ -80,9 +80,16 @@ public sealed class MotorcycleRetirementTests : IAsyncLifetime
         }));
         await context.SaveChangesAsync();
         context.ChangeTracker.Clear();
-        var repository = new MotorcycleRepository(context);
+        var sql = new List<string>();
+        var listingOptions = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseNpgsql(_database.GetConnectionString())
+            .LogTo(sql.Add)
+            .Options;
+        await using var listingContext = new ApplicationDbContext(listingOptions);
+        var repository = new MotorcycleRepository(listingContext);
 
         var first = await repository.GetPageAsync(null, 1_000);
+        sql.Clear();
         var second = await repository.GetPageAsync(first.NextCursor, 1_000);
 
         Assert.Equal(100, first.Items.Count);
@@ -90,6 +97,8 @@ public sealed class MotorcycleRetirementTests : IAsyncLifetime
         Assert.NotNull(first.NextCursor);
         Assert.Null(second.NextCursor);
         Assert.Empty(first.Items.Select(item => item.Id).Intersect(second.Items.Select(item => item.Id)));
+        Assert.Contains(sql, command => command.Contains("WHERE \"Id\" >", StringComparison.Ordinal));
+        Assert.DoesNotContain(sql, command => command.Contains("CASE", StringComparison.Ordinal));
 
         context.Motorcycles.AddRange(Enumerable.Range(105, 10_000).Select(index => new Motorcycle
         {

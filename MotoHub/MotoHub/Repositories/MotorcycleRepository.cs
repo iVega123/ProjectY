@@ -19,15 +19,17 @@ namespace MotoHub.Repositories
         {
             var size = CursorPagination.NormalizePageSize(pageSize);
             var afterId = CursorPagination.Decode(cursor);
-            var query = _context.Motorcycles
+            var source = afterId is null
+                ? _context.Motorcycles
+                : _context.Motorcycles.FromSqlInterpolated($$"""
+                    SELECT * FROM "Motorcycles"
+                    WHERE "RetiredAtUtc" IS NULL AND "Id" > {{afterId}}
+                    """);
+            var query = source
                 .AsNoTracking()
                 .Where(motorcycle => motorcycle.RetiredAtUtc == null)
                 .OrderBy(motorcycle => motorcycle.Id)
                 .AsQueryable();
-            if (afterId is not null)
-            {
-                query = query.Where(motorcycle => string.Compare(motorcycle.Id, afterId) > 0);
-            }
 
             var fetched = await query.Take(size + 1).ToListAsync();
             return CursorPagination.CreatePage(fetched, size, motorcycle => motorcycle.Id);

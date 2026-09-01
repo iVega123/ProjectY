@@ -207,6 +207,66 @@ public sealed class ActiveRentalApiTests : IAsyncLifetime
         });
         Assert.Contains("IXSCAN", availabilityPlan);
         Assert.DoesNotContain("COLLSCAN", availabilityPlan);
+
+        var schedulePlan = await ExplainFindAsync(database, new BsonDocument
+        {
+            ["MotorcycleLicencePlate"] = "LEGACY-0001",
+            ["status"] = new BsonDocument("$in", new BsonArray
+            {
+                RentalStatus.Active.ToString(),
+                RentalStatus.Completed.ToString()
+            }),
+            ["startDate"] = new BsonDocument("$lt", now.AddDays(1)),
+            ["$or"] = new BsonArray
+            {
+                new BsonDocument
+                {
+                    ["endDate"] = new BsonDocument
+                    {
+                        ["$ne"] = BsonNull.Value,
+                        ["$gt"] = now.AddDays(-1)
+                    }
+                },
+                new BsonDocument
+                {
+                    ["endDate"] = BsonNull.Value,
+                    ["predictedEndDate"] = new BsonDocument("$gt", now.AddDays(-1))
+                }
+            }
+        });
+        Assert.Contains(MongoRentalIndexInitializer.MotorcycleScheduleIndexName, schedulePlan);
+        Assert.DoesNotContain("COLLSCAN", schedulePlan);
+    }
+
+    [Fact]
+    [Trait("Category", "Integration")]
+    public async Task OverlapQuery_RejectsPeriodsInsideCompletedRentalHistory()
+    {
+        using var client = CreateAuthenticatedClient();
+        _ = await client.GetAsync("/api/Rental/user?pageSize=1");
+        var context = new MongoDbContext(_database.GetConnectionString(), DatabaseName);
+        var repository = new RentalRepository(context);
+        var existingStart = new DateTime(2026, 8, 1, 0, 0, 0, DateTimeKind.Utc);
+        var existingEnd = existingStart.AddDays(7);
+        await repository.CreateRentalAsync(new Rental
+        {
+            MotorcycleLicencePlate = "HISTORY-0001",
+            UserId = "rider-history",
+            StartDate = existingStart,
+            EndDate = existingEnd,
+            PredictedEndDate = existingEnd,
+            InitCost = 210m,
+            Status = RentalStatus.Completed
+        });
+
+        Assert.True(await repository.HasOverlappingRentalAsync(
+            "HISTORY-0001",
+            existingStart.AddDays(1),
+            existingEnd.AddDays(-1)));
+        Assert.False(await repository.HasOverlappingRentalAsync(
+            "HISTORY-0001",
+            existingEnd,
+            existingEnd.AddDays(7)));
     }
 
     private HttpClient CreateAuthenticatedClient()

@@ -77,9 +77,16 @@ public sealed class MigrationTests : IAsyncLifetime
         }));
         await context.SaveChangesAsync();
         context.ChangeTracker.Clear();
-        var repository = new RiderRepository(context);
+        var sql = new List<string>();
+        var listingOptions = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseNpgsql(_database.GetConnectionString())
+            .LogTo(sql.Add)
+            .Options;
+        await using var listingContext = new ApplicationDbContext(listingOptions);
+        var repository = new RiderRepository(listingContext);
 
         var first = await repository.GetPageAsync(null, 1_000);
+        sql.Clear();
         var second = await repository.GetPageAsync(first.NextCursor, 1_000);
 
         Assert.Equal(100, first.Items.Count);
@@ -88,6 +95,8 @@ public sealed class MigrationTests : IAsyncLifetime
         Assert.Null(second.NextCursor);
         Assert.Equal("https://storage.example.test/cnh-rider-0000", first.Items[0].CNHUrl?.Url);
         Assert.Empty(first.Items.Select(item => item.Id).Intersect(second.Items.Select(item => item.Id)));
+        Assert.Contains(sql, command => command.Contains("WHERE \"Id\" >", StringComparison.Ordinal));
+        Assert.DoesNotContain(sql, command => command.Contains("CASE", StringComparison.Ordinal));
     }
 }
 

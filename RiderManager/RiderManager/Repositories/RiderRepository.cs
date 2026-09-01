@@ -29,15 +29,17 @@ namespace RiderManager.Repositories
         {
             var size = CursorPagination.NormalizePageSize(pageSize);
             var afterId = CursorPagination.Decode(cursor);
-            var query = _context.Riders
+            var source = afterId is null
+                ? _context.Riders
+                : _context.Riders.FromSqlInterpolated($$"""
+                    SELECT * FROM "Riders"
+                    WHERE "Id" > {{afterId}}
+                    """);
+            var query = source
                 .AsNoTracking()
                 .Include(rider => rider.CNHUrl)
                 .OrderBy(rider => rider.Id)
                 .AsQueryable();
-            if (afterId is not null)
-            {
-                query = query.Where(rider => string.Compare(rider.Id, afterId) > 0);
-            }
 
             var fetched = await query.Take(size + 1).ToListAsync();
             return CursorPagination.CreatePage(fetched, size, rider => rider.Id);

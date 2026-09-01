@@ -71,9 +71,9 @@ public sealed class InMemoryRentalRepository : IRentalRepository
         DateTime endDate) =>
         Task.FromResult(_rentals.Values.Any(rental =>
             rental.MotorcycleLicencePlate == licencePlate &&
-            rental.Status == RentalStatus.Active &&
+            rental.Status is not RentalStatus.Cancelled and not RentalStatus.Quarantined &&
             rental.StartDate < endDate &&
-            rental.PredictedEndDate > startDate));
+            (rental.EndDate ?? rental.PredictedEndDate) > startDate));
 
     public Task<bool> IsMotorcycleCurrentlyRentedAsync(string licencePlate)
     {

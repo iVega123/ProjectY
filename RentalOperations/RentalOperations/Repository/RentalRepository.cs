@@ -73,11 +73,21 @@ namespace RentalOperations.Repository
             DateTime startDate,
             DateTime endDate)
         {
+            var schedulableStatuses = Builders<Rental>.Filter.In(
+                rental => rental.Status,
+                [RentalStatus.Active, RentalStatus.Completed]);
+            var existingPeriodEndsAfterRequestedStart = Builders<Rental>.Filter.Or(
+                Builders<Rental>.Filter.And(
+                    Builders<Rental>.Filter.Ne(rental => rental.EndDate, null),
+                    Builders<Rental>.Filter.Gt(rental => rental.EndDate, startDate)),
+                Builders<Rental>.Filter.And(
+                    Builders<Rental>.Filter.Eq(rental => rental.EndDate, null),
+                    Builders<Rental>.Filter.Gt(rental => rental.PredictedEndDate, startDate)));
             var filter = Builders<Rental>.Filter.And(
                 Builders<Rental>.Filter.Eq(rental => rental.MotorcycleLicencePlate, licencePlate),
-                Builders<Rental>.Filter.Eq(rental => rental.Status, RentalStatus.Active),
+                schedulableStatuses,
                 Builders<Rental>.Filter.Lt(rental => rental.StartDate, endDate),
-                Builders<Rental>.Filter.Gt(rental => rental.PredictedEndDate, startDate));
+                existingPeriodEndsAfterRequestedStart);
             return _rentals.Find(filter).Limit(1).AnyAsync();
         }
 
