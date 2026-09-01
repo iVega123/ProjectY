@@ -369,6 +369,25 @@ namespace MotoHubTests.Integration
         }
 
         [Fact]
+        public async Task Create_ModelThatBecomesTooShortAfterTrimming_ReturnsValidationError()
+        {
+            using var client = _factory.CreateClient();
+            client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
+                "Bearer",
+                GenerateJwtToken());
+
+            var response = await client.PostAsJsonAsync("/api/motorcycles", new MotorcycleDTO
+            {
+                LicensePlate = NextPlate(),
+                Model = " A",
+                Year = 2020
+            });
+
+            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+            Assert.Contains("Model", await response.Content.ReadAsStringAsync(), StringComparison.OrdinalIgnoreCase);
+        }
+
+        [Fact]
         public async Task GetAll_WithInvalidApiKey_ReturnsUnauthorized()
         {
             // Arrange

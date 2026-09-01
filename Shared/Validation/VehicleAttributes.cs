@@ -31,3 +31,35 @@ public sealed class PlausibleVehicleYearAttribute : ValidationAttribute
     public override string FormatErrorMessage(string name) =>
         $"O ano deve estar entre {MinimumYear} e {DateTime.UtcNow.Year + 1}.";
 }
+
+[AttributeUsage(AttributeTargets.Property | AttributeTargets.Field | AttributeTargets.Parameter)]
+public sealed class TrimmedStringLengthAttribute : ValidationAttribute
+{
+    private readonly int _maximumLength;
+
+    public TrimmedStringLengthAttribute(int maximumLength)
+    {
+        _maximumLength = maximumLength;
+    }
+
+    public int MinimumLength { get; init; }
+
+    public override bool IsValid(object? value)
+    {
+        if (value is null)
+        {
+            return true;
+        }
+
+        if (value is not string text)
+        {
+            return false;
+        }
+
+        var trimmedLength = text.Trim().Length;
+        return trimmedLength >= MinimumLength && trimmedLength <= _maximumLength;
+    }
+
+    public override string FormatErrorMessage(string name) =>
+        $"{name} deve conter entre {MinimumLength} e {_maximumLength} caracteres após remover espaços externos.";
+}

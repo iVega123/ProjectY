@@ -36,9 +36,48 @@ public sealed class MigrationTests : IAsyncLifetime
         await context.SaveChangesAsync();
 
         Assert.Empty(await context.Database.GetPendingMigrationsAsync());
-        Assert.Equal(5, (await context.Database.GetAppliedMigrationsAsync()).Count());
+        Assert.Equal(6, (await context.Database.GetAppliedMigrationsAsync()).Count());
         Assert.Equal(1, await context.Motorcycles.CountAsync());
     }
+
+    [Fact]
+    [Trait("Category", "Integration")]
+    public async Task PlateMigration_NormalizesWinnerAndQuarantinesDuplicateMotorcycle()
+    {
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseNpgsql(_database.GetConnectionString())
+            .Options;
+        await using var context = new ApplicationDbContext(options);
+        await context.Database.MigrateAsync("20260901122917_AddMotorcyclePaginationIndex");
+        context.Motorcycles.AddRange(
+            CreateMotorcycle("motorcycle-a", "abc1234", DateTime.UtcNow.AddDays(-2)),
+            CreateMotorcycle("motorcycle-b", " ABC1234 ", DateTime.UtcNow.AddDays(-1)));
+        await context.SaveChangesAsync();
+
+        await context.Database.MigrateAsync();
+        context.ChangeTracker.Clear();
+
+        var winner = await context.Motorcycles.SingleAsync(motorcycle => motorcycle.Id == "motorcycle-a");
+        var duplicate = await context.Motorcycles.SingleAsync(motorcycle => motorcycle.Id == "motorcycle-b");
+        Assert.Equal("ABC1234", winner.LicensePlate);
+        Assert.Null(winner.RetiredAtUtc);
+        Assert.StartsWith("~QUARANTINED~", duplicate.LicensePlate, StringComparison.Ordinal);
+        Assert.NotNull(duplicate.RetiredAtUtc);
+        Assert.Equal(
+            2,
+            await context.Database.SqlQueryRaw<int>(
+                "SELECT COUNT(*)::int AS \"Value\" FROM \"LegacyMotorcyclePlateReconciliations\"")
+                .SingleAsync());
+    }
+
+    private static Motorcycle CreateMotorcycle(string id, string licensePlate, DateTime registrationDate) => new()
+    {
+        Id = id,
+        Year = 2020,
+        Model = "Legacy motorcycle",
+        LicensePlate = licensePlate,
+        RegistrationDate = registrationDate
+    };
 }
 
 public sealed class DbContextConstructionTests

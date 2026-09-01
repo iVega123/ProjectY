@@ -9,7 +9,7 @@ namespace MotoHub.DTOs
         public int Year { get; set; }
 
         [Required]
-        [StringLength(100, MinimumLength = 2)]
+        [TrimmedStringLength(100, MinimumLength = 2)]
         public string? Model { get; set; }
 
         [Required]
