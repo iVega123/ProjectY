@@ -72,8 +72,15 @@ ambiguous and can cause a duplicate publish.
 Each relay atomically claims one eligible aggregate head with `FOR UPDATE SKIP
 LOCKED`, records an owner token and lease, and publishes outside the database
 transaction. Another replica skips that row. Rows from the same aggregate are
-released in `AggregateSequence` order; no ordering is promised between
-different aggregates.
+selected by `AggregateSequence`, `OccurredAtUtc`, and `Id`, and only one head
+can be owned at a time.
+
+The relay preserves causal order only when the producer persists a strictly
+monotonic `AggregateSequence` in the same write. AuthGate image chunks do this
+inside one registration transaction. MotoHub licence-plate updates currently
+write sequence `0` for every separate update, so their timestamp and identifier
+are tie-breakers, not a causal clock. Ordering between those updates is
+deliberately not promised, nor is ordering between different aggregates.
 
 A publish failure clears the claim and schedules a bounded backoff. A process
 crash leaves the claim until its lease expires. A confirm followed by a crash
@@ -140,8 +147,8 @@ HTTP key as permanent evidence.
 The domain commit succeeds and the outbox row remains pending. The API does not
 wait for RabbitMQ, so downstream views can be stale until the relay recovers.
 Backlog age and attempt count, not API status, expose this degradation. Ordering
-within one aggregate is preserved because later rows cannot pass its pending
-head.
+for already-sequenced rows is preserved because later rows cannot pass their
+pending head; the relay does not invent a missing producer sequence.
 
 ### Broker partition and ambiguous confirms
 
@@ -158,7 +165,9 @@ early. Claim tokens prevent a former owner from marking a row complete after it
 loses ownership, but they cannot retract an external publish already made.
 Production nodes therefore require synchronized clocks and lease durations
 larger than expected skew and publish latency. Duplicate delivery remains an
-expected outcome and must reach an inbox-protected handler.
+expected outcome and must reach an inbox-protected handler. Same-sequence
+MotoHub updates can also be observed out of causal order when their timestamps
+come from skewed writers.
 
 ### Partition during the unique-index race
 
@@ -188,7 +197,11 @@ acknowledge conflicting writes outside its configured consistency model.
   RabbitMQ.** Each guarantee ends at its named authority.
 - **Not exactly-once execution.** Handlers and middleware can run more than
   once; the durable effect is what is deduplicated.
-- **Not global event ordering.** Ordering is per aggregate only.
+- **Not global event ordering.** A producer sequence can order one aggregate;
+  nothing orders different aggregates.
+- **Not causal ordering for MotoHub licence updates.** Those events do not yet
+  carry a durable monotonic aggregate sequence; relay tie-breakers are not a
+  substitute for one.
 - **Not arbitrary MongoDB effect safety.** The current Mongo inbox requires an
   idempotent effect after a crash window.
 - **Not permanent deduplication.** HTTP and inbox records expire.
@@ -210,7 +223,7 @@ only where the test must deterministically stop or observe a publish.
 | [Database rental claim](#database-serialized-rental-claim) | [`ConcurrentCreateRequestsForSameMotorcycle_OneSucceedsAndOneReturnsConflict`](../../RentalOperations/RentalOperationsTests/Integration/MongoDb/ActiveRentalApiTests.cs) | The production Mongo partial unique index is removed |
 | [Database rental claim](#database-serialized-rental-claim) | [`ConcurrentClaimsForSameMotorcycle_OneIsRejectedByDatabaseConstraint`](../../RentalOperations/RentalOperationsTests/Integration/PostgreSql/ActiveRentalConstraintTests.cs) | The relational partial unique index is removed |
 | [Transactional outbox](#transactional-outbox) | [`DomainMutationAndOutboxInsert_RollBackTogetherWhenSaveFails`](../../MotoHub/MotoHubTests/Integration/PostgreSql/OutboxRelayTests.cs) | The outbox is no longer part of the aggregate save |
-| [Transactional outbox](#transactional-outbox) | [`CommittedMessages_SurviveRelayRestartAndDrainInAggregateOrderAfterBrokerRecovery`](../../MotoHub/MotoHubTests/Integration/PostgreSql/OutboxRelayTests.cs) | The committed event row or retry behavior is removed |
+| [Transactional outbox](#transactional-outbox) | [`CommittedSequencedMessages_SurviveRelayRestartAndDrainAfterBrokerRecovery`](../../MotoHub/MotoHubTests/Integration/PostgreSql/OutboxRelayTests.cs) | The committed event row or retry behavior is removed |
 | [Leased relay](#leased-outbox-relay) | [`ConcurrentRelays_ClaimOnlyOneHeadMessagePerAggregate`](../../MotoHub/MotoHubTests/Integration/PostgreSql/OutboxRelayTests.cs) | Atomic claims or aggregate-head ordering is removed |
 | [PostgreSQL inbox](#transactional-inbox) | [`SameMessageProcessedConcurrently_ProducesOneDatabaseEffect`](../../RiderManager/RiderManagerTests/Integration/PostgreSql/InboxProcessorTests.cs) | The inbox conflict gate or shared transaction is removed |
 | [PostgreSQL inbox](#transactional-inbox) | [`ImageRedelivery_UsesInboxAndCallsIdempotentUploadOnce`](../../RiderManager/RiderManagerTests/Integration/PostgreSql/InboxProcessorTests.cs) | Completed image messages are handled again |

@@ -28,7 +28,7 @@ public sealed class OutboxRelayTests : IAsyncLifetime
     [Fact]
     [Trait("Category", "Integration")]
     [Trait("Guarantee", "ADR-0009#transactional-outbox")]
-    public async Task CommittedMessages_SurviveRelayRestartAndDrainInAggregateOrderAfterBrokerRecovery()
+    public async Task CommittedSequencedMessages_SurviveRelayRestartAndDrainAfterBrokerRecovery()
     {
         var transport = new RecoverableOutboxTransport { IsAvailable = false };
 
