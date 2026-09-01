@@ -139,7 +139,7 @@ local_resource(
     'cockroach-migrations',
     bootstrap_script + ['-Resource', 'Cockroach'],
     cmd_bat = bootstrap_script_bat + ['-Resource', 'Cockroach'],
-    deps = ['scripts/Initialize-LocalResource.ps1', 'deploy/db/cockroach'],
+    deps = ['scripts/Initialize-LocalResource.ps1', 'deploy/db/sql'],
     resource_deps = ['cockroachdb'],
     labels = ['setup'],
 )

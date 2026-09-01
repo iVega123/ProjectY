@@ -1,20 +1,21 @@
 -- Esquema mínimo do núcleo transacional.
 --
--- O ponto desta migração é a última restrição: a sobreposição de aluguéis, que
--- na versão auditada era um `foreach` em C# sujeito a corrida (M11), passa a ser
--- garantida pelo banco sob concorrência real.
-
-CREATE DATABASE IF NOT EXISTS projecty;
-SET DATABASE = projecty;
-
--- Um usuário por serviço, com permissão só no que lhe cabe (A2).
-CREATE USER IF NOT EXISTS rental_core;
-CREATE USER IF NOT EXISTS media_guard;
+-- O ponto desta migração é a restrição de unicidade parcial: a sobreposição de
+-- aluguéis, que na versão auditada era um `foreach` em C# sujeito a corrida
+-- (M11), passa a ser garantida pelo banco sob concorrência real.
+--
+-- Este arquivo é escrito no subconjunto que CockroachDB e PostgreSQL aceitam.
+-- Não é elegância: é a última coluna da tabela do ADR 0004. O engine local e o
+-- gerenciado são o mesmo (CockroachDB), então nada aqui falharia se o dialeto
+-- escorregasse — o CI aplica o arquivo nos dois engines justamente porque
+-- nenhuma outra coisa defenderia essa portabilidade.
+--
+-- A criação de banco e de papéis mora em 000_bootstrap.<engine>.sql.
 
 CREATE TABLE IF NOT EXISTS motorcycles (
     id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    license_plate STRING NOT NULL,
-    model         STRING,
+    license_plate TEXT NOT NULL,
+    model         TEXT,
     year          INT NOT NULL CHECK (year BETWEEN 1950 AND 2100),
     registered_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     retired_at    TIMESTAMPTZ,
@@ -23,14 +24,14 @@ CREATE TABLE IF NOT EXISTS motorcycles (
 
 CREATE TABLE IF NOT EXISTS rentals (
     id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    rider_id          STRING NOT NULL,
-    license_plate     STRING NOT NULL REFERENCES motorcycles (license_plate),
+    rider_id          TEXT NOT NULL,
+    license_plate     TEXT NOT NULL REFERENCES motorcycles (license_plate),
     starts_at         TIMESTAMPTZ NOT NULL,
     predicted_ends_at TIMESTAMPTZ NOT NULL,
     ends_at           TIMESTAMPTZ,
     init_cost         DECIMAL(12, 2) NOT NULL,
     final_cost        DECIMAL(12, 2),
-    status            STRING NOT NULL DEFAULT 'active'
+    status            TEXT NOT NULL DEFAULT 'active'
                       CHECK (status IN ('active', 'closed', 'cancelled')),
     created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
     CHECK (predicted_ends_at > starts_at)
@@ -49,9 +50,9 @@ CREATE INDEX IF NOT EXISTS rentals_by_rider ON rentals (rider_id, created_at DES
 -- separado a envia ao Kafka. É o que impede a divergência de escrita dupla (M3).
 CREATE TABLE IF NOT EXISTS outbox (
     id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    aggregate_type STRING NOT NULL,
-    aggregate_id   STRING NOT NULL,
-    event_type     STRING NOT NULL,
+    aggregate_type TEXT NOT NULL,
+    aggregate_id   TEXT NOT NULL,
+    event_type     TEXT NOT NULL,
     payload        JSONB NOT NULL,
     occurred_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
     published_at   TIMESTAMPTZ
@@ -62,13 +63,16 @@ CREATE INDEX IF NOT EXISTS outbox_pending ON outbox (occurred_at) WHERE publishe
 -- Inbox: deduplicação no consumo. Junto com o outbox, dá efeito de "exatamente
 -- uma vez" sem que o broker precise prometer entrega exatamente uma vez.
 CREATE TABLE IF NOT EXISTS inbox (
-    message_id  STRING NOT NULL,
-    consumer    STRING NOT NULL,
+    message_id  TEXT NOT NULL,
+    consumer    TEXT NOT NULL,
     handled_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (message_id, consumer)
 );
 
 CREATE INDEX IF NOT EXISTS inbox_retention ON inbox (handled_at);
+
+GRANT USAGE ON SCHEMA public TO rental_core;
+GRANT USAGE ON SCHEMA public TO media_guard;
 
 GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE motorcycles, rentals, outbox, inbox TO rental_core;
 GRANT SELECT ON TABLE rentals TO media_guard;
