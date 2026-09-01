@@ -6,6 +6,9 @@ using MotoHub.Models;
 using MotoHub.Repositories;
 using MotoHub.Services.RabbitMQ;
 
+using ProjectY.Shared.Pagination;
+using ProjectY.Shared.Validation;
+
 namespace MotoHub.Services
 {
     public class MotorcycleService : IMotorcycleService
@@ -27,13 +30,15 @@ namespace MotoHub.Services
             _rentalOperationService = rentalOperationService;
         }
 
-        public IEnumerable<MotorcycleDTO> GetAllMotorcycles()
+        public async Task<CursorPage<MotorcycleDTO>> GetMotorcyclesAsync(string? cursor, int? pageSize)
         {
-            var motorcycles = _repository.GetAll();
-            return _mapper.Map<IEnumerable<MotorcycleDTO>>(motorcycles);
+            var page = await _repository.GetPageAsync(cursor, pageSize);
+            return new CursorPage<MotorcycleDTO>(
+                _mapper.Map<IReadOnlyList<MotorcycleDTO>>(page.Items),
+                page.NextCursor);
         }
 
-        public async Task<MotorcycleDTO> GetMotorcycleByLicensePlateAsync(string licensePlate)
+        public async Task<MotorcycleDTO?> GetMotorcycleByLicensePlateAsync(string licensePlate)
         {
             var motorcycle = await _repository.GetByLicensePlateAsync(licensePlate);
             return _mapper.Map<MotorcycleDTO>(motorcycle);
@@ -47,23 +52,50 @@ namespace MotoHub.Services
 
         public async Task UpdateMotorcycleAsync(string licensePlate, string newLicencePlate)
         {
+            licensePlate = BrazilianLicensePlateAttribute.Normalize(licensePlate);
+            newLicencePlate = BrazilianLicensePlateAttribute.Normalize(newLicencePlate);
             var existingMotorcycle = await _repository.GetByLicensePlateAsync(licensePlate);
             if (existingMotorcycle == null)
             {
                 return;
             }
 
-            existingMotorcycle.LicensePlate = newLicencePlate;
+            if (existingMotorcycle.RetiredAtUtc is not null)
+            {
+                return;
+            }
 
-            _repository.Update(existingMotorcycle);
+            if (string.Equals(licensePlate, newLicencePlate, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            if (_repository.LicensePlateExists(newLicencePlate))
+            {
+                throw new InvalidOperationException(
+                    $"Motorcycle with plate {newLicencePlate} already exists.");
+            }
+
+            var renameReserved = await _rentalOperationService.TryReserveMotorcycleRenameAsync(
+                licensePlate,
+                newLicencePlate);
+            if (!renameReserved)
+            {
+                throw new InvalidOperationException(
+                    $"Motorcycle plate {newLicencePlate} is already claimed by a rental or retirement.");
+            }
+
+            existingMotorcycle.LicensePlate = newLicencePlate;
 
             LicencePlateRabbitMQEntity licencePlateRabbitMQEntity = new LicencePlateRabbitMQEntity()
             {
+                AggregateId = existingMotorcycle.Id,
                 newLicencePlate = newLicencePlate,
                 oldLicencePlate = licensePlate,
             };
 
             _messagingPublisherService.PublishLicenceUpdate(licencePlateRabbitMQEntity);
+            _repository.Update(existingMotorcycle);
         }
 
         public async Task<OperationResult> DeleteMotorcycle(string licensePlate)
@@ -72,18 +104,43 @@ namespace MotoHub.Services
             if (existingMotorcycle == null)
                 return OperationResult.Fail($"Motorcycle with plate {licensePlate} not found.");
 
-            var isRented = await _rentalOperationService.GetRentalsByMotorcycleLicencePlateAsync(licensePlate);
-            if (isRented)
-                return OperationResult.Fail("Motorcycle is currently rented and cannot be deleted.");
+            if (existingMotorcycle.RetiredAtUtc is not null)
+                return OperationResult.Ok("Motorcycle was already retired.");
 
             try
             {
-                _repository.Delete(existingMotorcycle.Id);
-                return OperationResult.Ok("Motorcycle successfully deleted.");
+                var retirementReserved = await _rentalOperationService.TryRetireMotorcycleAsync(licensePlate);
+                if (!retirementReserved)
+                    return OperationResult.Fail(
+                        "Motorcycle has an active rental and cannot be retired.",
+                        StatusCodes.Status409Conflict);
+
+                var retired = await _repository.RetireAsync(
+                    existingMotorcycle.Id,
+                    DateTime.UtcNow,
+                    MotorcycleRetirementReasons.RequestedByAdministrator);
+                return retired
+                    ? OperationResult.Ok("Motorcycle successfully retired.")
+                    : OperationResult.Ok("Motorcycle was already retired.");
             }
             catch (Exception ex)
             {
-                return OperationResult.Fail("Failed to delete the motorcycle due to an unexpected error." + ex.Message);
+                // The RentalOperations retirement marker is intentionally retained on an
+                // ambiguous failure. A retry can finish the soft delete without allowing a
+                // rental to slip through the cross-service commit window.
+                return OperationResult.Fail("Failed to retire the motorcycle due to an unexpected error. " + ex.Message);
+            }
+        }
+
+        public async Task EnsureHistoricalReferencesAsync(IEnumerable<string> licensePlates)
+        {
+            var retiredAtUtc = DateTime.UtcNow;
+            foreach (var licensePlate in licensePlates
+                         .Where(plate => !string.IsNullOrWhiteSpace(plate))
+                         .Select(plate => plate.Trim())
+                         .Distinct(StringComparer.Ordinal))
+            {
+                await _repository.EnsureHistoricalReferenceAsync(licensePlate, retiredAtUtc);
             }
         }
 

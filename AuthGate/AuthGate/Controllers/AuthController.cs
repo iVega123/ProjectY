@@ -8,6 +8,9 @@ using AuthGate.Services.File;
 using AuthGate.Services.RabbitMQ;
 using AuthGate.Services;
 using AuthGate.Entities;
+using AuthGate.Data;
+using Microsoft.EntityFrameworkCore;
+using ProjectY.Shared.Validation;
 
 namespace AuthGate.Controllers
 {
@@ -22,6 +25,7 @@ namespace AuthGate.Controllers
         private readonly ILogger<AuthController> _logger;
         private readonly IFileValidationService _fileValidationService;
         private readonly IMessagingPublisherService _messagingPublisherService;
+        private readonly ApplicationDbContext? _dbContext;
 
         public AuthController(
             UserManager<ApplicationUser> userManager,
@@ -30,7 +34,8 @@ namespace AuthGate.Controllers
             IConfiguration configuration,
             ILogger<AuthController> logger,
             IFileValidationService fileValidationService,
-            IMessagingPublisherService messagingPublisherService
+            IMessagingPublisherService messagingPublisherService,
+            ApplicationDbContext? dbContext = null
             )
         {
             _userManager = userManager;
@@ -40,6 +45,7 @@ namespace AuthGate.Controllers
             _logger = logger;
             _fileValidationService = fileValidationService;
             _messagingPublisherService = messagingPublisherService;
+            _dbContext = dbContext;
         }
 
         [HttpPost("register/rider")]
@@ -69,11 +75,21 @@ namespace AuthGate.Controllers
                 UserName = model.Email,
                 Name = model.Name,
                 Email = model.Email,
-                CNPJ = model.CNPJ,
+                CNPJ = BrazilianCnpj.Normalize(model.CNPJ),
                 DateOfBirth = model.DateOfBirth,
                 CNHNumber = model.CNHNumber,
                 CNHType = parsedCNHType
             };
+
+            (Stream File, string Extension)? validatedImage = null;
+            if (model.CNHImage != null)
+            {
+                validatedImage = await _fileValidationService.ValidateAndConvertFileAsync(model.CNHImage);
+            }
+
+            await using var transaction = _dbContext is not null && _dbContext.Database.IsRelational()
+                ? await _dbContext.Database.BeginTransactionAsync()
+                : null;
 
             var result = await _userManager.CreateAsync(riderUser, model.Password);
             if (!result.Succeeded)
@@ -94,12 +110,24 @@ namespace AuthGate.Controllers
 
             _logger.LogInformation("Rider user {UserId} successfully registered.", riderUser.Id);
 
-            if (model.CNHImage != null)
-            {
-                var (file, ext) = await _fileValidationService.ValidateAndConvertFileAsync(model.CNHImage);
-                _messagingPublisherService.PublishImageStream(file, ext, riderUser.Id);
-            }
             _messagingPublisherService.PublishRiderInfo(convertRider(model, riderUser.Id));
+            if (validatedImage is not null)
+            {
+                _messagingPublisherService.PublishImageStream(
+                    validatedImage.Value.File,
+                    validatedImage.Value.Extension,
+                    riderUser.Id);
+            }
+
+            if (_dbContext is not null)
+            {
+                await _dbContext.SaveChangesAsync();
+            }
+
+            if (transaction is not null)
+            {
+                await transaction.CommitAsync();
+            }
 
             return Ok("Rider user successfully registered.");
         }
@@ -181,7 +209,7 @@ namespace AuthGate.Controllers
                 Name = model.Name,
                 UserId = id,
                 CNHNumber = model.CNHNumber,
-                CNPJ = model.CNPJ,
+                CNPJ = BrazilianCnpj.Normalize(model.CNPJ),
                 CNHType = model.CNHType,
                 DateOfBirth = model.DateOfBirth,
                 Email = model.Email,

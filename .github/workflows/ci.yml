@@ -30,6 +30,11 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v6
 
+      - name: Validate Compose models
+        run: |
+          docker compose --file docker-compose.yml config --quiet --no-interpolate
+          docker compose --file deploy/overlays/selfhost/compose.yaml config --quiet --no-interpolate
+
       - name: Detect relevant paths
         id: filter
         uses: dorny/paths-filter@v3
@@ -149,7 +154,7 @@ jobs:
       - name: Set up .NET
         uses: actions/setup-dotnet@v5
         with:
-          dotnet-version: 8.0.x
+          dotnet-version: 10.0.x
 
       - name: Restore
         run: dotnet restore "${{ matrix.solution }}"

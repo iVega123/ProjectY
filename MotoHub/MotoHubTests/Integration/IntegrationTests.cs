@@ -1,7 +1,12 @@
 ﻿using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.IdentityModel.Tokens;
+using Microsoft.EntityFrameworkCore;
+using MotoHub.Data;
 using MotoHub.DTOs;
+using MotoHub.Models;
+using MotoHub.Services;
 using Newtonsoft.Json;
 using System.IdentityModel.Tokens.Jwt;
 using System.Net;
@@ -14,11 +19,41 @@ namespace MotoHubTests.Integration
 {
     public class IntegrationTests : IClassFixture<CustomWebApplicationFactory<Program>>
     {
+        private static int _plateSequence;
         private readonly WebApplicationFactory<Program> _factory;
 
         public IntegrationTests(CustomWebApplicationFactory<Program> factory)
         {
             _factory = factory;
+        }
+
+        [Fact]
+        public async Task Update_CommitsMotorcycleAndOutboxMessageTogether()
+        {
+            using var scope = _factory.Services.CreateScope();
+            var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+            var repositoryContext = scope.ServiceProvider.GetRequiredService<IApplicationDbContext>();
+            Assert.Same(context, repositoryContext);
+
+            var motorcycle = new Motorcycle
+            {
+                Id = Guid.NewGuid().ToString(),
+                LicensePlate = $"OUT-{Guid.NewGuid():N}".ToUpperInvariant(),
+                Model = "Transactional outbox",
+                Year = 2026,
+                RegistrationDate = DateTime.UtcNow
+            };
+            context.Motorcycles.Add(motorcycle);
+            await context.SaveChangesAsync();
+
+            var service = scope.ServiceProvider.GetRequiredService<IMotorcycleService>();
+            var newLicencePlate = $"NEW-{Guid.NewGuid():N}".ToUpperInvariant();
+            await service.UpdateMotorcycleAsync(motorcycle.LicensePlate, newLicencePlate);
+
+            var message = Assert.Single(context.OutboxMessages.Local);
+            Assert.Equal(motorcycle.Id, message.AggregateId);
+            Assert.Equal(newLicencePlate, motorcycle.LicensePlate);
+            Assert.Equal(1, await context.OutboxMessages.CountAsync(item => item.Id == message.Id));
         }
 
         [Fact]
@@ -42,7 +77,7 @@ namespace MotoHubTests.Integration
         {
             // Arrange
             var client = _factory.CreateClient();
-            var motorcycle = new MotorcycleDTO { LicensePlate = "ABC123", Model = "Honda", Year = 2020 };
+            var motorcycle = new MotorcycleDTO { LicensePlate = NextPlate(), Model = "Honda", Year = 2020 };
 
             var token = GenerateJwtToken();
 
@@ -59,13 +94,45 @@ namespace MotoHubTests.Integration
         }
 
         [Fact]
+        public async Task Create_IgnoresClientSuppliedRetirementMetadata()
+        {
+            using var client = _factory.CreateClient();
+            client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
+                "Bearer",
+                GenerateJwtToken());
+            var licensePlate = NextPlate();
+            var response = await client.PostAsJsonAsync("/api/motorcycles", new MotorcycleDTO
+            {
+                LicensePlate = licensePlate,
+                Model = "Must remain active",
+                Year = 2026,
+                RetiredAtUtc = DateTime.UtcNow,
+                RetirementReason = "client-controlled"
+            });
+            response.EnsureSuccessStatusCode();
+
+            using var scope = _factory.Services.CreateScope();
+            var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+            var motorcycle = await context.Motorcycles.SingleAsync(candidate =>
+                candidate.LicensePlate == licensePlate);
+
+            Assert.Null(motorcycle.RetiredAtUtc);
+            Assert.Null(motorcycle.RetirementReason);
+        }
+
+        [Fact]
         public async Task GetByLicensePlate_ExistingPlate_ReturnsOk()
         {
             // Arrange
             var client = _factory.CreateClient();
-            var licensePlate = "ABC123";
+            var licensePlate = NextPlate();
             var token = GenerateJwtToken();
             client.DefaultRequestHeaders.Add("Authorization", $"Bearer {token}");
+
+            var createResponse = await client.PostAsJsonAsync(
+                "/api/motorcycles",
+                new MotorcycleDTO { LicensePlate = licensePlate, Model = "Honda", Year = 2020 });
+            createResponse.EnsureSuccessStatusCode();
 
             // Act
             var response = await client.GetAsync($"/api/motorcycles/{licensePlate}");
@@ -96,8 +163,8 @@ namespace MotoHubTests.Integration
         {
             // Arrange
             var client = _factory.CreateClient();
-            var originalLicensePlate = "ABC123";
-            var newLicensePlate = "XYZ987";
+            var originalLicensePlate = NextPlate();
+            var newLicensePlate = NextPlate();
             var motorcycle = new MotorcycleDTO { LicensePlate = originalLicensePlate, Model = "Honda", Year = 2020 };
             var updatedMotorcycle = new MotorcycleDTO { LicensePlate = newLicensePlate, Model = "UpdatedModel", Year = 2021 };
 
@@ -140,10 +207,15 @@ namespace MotoHubTests.Integration
         {
             // Arrange
             var client = _factory.CreateClient();
-            var licensePlate = "ABC123";
+            var licensePlate = NextPlate();
 
             var token = GenerateJwtToken();
             client.DefaultRequestHeaders.Add("Authorization", $"Bearer {token}");
+
+            var createResponse = await client.PostAsJsonAsync(
+                "/api/motorcycles",
+                new MotorcycleDTO { LicensePlate = licensePlate, Model = "Honda", Year = 2020 });
+            createResponse.EnsureSuccessStatusCode();
 
             // Act
             var response = await client.DeleteAsync($"/api/motorcycles/{licensePlate}");
@@ -220,7 +292,7 @@ namespace MotoHubTests.Integration
         {
             // Arrange
             var client = _factory.CreateClient();
-            var motorcycle = new MotorcycleDTO { LicensePlate = "ExistingPlate", Model = "Honda", Year = 2020 };
+            var motorcycle = new MotorcycleDTO { LicensePlate = NextPlate(), Model = "Honda", Year = 2020 };
 
             var token = GenerateJwtToken();
             client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
@@ -253,6 +325,68 @@ namespace MotoHubTests.Integration
             Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
         }
 
+        [Theory]
+        [InlineData("ABC123")]
+        [InlineData("ABC-1234")]
+        [InlineData("prefixABC1234suffix")]
+        public async Task Create_InvalidLicensePlate_ReturnsValidationError(string licensePlate)
+        {
+            using var client = _factory.CreateClient();
+            client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
+                "Bearer",
+                GenerateJwtToken());
+
+            var response = await client.PostAsJsonAsync("/api/motorcycles", new MotorcycleDTO
+            {
+                LicensePlate = licensePlate,
+                Model = "Honda",
+                Year = 2020
+            });
+
+            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+            Assert.Contains("placa", await response.Content.ReadAsStringAsync(), StringComparison.OrdinalIgnoreCase);
+        }
+
+        [Theory]
+        [InlineData(1899)]
+        [InlineData(3000)]
+        public async Task Create_ImplausibleYear_ReturnsValidationError(int year)
+        {
+            using var client = _factory.CreateClient();
+            client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
+                "Bearer",
+                GenerateJwtToken());
+
+            var response = await client.PostAsJsonAsync("/api/motorcycles", new MotorcycleDTO
+            {
+                LicensePlate = NextPlate(),
+                Model = "Honda",
+                Year = year
+            });
+
+            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+            Assert.Contains("ano", await response.Content.ReadAsStringAsync(), StringComparison.OrdinalIgnoreCase);
+        }
+
+        [Fact]
+        public async Task Create_ModelThatBecomesTooShortAfterTrimming_ReturnsValidationError()
+        {
+            using var client = _factory.CreateClient();
+            client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
+                "Bearer",
+                GenerateJwtToken());
+
+            var response = await client.PostAsJsonAsync("/api/motorcycles", new MotorcycleDTO
+            {
+                LicensePlate = NextPlate(),
+                Model = " A",
+                Year = 2020
+            });
+
+            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+            Assert.Contains("Model", await response.Content.ReadAsStringAsync(), StringComparison.OrdinalIgnoreCase);
+        }
+
         [Fact]
         public async Task GetAll_WithInvalidApiKey_ReturnsUnauthorized()
         {
@@ -273,6 +407,9 @@ namespace MotoHubTests.Integration
         {
             return "30cee9e2-9a38-4aad-8fe6-0398bd7f2a25";
         }
+
+        private static string NextPlate() =>
+            $"TST{Interlocked.Increment(ref _plateSequence) % 10000:D4}";
 
         private string GenerateInvalidJwtToken()
         {

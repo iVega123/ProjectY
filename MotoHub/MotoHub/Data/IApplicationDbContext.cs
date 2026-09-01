@@ -8,6 +8,7 @@ namespace MotoHub.Data
     {
         DbSet<Motorcycle> Motorcycles { get; set; }
         int SaveChanges();
+        Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
         EntityEntry<TEntity> Entry<TEntity>(TEntity entity) where TEntity : class;
     }
 }

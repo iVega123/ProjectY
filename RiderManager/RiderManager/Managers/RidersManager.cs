@@ -2,6 +2,7 @@
 using RiderManager.Services.MinioStorageService;
 using RiderManager.Services.PreSignedService;
 using RiderManager.Services.RiderServices;
+using ProjectY.Shared.Pagination;
 
 namespace RiderManager.Managers
 {
@@ -24,7 +25,7 @@ namespace RiderManager.Managers
             {
                 var filePath = await _minioFileStorageService.UploadFileAsync(riderDto.CNHImagePath);
                 var rider = await _riderService.AddRiderAsync(riderDto);
-                var link = await _minioFileStorageService.GetPresignedUrlAsync(filePath, rider.Id);
+                var link = await _minioFileStorageService.GetPresignedUrlAsync(filePath, rider.UserId);
                 await _preSignedUrlService.StorePresignedUrlAsync(link);
 
                 return;
@@ -54,46 +55,26 @@ namespace RiderManager.Managers
             await _riderService.DeleteRiderAsync(userId);
         }
 
-        public async Task UpdateRiderImageAsync(string userId, IFormFile cnhFile)
+        public async Task UpdateRiderImageAsync(string userId, IFormFile cnhFile, string? objectName = null)
         {
-            var filePath = await _minioFileStorageService.UploadFileAsync(cnhFile);
+            var filePath = await _minioFileStorageService.UploadFileAsync(cnhFile, objectName);
             var link = await _minioFileStorageService.GetPresignedUrlAsync(filePath, userId);
             await _preSignedUrlService.StorePresignedUrlAsync(link);
             return;
         }
 
-        public async Task<IEnumerable<RiderResponseDTO>> GetAllRidersAsync()
+        public Task<CursorPage<RiderResponseDTO>> GetRidersAsync(string? cursor, int? pageSize)
         {
-            var riders = await _riderService.GetAllRidersAsync();
-            var riderDtos = new List<RiderResponseDTO>();
-
-            foreach (var rider in riders)
-            {
-                var (isExpired, uploadFile) = await _preSignedUrlService.GetOrCreatePresignedUrlAsync(rider.Id);
-                if (uploadFile != null)
-                {
-                    if (isExpired)
-                    {
-                        var link = await _minioFileStorageService.GetPresignedUrlAsync(uploadFile.fileName, uploadFile.riderId);
-                        await _preSignedUrlService.StorePresignedUrlAsync(link);
-                    }
-                    rider.CNHUrl = uploadFile.fileUrl;
-                    riderDtos.Add(rider);
-                }
-                else
-                {
-                    riderDtos.Add(rider);
-                }
-            }
-
-            return riderDtos;
+            // Listing is a read-only database operation. URL refresh remains on the
+            // single-rider path so a page never performs one object-storage call per row.
+            return _riderService.GetRidersAsync(cursor, pageSize);
         }
 
         public async Task<RiderResponseDTO> GetRiderByUserIdAsync(string userId)
         {
             var rider = await _riderService.GetRiderByUserIdAsync(userId);
 
-            var (isExpired, uploadFile) = await _preSignedUrlService.GetOrCreatePresignedUrlAsync(rider.Id);
+            var (isExpired, uploadFile) = await _preSignedUrlService.GetOrCreatePresignedUrlAsync(userId);
             if (!isExpired)
             {
                 return await _riderService.GetRiderByUserIdAsync(userId);
@@ -101,7 +82,7 @@ namespace RiderManager.Managers
 
             if (uploadFile != null)
             {
-                var link = await _minioFileStorageService.GetPresignedUrlAsync(uploadFile.fileName, userId);
+                var link = await _minioFileStorageService.GetPresignedUrlAsync(uploadFile.FileName, userId);
                 await _preSignedUrlService.StorePresignedUrlAsync(link);
                 return await _riderService.GetRiderByUserIdAsync(userId);
             }

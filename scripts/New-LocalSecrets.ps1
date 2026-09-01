@@ -202,7 +202,11 @@ $rabbitMqDefinitions = [ordered]@{
     parameters = @()
     global_parameters = @()
     policies = @()
-    queues = @()
+    queues = @(
+        [ordered]@{ name = "rider_info_queue"; vhost = "projecty-rider"; durable = $true; auto_delete = $false; arguments = @{} },
+        [ordered]@{ name = "image_stream_queue"; vhost = "projecty-rider"; durable = $true; auto_delete = $false; arguments = @{} },
+        [ordered]@{ name = "licence_update_queue"; vhost = "projecty-rental"; durable = $true; auto_delete = $false; arguments = @{} }
+    )
     exchanges = @()
     bindings = @()
 }

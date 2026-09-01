@@ -21,10 +21,18 @@ namespace RiderManager.Controllers
         [Authorize]
         [ServiceFilter(typeof(AdminAuthorizationFilter))]
         [HttpGet]
-        public async Task<IActionResult> GetAllRiders()
+        public async Task<IActionResult> GetAllRiders(
+            [FromQuery] string? cursor,
+            [FromQuery] int? pageSize)
         {
-            var riders = await _riderManager.GetAllRidersAsync();
-            return Ok(riders);
+            try
+            {
+                return Ok(await _riderManager.GetRidersAsync(cursor, pageSize));
+            }
+            catch (FormatException exception)
+            {
+                return BadRequest(exception.Message);
+            }
         }
 
 

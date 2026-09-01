@@ -2,6 +2,8 @@
 using RiderManager.Data;
 using RiderManager.Models;
 
+using ProjectY.Shared.Pagination;
+
 namespace RiderManager.Repositories
 {
     public class RiderRepository : IRiderRepository
@@ -23,9 +25,24 @@ namespace RiderManager.Repositories
             return await _context.Riders.FirstOrDefaultAsync(r => r.UserId == userId);
         }
 
-        public async Task<List<Rider>> GetAllAsync()
+        public async Task<CursorPage<Rider>> GetPageAsync(string? cursor, int? pageSize)
         {
-            return await _context.Riders.ToListAsync();
+            var size = CursorPagination.NormalizePageSize(pageSize);
+            var afterId = CursorPagination.Decode(cursor);
+            var source = afterId is null
+                ? _context.Riders
+                : _context.Riders.FromSqlInterpolated($$"""
+                    SELECT * FROM "Riders"
+                    WHERE "Id" > {{afterId}}
+                    """);
+            var query = source
+                .AsNoTracking()
+                .Include(rider => rider.CNHUrl)
+                .OrderBy(rider => rider.Id)
+                .AsQueryable();
+
+            var fetched = await query.Take(size + 1).ToListAsync();
+            return CursorPagination.CreatePage(fetched, size, rider => rider.Id);
         }
 
         public async Task AddAsync(Rider rider)

@@ -4,6 +4,7 @@ using Microsoft.OpenApi.Models;
 using MongoDB.Driver;
 using ProjectY.Shared.Health;
 using ProjectY.Shared.Hosting;
+using ProjectY.Shared.Idempotency;
 using RentalOperations.Configurations;
 using RentalOperations.CrossCutting.Services;
 using RentalOperations.Data;
@@ -40,6 +41,7 @@ Log.Logger = new LoggerConfiguration()
 
 builder.Services.Configure<RiderManagerSettings>(builder.Configuration.GetSection("RiderManagerSettings"));
 builder.Services.Configure<MotoHubSettings>(builder.Configuration.GetSection("MotoHubSettings"));
+builder.Services.AddProjectYIdempotency(builder.Configuration, "rental-operations");
 
 var rabbitMQConfig = builder.Configuration.GetSection("RabbitMQ").Get<RabbitMQOptions>();
 builder.Services.AddSingleton<RabbitMQOptions>(rabbitMQConfig);
@@ -53,6 +55,13 @@ builder.Services
     .AddTcpDependency("rabbitmq", rabbitMQConfig?.HostName ?? "rabbitmq", 5672);
 builder.Services.AddSingleton<MongoDbContext>(sp =>
     new MongoDbContext(mongoDbSettings["ConnectionString"], mongoDbSettings["DatabaseName"]));
+builder.Services.AddHostedService<MongoRentalIndexInitializer>();
+builder.Services.AddSingleton(
+    builder.Configuration.GetSection("Messaging:Inbox").Get<MongoInboxOptions>()
+        ?? new MongoInboxOptions());
+builder.Services.AddSingleton(TimeProvider.System);
+builder.Services.AddSingleton<MongoInboxProcessor>();
+builder.Services.AddHostedService<MongoInboxInitializer>();
 builder.Services.AddAuthentication(options =>
 {
     options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
@@ -73,12 +82,13 @@ builder.Services.AddAuthentication(options =>
     };
 });
 builder.Services.AddControllers();
-builder.Services.AddAutoMapper(typeof(Program));
+builder.Services.AddAutoMapper(_ => { }, typeof(Program));
 builder.Services.AddScoped<AuthorizationFilter>();
 builder.Services.AddScoped<AdminAuthorizationFilter>();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(c =>
 {
+    c.OperationFilter<IdempotencyKeyOperationFilter>();
     c.SwaggerDoc("v1", new OpenApiInfo { Title = "RentalOperations", Version = "v1" });
 
     // Configuração do esquema de segurança JWT no Swagger
@@ -130,6 +140,7 @@ app.UseHttpsRedirection();
 
 app.UseAuthentication();
 app.UseAuthorization();
+app.UseProjectYIdempotency();
 
 app.MapControllers();
 app.MapProjectYHealthChecks();

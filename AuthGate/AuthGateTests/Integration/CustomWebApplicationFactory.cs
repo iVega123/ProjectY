@@ -1,12 +1,15 @@
 ﻿using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Configuration;
 using AuthGate.Data;
 using AuthGate.Model;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.DataProtection;
+using Microsoft.Extensions.Hosting;
 using Moq;
 using RabbitMQ.Client;
 using Xunit;
@@ -41,6 +44,7 @@ namespace AuthGateTests.Integration
 
             builder.ConfigureServices(services =>
             {
+                services.RemoveAll<IHostedService>();
                 services.AddDataProtection().UseEphemeralDataProtectionProvider();
 
                 var modelMock = new Mock<IModel>();
@@ -62,11 +66,8 @@ namespace AuthGateTests.Integration
                 }
 
                 services.AddSingleton<IConnection>(connectionMock.Object);
-                var descriptor = services.SingleOrDefault(d => d.ServiceType == typeof(DbContextOptions<ApplicationDbContext>));
-                if (descriptor != null)
-                {
-                    services.Remove(descriptor);
-                }
+                services.RemoveAll<DbContextOptions<ApplicationDbContext>>();
+                services.RemoveAll<IDbContextOptionsConfiguration<ApplicationDbContext>>();
 
                 services.AddDbContext<ApplicationDbContext>(options =>
                 {
@@ -85,7 +86,13 @@ namespace AuthGateTests.Integration
                     {"Jwt:SigningKeys:AuthGate", "test-only-auth-gate-key-with-32-bytes"},
                     {"Jwt:Audiences:MotoHub", "projecty.moto-hub"},
                     {"Jwt:SigningKeys:MotoHub", "test-only-moto-hub-signing-key-0001"},
-                    {"Messaging:SigningKey", "test-only-queue-signing-key-with-32-bytes"}
+                    {"Messaging:SigningKey", "test-only-queue-signing-key-with-32-bytes"},
+                    {"RabbitMQ:HostName", "unused"},
+                    {"RabbitMQ:VirtualHost", "unused"},
+                    {"RabbitMQ:UserName", "unused"},
+                    {"RabbitMQ:Password", "unused"},
+                    {"RabbitMQ:RiderInfoQueueName", "rider-info-test"},
+                    {"RabbitMQ:ImageStreamQueueName", "image-stream-test"}
                 };
 
                 configBuilder.Sources.Clear();

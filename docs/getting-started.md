@@ -32,6 +32,7 @@ starting.
 | Logstash | `5000` |
 | Kibana | `5601` |
 | PostgreSQL | `5432` |
+| Redis | `6379` |
 | pgAdmin | `5050` |
 | MongoDB | `27017` |
 | MinIO | `9000`, `9001` |
@@ -79,12 +80,22 @@ required before the first Compose startup.
 RabbitMQ does not publish its AMQP or management ports to the host. To inspect
 it locally, run management commands inside the container or attach a temporary
 tool to the Compose network instead of adding a permanent host port mapping.
+The generated definitions declare the rider and licence-update queues as
+durable. When upgrading a stack that created those queues as non-durable,
+restart RabbitMQ before the application services so the old queues disappear;
+RabbitMQ cannot change queue durability in place.
 
 Then start the stack:
 
 ```bash
 docker compose up --build
 ```
+
+PostgreSQL must become healthy before the one-shot AuthGate, MotoHub, and
+RiderManager migration containers run. Each application starts only after its
+migration container exits successfully. See
+[PostgreSQL migration operations](database-migrations.md) for baseline adoption,
+schema changes, and rollback.
 
 The first build downloads the service and infrastructure images, so its duration
 depends on the network connection and Docker cache.

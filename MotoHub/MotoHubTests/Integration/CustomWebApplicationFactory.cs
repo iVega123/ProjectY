@@ -1,8 +1,11 @@
 ﻿using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Hosting;
 using Moq;
 using MotoHub.CrossCutting;
 using MotoHub.Data;
@@ -20,6 +23,7 @@ namespace MotoHubTests.Integration
         {
             builder.ConfigureServices(services =>
             {
+                services.RemoveAll<IHostedService>();
 
                 var serviceDescriptor = services.FirstOrDefault(descriptor =>
                 descriptor.ServiceType == typeof(IRentalOperationService));
@@ -32,6 +36,12 @@ namespace MotoHubTests.Integration
                 var mockService = new Mock<IRentalOperationService>();
                 mockService.Setup(service => service.GetRentalsByMotorcycleLicencePlateAsync("mock"))
                            .ReturnsAsync(true);
+                mockService.Setup(service => service.TryRetireMotorcycleAsync(It.IsAny<string>()))
+                    .ReturnsAsync(true);
+                mockService.Setup(service => service.TryReserveMotorcycleRenameAsync(
+                        It.IsAny<string>(),
+                        It.IsAny<string>()))
+                    .ReturnsAsync(true);
 
                 services.AddSingleton<IRentalOperationService>(mockService.Object);
 
@@ -54,11 +64,8 @@ namespace MotoHubTests.Integration
                 }
 
                 services.AddSingleton<IConnection>(connectionMock.Object);
-                var descriptor = services.SingleOrDefault(d => d.ServiceType == typeof(DbContextOptions<ApplicationDbContext>));
-                if (descriptor != null)
-                {
-                    services.Remove(descriptor);
-                }
+                services.RemoveAll<DbContextOptions<ApplicationDbContext>>();
+                services.RemoveAll<IDbContextOptionsConfiguration<ApplicationDbContext>>();
 
                 services.AddDbContext<ApplicationDbContext>(options =>
                 {
@@ -75,7 +82,12 @@ namespace MotoHubTests.Integration
                     {"Jwt:SigningKey", JwtKey},
                     {"Jwt:Issuer", JwtIssuer},
                     {"Jwt:Audience", JwtAudience},
-                    {"MotoHubApiKey", "" }
+                    {"MotoHubApiKey", "" },
+                    {"RabbitMQ:HostName", "unused"},
+                    {"RabbitMQ:VirtualHost", "unused"},
+                    {"RabbitMQ:UserName", "unused"},
+                    {"RabbitMQ:Password", "unused"},
+                    {"RabbitMQ:LicenceUpdateQueueName", "licence-update-test"}
                 };
 
                 configBuilder.Sources.Clear();

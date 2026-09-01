@@ -1,5 +1,44 @@
 version: '3.7'
 
+x-auth-gate-environment: &auth-gate-environment
+  ASPNETCORE_ENVIRONMENT: Production
+  Swagger__Enabled: "${SWAGGER_ENABLED:-false}"
+  ConnectionStrings__Postgresql: "Host=postgres;Port=5432;Database=${AUTH_GATE_POSTGRES_DB:?Set AUTH_GATE_POSTGRES_DB in .env};Username=${POSTGRES_USER:?Set POSTGRES_USER in .env};Password=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}"
+  RabbitMQ__UserName: "${AUTH_GATE_RABBITMQ_USER:?Set AUTH_GATE_RABBITMQ_USER in .env}"
+  RabbitMQ__Password: "${AUTH_GATE_RABBITMQ_PASSWORD:?Set AUTH_GATE_RABBITMQ_PASSWORD in .env}"
+  Messaging__SigningKey: "${RIDER_EVENTS_SIGNING_KEY:?Set RIDER_EVENTS_SIGNING_KEY in .env}"
+  Redis__ConnectionString: "redis:6379"
+  Jwt__SigningKeys__AuthGate: "${AUTH_GATE_JWT_SIGNING_KEY:?Set AUTH_GATE_JWT_SIGNING_KEY in .env}"
+  Jwt__SigningKeys__MotoHub: "${MOTO_HUB_JWT_SIGNING_KEY:?Set MOTO_HUB_JWT_SIGNING_KEY in .env}"
+  Jwt__SigningKeys__RiderManager: "${RIDER_MANAGER_JWT_SIGNING_KEY:?Set RIDER_MANAGER_JWT_SIGNING_KEY in .env}"
+  Jwt__SigningKeys__RentalOperations: "${RENTAL_OPERATIONS_JWT_SIGNING_KEY:?Set RENTAL_OPERATIONS_JWT_SIGNING_KEY in .env}"
+
+x-rider-manager-environment: &rider-manager-environment
+  ASPNETCORE_ENVIRONMENT: Production
+  Swagger__Enabled: "${SWAGGER_ENABLED:-false}"
+  ASPNETCORE_URLS: http://+:8000
+  ConnectionStrings__Postgresql: "Host=postgres;Port=5432;Database=${RIDER_MANAGER_POSTGRES_DB:?Set RIDER_MANAGER_POSTGRES_DB in .env};Username=${POSTGRES_USER:?Set POSTGRES_USER in .env};Password=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}"
+  RabbitMQ__UserName: "${RIDER_MANAGER_RABBITMQ_USER:?Set RIDER_MANAGER_RABBITMQ_USER in .env}"
+  RabbitMQ__Password: "${RIDER_MANAGER_RABBITMQ_PASSWORD:?Set RIDER_MANAGER_RABBITMQ_PASSWORD in .env}"
+  Messaging__SigningKey: "${RIDER_EVENTS_SIGNING_KEY:?Set RIDER_EVENTS_SIGNING_KEY in .env}"
+  Redis__ConnectionString: "redis:6379"
+  MinIO__AccessKey: "${MINIO_USER:?Set MINIO_USER in .env}"
+  MinIO__SecretKey: "${MINIO_PASSWORD:?Set MINIO_PASSWORD in .env}"
+  Jwt__SigningKey: "${RIDER_MANAGER_JWT_SIGNING_KEY:?Set RIDER_MANAGER_JWT_SIGNING_KEY in .env}"
+  RiderManagerApiKey: "${RIDER_MANAGER_API_KEY:?Set RIDER_MANAGER_API_KEY in .env}"
+
+x-moto-hub-environment: &moto-hub-environment
+  ASPNETCORE_ENVIRONMENT: Production
+  Swagger__Enabled: "${SWAGGER_ENABLED:-false}"
+  ASPNETCORE_URLS: http://+:8100
+  ConnectionStrings__Postgresql: "Host=postgres;Port=5432;Database=${MOTO_HUB_POSTGRES_DB:?Set MOTO_HUB_POSTGRES_DB in .env};Username=${POSTGRES_USER:?Set POSTGRES_USER in .env};Password=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}"
+  RabbitMQ__UserName: "${MOTO_HUB_RABBITMQ_USER:?Set MOTO_HUB_RABBITMQ_USER in .env}"
+  RabbitMQ__Password: "${MOTO_HUB_RABBITMQ_PASSWORD:?Set MOTO_HUB_RABBITMQ_PASSWORD in .env}"
+  Redis__ConnectionString: "redis:6379"
+  Jwt__SigningKey: "${MOTO_HUB_JWT_SIGNING_KEY:?Set MOTO_HUB_JWT_SIGNING_KEY in .env}"
+  MotoHubApiKey: "${MOTO_HUB_API_KEY:?Set MOTO_HUB_API_KEY in .env}"
+  RentalOperationsSettings__ApiKey: "${RENTAL_OPERATIONS_API_KEY:?Set RENTAL_OPERATIONS_API_KEY in .env}"
+
 services:
   elasticsearch:
     image: docker.elastic.co/elasticsearch/elasticsearch:7.17.3
@@ -54,6 +93,28 @@ services:
     volumes:
       - postgres-data:/var/lib/postgresql/data
       - ./deploy/postgres/init-databases.sh:/docker-entrypoint-initdb.d/10-create-service-databases.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d postgres && psql -U \"$${POSTGRES_USER}\" -d postgres -tAc \"SELECT 1 WHERE (SELECT count(*) FROM pg_database WHERE datname IN ('$${AUTH_GATE_POSTGRES_DB}', '$${MOTO_HUB_POSTGRES_DB}', '$${RIDER_MANAGER_POSTGRES_DB}')) = 3\" | grep -qx 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+  redis:
+    image: redis:7.4-alpine
+    container_name: redis
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "always"]
+    ports:
+      - "6379:6379"
+    networks:
+      - elk
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
 
   pgadmin:
     image: dpage/pgadmin4:9.13
@@ -80,6 +141,12 @@ services:
       - mongo-data:/data/db
     networks:
       - elk
+    healthcheck:
+      test: ["CMD-SHELL", "mongosh --quiet --username \"$${MONGO_INITDB_ROOT_USERNAME}\" --password \"$${MONGO_INITDB_ROOT_PASSWORD}\" --authenticationDatabase admin --eval \"db.adminCommand('ping').ok\""]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
 
   rabbitmq:
     image: rabbitmq:3-management
@@ -112,7 +179,21 @@ services:
       - elk
     command: server /data --console-address ":9001"
 
+  auth-gate-migrations:
+    image: projecty/auth-gate:dev
+    build:
+      context: .
+      dockerfile: AuthGate/AuthGate/Dockerfile
+    command: ["--migrate=true"]
+    networks:
+      - elk
+    environment: *auth-gate-environment
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   auth-gate:
+    image: projecty/auth-gate:dev
     build:
       context: .
       dockerfile: AuthGate/AuthGate/Dockerfile
@@ -122,25 +203,36 @@ services:
       - "8181:8181"
     networks:
       - elk
-    environment:
-      ASPNETCORE_ENVIRONMENT: Production
-      Swagger__Enabled: "${SWAGGER_ENABLED:-false}"
-      ConnectionStrings__Postgresql: "Host=postgres;Port=5432;Database=${AUTH_GATE_POSTGRES_DB:?Set AUTH_GATE_POSTGRES_DB in .env};Username=${POSTGRES_USER:?Set POSTGRES_USER in .env};Password=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}"
-      RabbitMQ__UserName: "${AUTH_GATE_RABBITMQ_USER:?Set AUTH_GATE_RABBITMQ_USER in .env}"
-      RabbitMQ__Password: "${AUTH_GATE_RABBITMQ_PASSWORD:?Set AUTH_GATE_RABBITMQ_PASSWORD in .env}"
-      Messaging__SigningKey: "${RIDER_EVENTS_SIGNING_KEY:?Set RIDER_EVENTS_SIGNING_KEY in .env}"
-      Jwt__SigningKeys__AuthGate: "${AUTH_GATE_JWT_SIGNING_KEY:?Set AUTH_GATE_JWT_SIGNING_KEY in .env}"
-      Jwt__SigningKeys__MotoHub: "${MOTO_HUB_JWT_SIGNING_KEY:?Set MOTO_HUB_JWT_SIGNING_KEY in .env}"
-      Jwt__SigningKeys__RiderManager: "${RIDER_MANAGER_JWT_SIGNING_KEY:?Set RIDER_MANAGER_JWT_SIGNING_KEY in .env}"
-      Jwt__SigningKeys__RentalOperations: "${RENTAL_OPERATIONS_JWT_SIGNING_KEY:?Set RENTAL_OPERATIONS_JWT_SIGNING_KEY in .env}"
+    environment: *auth-gate-environment
     healthcheck:
       test: ["CMD", "dotnet", "AuthGate.dll", "--healthcheck", "http://localhost:8080/health/ready"]
       interval: 10s
       timeout: 5s
       retries: 6
       start_period: 10s
+    depends_on:
+      auth-gate-migrations:
+        condition: service_completed_successfully
+      rabbitmq:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
   
+  rider-manager-migrations:
+    image: projecty/rider-manager:dev
+    build:
+      context: .
+      dockerfile: RiderManager/RiderManager/Dockerfile
+    command: ["--migrate=true"]
+    networks:
+      - elk
+    environment: *rider-manager-environment
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   rider-manager:
+    image: projecty/rider-manager:dev
     build:
       context: .
       dockerfile: RiderManager/RiderManager/Dockerfile
@@ -150,18 +242,7 @@ services:
       - "8001:8001"
     networks:
       - elk
-    environment:
-      ASPNETCORE_ENVIRONMENT: Production
-      Swagger__Enabled: "${SWAGGER_ENABLED:-false}"
-      ASPNETCORE_URLS: http://+:8000
-      ConnectionStrings__Postgresql: "Host=postgres;Port=5432;Database=${RIDER_MANAGER_POSTGRES_DB:?Set RIDER_MANAGER_POSTGRES_DB in .env};Username=${POSTGRES_USER:?Set POSTGRES_USER in .env};Password=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}"
-      RabbitMQ__UserName: "${RIDER_MANAGER_RABBITMQ_USER:?Set RIDER_MANAGER_RABBITMQ_USER in .env}"
-      RabbitMQ__Password: "${RIDER_MANAGER_RABBITMQ_PASSWORD:?Set RIDER_MANAGER_RABBITMQ_PASSWORD in .env}"
-      Messaging__SigningKey: "${RIDER_EVENTS_SIGNING_KEY:?Set RIDER_EVENTS_SIGNING_KEY in .env}"
-      MinIO__AccessKey: "${MINIO_USER:?Set MINIO_USER in .env}"
-      MinIO__SecretKey: "${MINIO_PASSWORD:?Set MINIO_PASSWORD in .env}"
-      Jwt__SigningKey: "${RIDER_MANAGER_JWT_SIGNING_KEY:?Set RIDER_MANAGER_JWT_SIGNING_KEY in .env}"
-      RiderManagerApiKey: "${RIDER_MANAGER_API_KEY:?Set RIDER_MANAGER_API_KEY in .env}"
+    environment: *rider-manager-environment
     healthcheck:
       test: ["CMD", "dotnet", "RiderManager.dll", "--healthcheck", "http://localhost:8000/health/ready"]
       interval: 10s
@@ -169,10 +250,28 @@ services:
       retries: 6
       start_period: 10s
     depends_on:
+      rider-manager-migrations:
+        condition: service_completed_successfully
       rabbitmq:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  moto-hub-migrations:
+    image: projecty/moto-hub:dev
+    build:
+      context: .
+      dockerfile: MotoHub/MotoHub/Dockerfile
+    command: ["--migrate=true"]
+    networks:
+      - elk
+    environment: *moto-hub-environment
+    depends_on:
+      postgres:
         condition: service_healthy
 
   moto-hub:
+    image: projecty/moto-hub:dev
     build:
       context: .
       dockerfile: MotoHub/MotoHub/Dockerfile
@@ -182,22 +281,20 @@ services:
       - "8101:8101"
     networks:
       - elk
-    environment:
-      ASPNETCORE_ENVIRONMENT: Production
-      Swagger__Enabled: "${SWAGGER_ENABLED:-false}"
-      ASPNETCORE_URLS: http://+:8100
-      ConnectionStrings__Postgresql: "Host=postgres;Port=5432;Database=${MOTO_HUB_POSTGRES_DB:?Set MOTO_HUB_POSTGRES_DB in .env};Username=${POSTGRES_USER:?Set POSTGRES_USER in .env};Password=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}"
-      RabbitMQ__UserName: "${MOTO_HUB_RABBITMQ_USER:?Set MOTO_HUB_RABBITMQ_USER in .env}"
-      RabbitMQ__Password: "${MOTO_HUB_RABBITMQ_PASSWORD:?Set MOTO_HUB_RABBITMQ_PASSWORD in .env}"
-      Jwt__SigningKey: "${MOTO_HUB_JWT_SIGNING_KEY:?Set MOTO_HUB_JWT_SIGNING_KEY in .env}"
-      MotoHubApiKey: "${MOTO_HUB_API_KEY:?Set MOTO_HUB_API_KEY in .env}"
-      RentalOperationsSettings__ApiKey: "${RENTAL_OPERATIONS_API_KEY:?Set RENTAL_OPERATIONS_API_KEY in .env}"
+    environment: *moto-hub-environment
     healthcheck:
       test: ["CMD", "dotnet", "MotoHub.dll", "--healthcheck", "http://localhost:8100/health/ready"]
       interval: 10s
       timeout: 5s
       retries: 6
       start_period: 10s
+    depends_on:
+      moto-hub-migrations:
+        condition: service_completed_successfully
+      rabbitmq:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
   
   rental-operations:
     build:
@@ -217,6 +314,7 @@ services:
       MongoDbSettings__DatabaseName: "${MONGO_DB:?Set MONGO_DB in .env}"
       RabbitMQ__UserName: "${RENTAL_OPERATIONS_RABBITMQ_USER:?Set RENTAL_OPERATIONS_RABBITMQ_USER in .env}"
       RabbitMQ__Password: "${RENTAL_OPERATIONS_RABBITMQ_PASSWORD:?Set RENTAL_OPERATIONS_RABBITMQ_PASSWORD in .env}"
+      Redis__ConnectionString: "redis:6379"
       Jwt__SigningKey: "${RENTAL_OPERATIONS_JWT_SIGNING_KEY:?Set RENTAL_OPERATIONS_JWT_SIGNING_KEY in .env}"
       RentalOperationsApiKey: "${RENTAL_OPERATIONS_API_KEY:?Set RENTAL_OPERATIONS_API_KEY in .env}"
       RiderManagerSettings__ApiKey: "${RIDER_MANAGER_API_KEY:?Set RIDER_MANAGER_API_KEY in .env}"
@@ -228,7 +326,13 @@ services:
       retries: 6
       start_period: 10s
     depends_on:
+      mongodb:
+        condition: service_healthy
+      moto-hub:
+        condition: service_healthy
       rabbitmq:
+        condition: service_healthy
+      redis:
         condition: service_healthy
 
 networks:
@@ -237,6 +341,7 @@ networks:
 
 volumes:
   postgres-data:
+  redis-data:
   mongo-data:
   rabbitmq-data:
   minio-data:

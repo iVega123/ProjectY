@@ -9,7 +9,6 @@ using MotoHub.Services;
 using MotoHub.Repositories;
 using Microsoft.OpenApi.Models;
 using MotoHub.Filters;
-using RabbitMQ.Client;
 using Serilog.Sinks.Elasticsearch;
 using MotoHub.Configurations;
 using MotoHub.Services.RabbitMQ;
@@ -17,6 +16,8 @@ using MotoHub.CrossCutting;
 using Npgsql;
 using ProjectY.Shared.Health;
 using ProjectY.Shared.Hosting;
+using ProjectY.Shared.Messaging;
+using ProjectY.Shared.Idempotency;
 
 if (await HealthProbeCommand.TryRunAsync(args))
 {
@@ -50,27 +51,16 @@ if (!isTesting)
 Log.Logger = loggerConfig.CreateLogger();
 builder.Host.UseSerilog();
 
-var rabbitMQConfig = builder.Configuration.GetSection("RabbitMQ").Get<RabbitMQOptions>();
+var rabbitMQConfig = builder.Configuration.GetSection("RabbitMQ").Get<RabbitMQOptions>()
+    ?? throw new InvalidOperationException("RabbitMQ configuration is missing.");
 builder.Services.AddSingleton<RabbitMQOptions>(rabbitMQConfig);
+builder.Services.AddProjectYIdempotency(builder.Configuration, "moto-hub");
 var postgresConnection = new NpgsqlConnectionStringBuilder(
     builder.Configuration.GetConnectionString("Postgresql") ?? "Host=postgres;Port=5432");
 builder.Services
     .AddProjectYHealthChecks()
     .AddTcpDependency("postgres", postgresConnection.Host ?? "postgres", postgresConnection.Port)
-    .AddTcpDependency("rabbitmq", rabbitMQConfig?.HostName ?? "rabbitmq", 5672);
-
-builder.Services.AddSingleton<IConnection>(sp =>
-{
-    var rabbitMQOptions = sp.GetRequiredService<RabbitMQOptions>();
-    var factory = new ConnectionFactory()
-    {
-        HostName = rabbitMQOptions.HostName,
-        VirtualHost = rabbitMQOptions.VirtualHost,
-        UserName = rabbitMQOptions.UserName,
-        Password = rabbitMQOptions.Password
-    };
-    return factory.CreateConnection();
-});
+    .AddTcpDependency("rabbitmq", rabbitMQConfig.HostName, 5672);
 
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
     options.UseNpgsql(builder.Configuration.GetConnectionString("Postgresql")));
@@ -96,17 +86,30 @@ builder.Services.AddAuthentication(options =>
 });
 
 builder.Services.AddControllers();
-builder.Services.AddAutoMapper(typeof(Program));
+builder.Services.AddAutoMapper(_ => { }, typeof(Program));
 builder.Services.AddHttpClient();
-builder.Services.AddScoped<IApplicationDbContext, ApplicationDbContext>();
+builder.Services.AddScoped<IApplicationDbContext>(services =>
+    services.GetRequiredService<ApplicationDbContext>());
 builder.Services.AddScoped<IMotorcycleRepository, MotorcycleRepository>();
 builder.Services.AddScoped<AdminAuthorizationFilter>();
 builder.Services.AddScoped<IMotorcycleService, MotorcycleService>();
 builder.Services.AddScoped<IMessagingPublisherService, MessagingPublisherService>();
+builder.Services.AddSingleton(new OutboxRelayOptions
+{
+    ServiceName = "moto-hub",
+    HostName = rabbitMQConfig.HostName,
+    VirtualHost = rabbitMQConfig.VirtualHost,
+    UserName = rabbitMQConfig.UserName,
+    Password = rabbitMQConfig.Password
+});
+builder.Services.AddSingleton<IOutboxTransport, RabbitMqOutboxTransport>();
+builder.Services.AddSingleton<IRabbitMqConnectionProvider, RabbitMqConnectionProvider>();
+builder.Services.AddHostedService<OutboxRelay<ApplicationDbContext>>();
 builder.Services.AddScoped<IRentalOperationService, RentalOperationService>();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(c =>
 {
+    c.OperationFilter<IdempotencyKeyOperationFilter>();
     c.SwaggerDoc("v1", new OpenApiInfo { Title = "MotoHub", Version = "v1" });
     var securityScheme = new OpenApiSecurityScheme
     {
@@ -133,6 +136,11 @@ builder.Services.AddSwaggerGen(c =>
 
 var app = builder.Build();
 
+if (await DatabaseMigrationCommand.TryRunAsync<ApplicationDbContext>(args, app.Services))
+{
+    return;
+}
+
 if (SwaggerPolicy.IsEnabled(app.Environment, app.Configuration))
 {
     app.UseSwagger();
@@ -142,11 +150,12 @@ if (SwaggerPolicy.IsEnabled(app.Environment, app.Configuration))
 app.UseHttpsRedirection();
 
 app.UseAuthentication();
-
 app.UseAuthorization();
+app.UseProjectYIdempotency();
 
 app.MapControllers();
 app.MapProjectYHealthChecks();
+app.MapOutboxMetrics<ApplicationDbContext>("moto-hub");
 
 app.Run();
 

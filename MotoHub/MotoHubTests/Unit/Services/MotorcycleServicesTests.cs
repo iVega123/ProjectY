@@ -1,4 +1,5 @@
 ﻿using AutoMapper;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Moq;
 using MotoHub.CrossCutting;
@@ -8,13 +9,14 @@ using MotoHub.Models;
 using MotoHub.Repositories;
 using MotoHub.Services;
 using MotoHub.Services.RabbitMQ;
+using ProjectY.Shared.Pagination;
 
 namespace MotoHubTests.Unit.Services
 {
     public class MotorcycleServiceTests
     {
         [Fact]
-        public void GetAllMotorcycles_ReturnsAllMotorcycles()
+        public async Task GetMotorcyclesAsync_ReturnsPageOfMotorcycles()
         {
             // Arrange
             var motorcycles = new List<Motorcycle>
@@ -30,7 +32,7 @@ namespace MotoHubTests.Unit.Services
             };
 
             var mockMapper = new Mock<IMapper>();
-            mockMapper.Setup(m => m.Map<IEnumerable<MotorcycleDTO>>(It.IsAny<IEnumerable<Motorcycle>>()))
+            mockMapper.Setup(m => m.Map<IReadOnlyList<MotorcycleDTO>>(It.IsAny<IReadOnlyList<Motorcycle>>()))
                       .Returns(motorcycleDTOs);
 
             var mockRepository = new Mock<IMotorcycleRepository>();
@@ -39,17 +41,17 @@ namespace MotoHubTests.Unit.Services
 
             var mockCrossCutting = new Mock<IRentalOperationService>();
 
-            mockRepository.Setup(repo => repo.GetAll())
-                          .Returns(motorcycles);
+            mockRepository.Setup(repo => repo.GetPageAsync(null, null))
+                          .ReturnsAsync(new CursorPage<Motorcycle>(motorcycles, null));
 
             var service = new MotorcycleService(mockRepository.Object, mockMapper.Object, mockMessagingPublish.Object, mockCrossCutting.Object);
 
             // Act
-            var result = service.GetAllMotorcycles();
+            var result = await service.GetMotorcyclesAsync(null, null);
 
             // Assert
             Assert.NotNull(result);
-            Assert.Collection(result,
+            Assert.Collection(result.Items,
                 item => Assert.Equal("ABC123", item.LicensePlate),
                 item => Assert.Equal("DEF456", item.LicensePlate)
             );
@@ -127,25 +129,68 @@ namespace MotoHubTests.Unit.Services
 
             var mockMessagingPublish = new Mock<IMessagingPublisherService>();
             var mockCrossCutting = new Mock<IRentalOperationService>();
+            mockCrossCutting.Setup(service => service.TryReserveMotorcycleRenameAsync(
+                    existingLicensePlate,
+                    newLicensePlate))
+                .ReturnsAsync(true);
 
             var mockMessagingPublisherService = new Mock<IMessagingPublisherService>();
             mockMessagingPublisherService.Setup(p => p.PublishLicenceUpdate(It.Is<LicencePlateRabbitMQEntity>(m =>
-                m.newLicencePlate == newLicensePlate && m.oldLicencePlate == existingLicensePlate)))
+                m.AggregateId == existingMotorcycle.Id &&
+                m.newLicencePlate == newLicensePlate &&
+                m.oldLicencePlate == existingLicensePlate)))
                 .Verifiable("Message was not published correctly");
 
-            var service = new MotorcycleService(mockRepository.Object, mockMapper.Object, mockMessagingPublish.Object, mockCrossCutting.Object);
+            var service = new MotorcycleService(mockRepository.Object, mockMapper.Object, mockMessagingPublisherService.Object, mockCrossCutting.Object);
 
             // Act
             await service.UpdateMotorcycleAsync(existingLicensePlate, newLicensePlate);
 
             // Assert
             mockRepository.Verify();
+            mockMessagingPublisherService.Verify();
 
             Assert.Equal(newLicensePlate, existingMotorcycle.LicensePlate);
         }
 
         [Fact]
-        public void DeleteMotorcycle_ExistingMotorcycle_DeletesMotorcycle()
+        public async Task UpdateMotorcycle_WhenNewPlateCannotBeReserved_DoesNotCommitRename()
+        {
+            const string existingLicensePlate = "ABC123";
+            const string newLicensePlate = "XYZ987";
+            var motorcycle = new Motorcycle
+            {
+                Id = Guid.NewGuid().ToString(),
+                LicensePlate = existingLicensePlate,
+                Model = "Honda",
+                Year = 2020
+            };
+            var repository = new Mock<IMotorcycleRepository>();
+            repository.Setup(instance => instance.GetByLicensePlateAsync(existingLicensePlate))
+                .ReturnsAsync(motorcycle);
+            var rentalOperations = new Mock<IRentalOperationService>();
+            rentalOperations.Setup(instance => instance.TryReserveMotorcycleRenameAsync(
+                    existingLicensePlate,
+                    newLicensePlate))
+                .ReturnsAsync(false);
+            var publisher = new Mock<IMessagingPublisherService>();
+            var service = new MotorcycleService(
+                repository.Object,
+                Mock.Of<IMapper>(),
+                publisher.Object,
+                rentalOperations.Object);
+
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                service.UpdateMotorcycleAsync(existingLicensePlate, newLicensePlate));
+
+            Assert.Equal(existingLicensePlate, motorcycle.LicensePlate);
+            repository.Verify(instance => instance.Update(It.IsAny<Motorcycle>()), Times.Never);
+            publisher.Verify(instance => instance.PublishLicenceUpdate(
+                It.IsAny<LicencePlateRabbitMQEntity>()), Times.Never);
+        }
+
+        [Fact]
+        public async Task DeleteMotorcycle_ExistingMotorcycle_RetiresMotorcycle()
         {
             // Arrange
             var existingLicensePlate = "ABC123";
@@ -156,14 +201,58 @@ namespace MotoHubTests.Unit.Services
             var mockCrossCutting = new Mock<IRentalOperationService>();
             mockRepository.Setup(repo => repo.GetByLicensePlateAsync(existingLicensePlate))
                           .ReturnsAsync(existingMotorcycle);
+            mockCrossCutting.Setup(service => service.TryRetireMotorcycleAsync(existingLicensePlate))
+                .ReturnsAsync(true);
+            mockRepository.Setup(repo => repo.RetireAsync(
+                    existingMotorcycle.Id,
+                    It.IsAny<DateTime>(),
+                    MotorcycleRetirementReasons.RequestedByAdministrator))
+                .ReturnsAsync(true);
 
             var service = new MotorcycleService(mockRepository.Object, Mock.Of<IMapper>(), mockMessagingPublish.Object, mockCrossCutting.Object);
 
             // Act
-            service.DeleteMotorcycle(existingLicensePlate);
+            var result = await service.DeleteMotorcycle(existingLicensePlate);
 
             // Assert
-            mockRepository.Verify(repo => repo.Delete(existingMotorcycle.Id), Times.Once);
+            Assert.True(result.Success);
+            mockRepository.Verify(repo => repo.RetireAsync(
+                existingMotorcycle.Id,
+                It.IsAny<DateTime>(),
+                MotorcycleRetirementReasons.RequestedByAdministrator), Times.Once);
+        }
+
+        [Fact]
+        public async Task DeleteMotorcycle_WhenRentalClaimWins_ReturnsConflictWithoutRetiring()
+        {
+            const string licensePlate = "BUSY-0001";
+            var motorcycle = new Motorcycle
+            {
+                Id = Guid.NewGuid().ToString(),
+                LicensePlate = licensePlate,
+                Model = "Busy",
+                Year = 2026
+            };
+            var repository = new Mock<IMotorcycleRepository>();
+            repository.Setup(candidate => candidate.GetByLicensePlateAsync(licensePlate))
+                .ReturnsAsync(motorcycle);
+            var rentalOperations = new Mock<IRentalOperationService>();
+            rentalOperations.Setup(service => service.TryRetireMotorcycleAsync(licensePlate))
+                .ReturnsAsync(false);
+            var service = new MotorcycleService(
+                repository.Object,
+                Mock.Of<IMapper>(),
+                Mock.Of<IMessagingPublisherService>(),
+                rentalOperations.Object);
+
+            var result = await service.DeleteMotorcycle(licensePlate);
+
+            Assert.False(result.Success);
+            Assert.Equal(StatusCodes.Status409Conflict, result.StatusCode);
+            repository.Verify(candidate => candidate.RetireAsync(
+                It.IsAny<string>(),
+                It.IsAny<DateTime>(),
+                It.IsAny<string>()), Times.Never);
         }
 
         [Fact]
@@ -231,7 +320,7 @@ namespace MotoHubTests.Unit.Services
         }
 
         [Fact]
-        public void DeleteMotorcycle_NonExistingMotorcycle_DoesNotDelete()
+        public async Task DeleteMotorcycle_NonExistingMotorcycle_DoesNotRetire()
         {
             // Arrange
             var nonExistingLicensePlate = "XYZ789";
@@ -245,10 +334,13 @@ namespace MotoHubTests.Unit.Services
             var service = new MotorcycleService(mockRepository.Object, Mock.Of<IMapper>(), mockMessagingPublish.Object, mockCrossCutting.Object);
 
             // Act
-            service.DeleteMotorcycle(nonExistingLicensePlate);
+            await service.DeleteMotorcycle(nonExistingLicensePlate);
 
             // Assert
-            mockRepository.Verify(repo => repo.Delete(It.IsAny<string>()), Times.Never);
+            mockRepository.Verify(repo => repo.RetireAsync(
+                It.IsAny<string>(),
+                It.IsAny<DateTime>(),
+                It.IsAny<string>()), Times.Never);
         }
     }
 }

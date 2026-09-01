@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 using MotoHub.DTOs;
 using MotoHub.Filters;
 using MotoHub.Services;
+using ProjectY.Shared.Validation;
 
 namespace MotoHub.Controllers
 {
@@ -23,11 +24,17 @@ namespace MotoHub.Controllers
         [Authorize]
         [ServiceFilter(typeof(AdminAuthorizationFilter))]
         [HttpGet]
-        public IActionResult GetAll()
+        public async Task<IActionResult> GetAll([FromQuery] string? cursor, [FromQuery] int? pageSize)
         {
-            _logger.LogInformation("Fetching all motorcycles.");
-            var motorcycles = _motorcycleService.GetAllMotorcycles();
-            return Ok(motorcycles);
+            _logger.LogInformation("Fetching a page of motorcycles.");
+            try
+            {
+                return Ok(await _motorcycleService.GetMotorcyclesAsync(cursor, pageSize));
+            }
+            catch (FormatException exception)
+            {
+                return BadRequest(exception.Message);
+            }
         }
 
         [ServiceFilter(typeof(AdminAuthorizationFilter))]
@@ -49,6 +56,8 @@ namespace MotoHub.Controllers
         [HttpPost]
         public IActionResult Create([FromBody] MotorcycleDTO motorcycle)
         {
+            motorcycle.LicensePlate = BrazilianLicensePlateAttribute.Normalize(motorcycle.LicensePlate);
+            motorcycle.Model = motorcycle.Model?.Trim();
             _logger.LogInformation("Creating motorcycle with license plate {LicensePlate}.", motorcycle.LicensePlate);
             if (_motorcycleService.LicensePlateExists(motorcycle.LicensePlate))
             {
@@ -65,6 +74,8 @@ namespace MotoHub.Controllers
         [HttpPut("{licensePlate}")]
         public async Task<IActionResult> Update(string licensePlate, string newLicencePlate)
         {
+            licensePlate = BrazilianLicensePlateAttribute.Normalize(licensePlate);
+            newLicencePlate = BrazilianLicensePlateAttribute.Normalize(newLicencePlate);
             _logger.LogInformation("Updating motorcycle with license plate {LicensePlate}.", licensePlate);
             var existingMotorcycle = await _motorcycleService.GetMotorcycleByLicensePlateAsync(licensePlate);
             if (existingMotorcycle == null)
@@ -73,8 +84,15 @@ namespace MotoHub.Controllers
                 return NotFound();
             }
 
-            await _motorcycleService.UpdateMotorcycleAsync(licensePlate, newLicencePlate);
-            return NoContent();
+            try
+            {
+                await _motorcycleService.UpdateMotorcycleAsync(licensePlate, newLicencePlate);
+                return NoContent();
+            }
+            catch (InvalidOperationException exception)
+            {
+                return Conflict(exception.Message);
+            }
         }
 
         [Authorize]
@@ -92,10 +110,20 @@ namespace MotoHub.Controllers
             }
             else
             {
-
-                return BadRequest(result.Message);
+                return result.StatusCode is { } statusCode
+                    ? StatusCode(statusCode, result.Message)
+                    : BadRequest(result.Message);
             }
 
+        }
+
+        [ServiceFilter(typeof(AdminAuthorizationFilter))]
+        [HttpPost("historical-references")]
+        public async Task<IActionResult> EnsureHistoricalReferences(
+            [FromBody] HistoricalMotorcycleReferencesRequest request)
+        {
+            await _motorcycleService.EnsureHistoricalReferencesAsync(request.LicensePlates);
+            return NoContent();
         }
     }
 }

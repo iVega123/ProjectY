@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 using RentalOperations.DTOs;
 using RentalOperations.Services;
 using RentalOperations.Filters;
+using RentalOperations.Domain;
 using System.Security.Claims;
 
 namespace RentalOperations.Controllers
@@ -33,6 +34,24 @@ namespace RentalOperations.Controllers
                 await _rentalService.CreateRentalAsync(createDto, userIdClaim.Value);
                 return Ok("Created with Success!");
             }
+            catch (ActiveRentalConflictException ex)
+            {
+                return Conflict(new ProblemDetails
+                {
+                    Status = StatusCodes.Status409Conflict,
+                    Title = "Active rental conflict",
+                    Detail = ex.Message
+                });
+            }
+            catch (MotorcycleRetiredException ex)
+            {
+                return Conflict(new ProblemDetails
+                {
+                    Status = StatusCodes.Status409Conflict,
+                    Title = "Motorcycle retired",
+                    Detail = ex.Message
+                });
+            }
             catch (Exception ex)
             {
                 return BadRequest(ex.Message);
@@ -42,7 +61,9 @@ namespace RentalOperations.Controllers
         [Authorize]
         [ServiceFilter(typeof(AuthorizationFilter))]
         [HttpGet("user")]
-        public async Task<IActionResult> GetRentalsByUser()
+        public async Task<IActionResult> GetRentalsByUser(
+            [FromQuery] string? cursor,
+            [FromQuery] int? pageSize)
         {
             try
             {
@@ -51,11 +72,10 @@ namespace RentalOperations.Controllers
                 {
                     return Forbid();
                 }
-                var rentals = await _rentalService.GetRentalsByUserIdAsync(userIdClaim.Value);
-                if (rentals == null || rentals.Count == 0)
-                    return NotFound($"No rentals found for user ID {userIdClaim.Value}");
-
-                return Ok(rentals);
+                return Ok(await _rentalService.GetRentalsByUserIdAsync(
+                    userIdClaim.Value,
+                    cursor,
+                    pageSize));
             }
             catch (Exception ex)
             {
@@ -66,15 +86,14 @@ namespace RentalOperations.Controllers
         [Authorize]
         [ServiceFilter(typeof(AdminAuthorizationFilter))]
         [HttpGet("user/{userId}")]
-        public async Task<IActionResult> GetRentalsByUserAdmin(string userId)
+        public async Task<IActionResult> GetRentalsByUserAdmin(
+            string userId,
+            [FromQuery] string? cursor,
+            [FromQuery] int? pageSize)
         {
             try
             {
-                var rentals = await _rentalService.GetRentalsByUserIdAsync(userId);
-                if (rentals == null || rentals.Count == 0)
-                    return NotFound($"No rentals found for user ID {userId}");
-
-                return Ok(rentals);
+                return Ok(await _rentalService.GetRentalsByUserIdAsync(userId, cursor, pageSize));
             }
             catch (Exception ex)
             {
@@ -120,6 +139,39 @@ namespace RentalOperations.Controllers
             {
                 return BadRequest($"Error checking rental status: {ex.Message}");
             }
+        }
+
+        [ServiceFilter(typeof(AdminAuthorizationFilter))]
+        [HttpPost("motorcycle-retirements/{licencePlate}")]
+        public async Task<IActionResult> TryRetireMotorcycle(string licencePlate)
+        {
+            var acquired = await _rentalService.TryRetireMotorcycleAsync(licencePlate);
+            return acquired
+                ? NoContent()
+                : Conflict(new ProblemDetails
+                {
+                    Status = StatusCodes.Status409Conflict,
+                    Title = "Active rental conflict",
+                    Detail = $"Motorcycle {licencePlate} has an active rental."
+                });
+        }
+
+        [ServiceFilter(typeof(AdminAuthorizationFilter))]
+        [HttpPost("motorcycle-renames/reservations")]
+        public async Task<IActionResult> TryReserveMotorcycleRename(
+            [FromBody] MotorcycleRenameReservationDto request)
+        {
+            var acquired = await _rentalService.TryReserveLicensePlateRenameAsync(
+                request.OldLicencePlate,
+                request.NewLicencePlate);
+            return acquired
+                ? NoContent()
+                : Conflict(new ProblemDetails
+                {
+                    Status = StatusCodes.Status409Conflict,
+                    Title = "Motorcycle claim conflict",
+                    Detail = $"Motorcycle {request.NewLicencePlate} is already claimed."
+                });
         }
     }
 }

@@ -12,15 +12,15 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace AuthGate.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    [Migration("20240419003445_InitialCreate")]
-    partial class InitialCreate
+    [Migration("20260831172837_AddTransactionalOutbox")]
+    partial class AddTransactionalOutbox
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
-                .HasAnnotation("ProductVersion", "8.0.4")
+                .HasAnnotation("ProductVersion", "10.0.4")
                 .HasAnnotation("Relational:MaxIdentifierLength", 63);
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
@@ -53,14 +53,14 @@ namespace AuthGate.Migrations
                     b.HasData(
                         new
                         {
-                            Id = "f034fb12-d12e-4fde-9f0c-0cbd07042014",
+                            Id = "00000000-0000-0000-0000-000000000001",
                             ConcurrencyStamp = "1",
                             Name = "Admin",
                             NormalizedName = "ADMIN"
                         },
                         new
                         {
-                            Id = "58b203f6-1beb-4647-b7cf-040d012861a0",
+                            Id = "00000000-0000-0000-0000-000000000002",
                             ConcurrencyStamp = "2",
                             Name = "Rider",
                             NormalizedName = "RIDER"
@@ -246,6 +246,64 @@ namespace AuthGate.Migrations
                     b.ToTable("AspNetUserTokens", (string)null);
                 });
 
+            modelBuilder.Entity("ProjectY.Shared.Messaging.OutboxMessage", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("AggregateId")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<long>("AggregateSequence")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("AggregateType")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<string>("Destination")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("EventType")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("LastError")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<DateTime?>("NextAttemptAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("OccurredAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Payload")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<int>("PublishAttempts")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("PublishedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AggregateType", "AggregateId", "AggregateSequence");
+
+                    b.HasIndex("PublishedAtUtc", "NextAttemptAtUtc", "OccurredAtUtc");
+
+                    b.ToTable("OutboxMessages", (string)null);
+                });
+
             modelBuilder.Entity("AuthGate.Model.ApplicationUser", b =>
                 {
                     b.HasBaseType("Microsoft.AspNetCore.Identity.IdentityUser");
@@ -261,30 +319,30 @@ namespace AuthGate.Migrations
                 {
                     b.HasBaseType("AuthGate.Model.ApplicationUser");
 
-                    b.Property<string>("CNPJ")
-                        .IsRequired()
-                        .HasMaxLength(14)
-                        .HasColumnType("character varying(14)");
-
-                    b.Property<DateTime>("DataNascimento")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("ImagemCNH")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<string>("NumeroCNH")
+                    b.Property<string>("CNHNumber")
                         .IsRequired()
                         .HasMaxLength(11)
                         .HasColumnType("character varying(11)");
 
-                    b.Property<int>("TipoCNH")
+                    b.Property<int>("CNHType")
                         .HasColumnType("integer");
 
-                    b.HasIndex("CNPJ")
+                    b.Property<string>("CNPJ")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<DateTime>("DateOfBirth")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.HasIndex("CNHNumber")
                         .IsUnique();
 
-                    b.HasIndex("NumeroCNH")
+                    b.HasIndex("CNPJ")
                         .IsUnique();
 
                     b.HasDiscriminator().HasValue("RiderUser");

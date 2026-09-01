@@ -1,5 +1,6 @@
 ﻿using Microsoft.EntityFrameworkCore;
 using MotoHub.Models;
+using ProjectY.Shared.Messaging;
 
 namespace MotoHub.Data
 {
@@ -7,16 +8,21 @@ namespace MotoHub.Data
     {
         public ApplicationDbContext(DbContextOptions<ApplicationDbContext> options) : base(options)
         {
-            Database.EnsureCreated();
         }
 
         public DbSet<Motorcycle> Motorcycles { get; set; }
+        public DbSet<OutboxMessage> OutboxMessages => Set<OutboxMessage>();
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             modelBuilder.Entity<Motorcycle>()
                 .HasIndex(m => m.LicensePlate)
                 .IsUnique();
+            modelBuilder.Entity<Motorcycle>()
+                .HasIndex(m => m.Id)
+                .HasDatabaseName("IX_Motorcycles_Active_Id")
+                .HasFilter("\"RetiredAtUtc\" IS NULL");
+            modelBuilder.ConfigureOutbox();
         }
     }
 }

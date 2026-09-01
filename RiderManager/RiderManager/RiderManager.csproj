@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
 
   <PropertyGroup>
-    <TargetFramework>net8.0</TargetFramework>
+    <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UserSecretsId>6c506916-5e52-4447-ade1-8bb27ba378f4</UserSecretsId>
@@ -10,26 +10,35 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="AutoMapper" Version="13.0.1" />
-    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="8.0.4" />
-    <PackageReference Include="Microsoft.EntityFrameworkCore.InMemory" Version="8.0.4" />
+    <PackageReference Include="AutoMapper" Version="16.2.0" />
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.4" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.4">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="Microsoft.EntityFrameworkCore.InMemory" Version="10.0.4" />
     <PackageReference Include="Microsoft.VisualStudio.Azure.Containers.Tools.Targets" Version="1.19.6" />
     <PackageReference Include="Minio" Version="6.0.2" />
-    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="8.0.2" />
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.3" />
     <PackageReference Include="RabbitMQ.Client" Version="6.8.1" />
-    <PackageReference Include="Serilog" Version="3.1.1" />
-    <PackageReference Include="Serilog.AspNetCore" Version="8.0.1" />
-    <PackageReference Include="Serilog.Formatting.Compact" Version="2.0.0" />
-    <PackageReference Include="Serilog.Sinks.Console" Version="5.0.1" />
+    <PackageReference Include="Serilog" Version="4.4.0" />
+    <PackageReference Include="Serilog.AspNetCore" Version="10.0.0" />
+    <PackageReference Include="Serilog.Formatting.Compact" Version="3.0.0" />
+    <PackageReference Include="Serilog.Sinks.Console" Version="6.1.1" />
     <PackageReference Include="Serilog.Sinks.Elasticsearch" Version="10.0.0" />
     <PackageReference Include="Serilog.Sinks.Http" Version="9.0.0" />
     <PackageReference Include="Swashbuckle.AspNetCore" Version="6.4.0" />
+    <PackageReference Include="StackExchange.Redis" Version="3.1.31" />
   </ItemGroup>
 
   <ItemGroup>
     <Compile Include="..\..\Shared\Health\ServiceHealthChecks.cs" Link="Shared\Health\ServiceHealthChecks.cs" />
     <Compile Include="..\..\Shared\Hosting\SwaggerPolicy.cs" Link="Shared\Hosting\SwaggerPolicy.cs" />
+    <Compile Include="..\..\Shared\Hosting\DatabaseMigrationCommand.cs" Link="Shared\Hosting\DatabaseMigrationCommand.cs" />
     <Compile Include="..\..\Shared\Messaging\QueueMessageAuthenticator.cs" Link="Shared\Messaging\QueueMessageAuthenticator.cs" />
+    <Compile Include="..\..\Shared\Idempotency\*.cs" Link="Shared\Idempotency\%(Filename)%(Extension)" />
+    <Compile Include="..\..\Shared\Pagination\*.cs" Link="Shared\Pagination\%(Filename)%(Extension)" />
+    <Compile Include="..\..\Shared\Validation\*.cs" Link="Shared\Validation\%(Filename)%(Extension)" />
   </ItemGroup>
 
 </Project>

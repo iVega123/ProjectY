@@ -5,6 +5,9 @@ using RentalOperations.DTOs;
 using RentalOperations.Model;
 using RentalOperations.Repository;
 
+using ProjectY.Shared.Pagination;
+using ProjectY.Shared.Validation;
+
 namespace RentalOperations.Services
 {
     public class RentalService : IRentalService
@@ -28,19 +31,19 @@ namespace RentalOperations.Services
 
         public async Task CreateRentalAsync(RentalCreateDto createDto, string userId)
         {
-
+            createDto.MotocycleLicencePlate = BrazilianLicensePlateAttribute.Normalize(
+                createDto.MotocycleLicencePlate);
             if (createDto.StartDate.AddDays(1) >= createDto.PredictedEndDate)
             {
                 throw new InvalidOperationException("The Rent time must at least one day");
             }
 
-            var existingRentals = await _repository.GetRentalsByMotorcycleIdAsync(createDto.MotocycleLicencePlate);
-            foreach (var rent in existingRentals)
+            if (await _repository.HasOverlappingRentalAsync(
+                createDto.MotocycleLicencePlate,
+                createDto.StartDate,
+                createDto.PredictedEndDate))
             {
-                if (createDto.StartDate < rent.EndDate || createDto.PredictedEndDate > rent.StartDate)
-                {
-                    throw new InvalidOperationException("This motorcycle is already rented for the requested period.");
-                }
+                throw new ActiveRentalConflictException(createDto.MotocycleLicencePlate);
             }
 
             var rider = await _riderManagerService.GetRiderByIdAsync(userId);
@@ -58,6 +61,10 @@ namespace RentalOperations.Services
             {
                 throw new ArgumentException("Motorcycle does not exist.");
             }
+            if (motorcycle.retiredAtUtc is not null)
+            {
+                throw new MotorcycleRetiredException(createDto.MotocycleLicencePlate);
+            }
 
             var rentalDomain = RentalDomain.Create(createDto, userId);
             var rental = new Rental
@@ -70,6 +77,22 @@ namespace RentalOperations.Services
                 InitCost = rentalDomain.TotalCost
             };
 
+            var rentalId = rental._id!.Value.ToString();
+            var claimResult = await _repository.TryClaimRentalAsync(
+                rental.MotorcycleLicencePlate,
+                rentalId);
+            if (claimResult == MotorcycleClaimResult.Retired)
+            {
+                throw new MotorcycleRetiredException(rental.MotorcycleLicencePlate);
+            }
+            if (claimResult == MotorcycleClaimResult.ActiveRental)
+            {
+                throw new ActiveRentalConflictException(rental.MotorcycleLicencePlate);
+            }
+
+            // The claim is deliberately retained if MongoDB reports an ambiguous
+            // insert failure. Startup reconciliation can repair a stale claim; releasing
+            // it here could let retirement win after the rental was actually committed.
             await _repository.CreateRentalAsync(rental);
         }
 
@@ -83,8 +106,13 @@ namespace RentalOperations.Services
             if (!string.Equals(rental.UserId, userId, StringComparison.Ordinal))
                 throw new UnauthorizedAccessException("The rental belongs to another rider.");
 
-            if (rental.FinalCost > 0)
+            if (rental.Status == RentalStatus.Completed)
+            {
+                await _repository.ReleaseRentalClaimAsync(
+                    rental.MotorcycleLicencePlate,
+                    rental._id!.Value.ToString());
                 return _mapper.Map<ResponseRentalDTO>(rental);
+            }
 
             var response = _mapper.Map<ResponseRentalDTO>(rental);
             response.ActualEndDate = actualEndDate;
@@ -112,26 +140,54 @@ namespace RentalOperations.Services
 
             response.FinalTotalCost = response.OriginalTotalCost + response.AdditionalCostsOrSavings;
 
-            var updateRent = _mapper.Map<Rental>(response);
-            await _repository.UpdateRentalAsync(updateRent);
+            rental.EndDate = actualEndDate;
+            rental.FinalCost = response.FinalTotalCost;
+            rental.AdditionalCostsOrSavings = response.AdditionalCostsOrSavings;
+            rental.StatusMessage = response.StatusMessage;
+            rental.Status = RentalStatus.Completed;
+            await _repository.UpdateRentalAsync(rental);
+            await _repository.ReleaseRentalClaimAsync(
+                rental.MotorcycleLicencePlate,
+                rental._id!.Value.ToString());
             return response;
         }
 
-        public async Task<List<ResponseRentalDTO>> GetRentalsByUserIdAsync(string userId)
+        public async Task<CursorPage<ResponseRentalDTO>> GetRentalsByUserIdAsync(
+            string userId,
+            string? cursor,
+            int? pageSize)
         {
-            var rentals = await _repository.GetRentalsByUserId(userId);
-            var rentalDtos = _mapper.Map<List<ResponseRentalDTO>>(rentals);
-            return rentalDtos;
+            var page = await _repository.GetRentalsByUserId(userId, cursor, pageSize);
+            return new CursorPage<ResponseRentalDTO>(
+                _mapper.Map<IReadOnlyList<ResponseRentalDTO>>(page.Items),
+                page.NextCursor);
         }
 
         public async Task UpdateMotorcycleLicensePlateAsync(string oldLicensePlate, string newLicensePlate)
         {
-            await _repository.UpdateLicensePlateForAllRentalsAsync(oldLicensePlate, newLicensePlate);
+            await _repository.UpdateLicensePlateForAllRentalsAsync(
+                BrazilianLicensePlateAttribute.Normalize(oldLicensePlate),
+                BrazilianLicensePlateAttribute.Normalize(newLicensePlate));
         }
+
+        public Task<bool> TryReserveLicensePlateRenameAsync(
+            string oldLicensePlate,
+            string newLicensePlate) =>
+            _repository.TryReserveLicensePlateRenameAsync(
+                BrazilianLicensePlateAttribute.Normalize(oldLicensePlate),
+                BrazilianLicensePlateAttribute.Normalize(newLicensePlate));
 
         public async Task<bool> IsMotorcycleCurrentlyRentedAsync(string licencePlate)
         {
-            return await _repository.IsMotorcycleCurrentlyRentedAsync(licencePlate);
+            return await _repository.IsMotorcycleCurrentlyRentedAsync(
+                BrazilianLicensePlateAttribute.Normalize(licencePlate));
+        }
+
+        public async Task<bool> TryRetireMotorcycleAsync(string licencePlate)
+        {
+            var result = await _repository.TryClaimRetirementAsync(
+                BrazilianLicensePlateAttribute.Normalize(licencePlate));
+            return result is MotorcycleClaimResult.Acquired or MotorcycleClaimResult.Retired;
         }
 
         private decimal DetermineDailyRate(int days)

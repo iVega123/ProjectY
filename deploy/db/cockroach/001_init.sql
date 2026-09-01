@@ -62,10 +62,13 @@ CREATE INDEX IF NOT EXISTS outbox_pending ON outbox (occurred_at) WHERE publishe
 -- Inbox: deduplicação no consumo. Junto com o outbox, dá efeito de "exatamente
 -- uma vez" sem que o broker precise prometer entrega exatamente uma vez.
 CREATE TABLE IF NOT EXISTS inbox (
-    message_id  STRING PRIMARY KEY,
+    message_id  STRING NOT NULL,
     consumer    STRING NOT NULL,
-    handled_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+    handled_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (message_id, consumer)
 );
+
+CREATE INDEX IF NOT EXISTS inbox_retention ON inbox (handled_at);
 
 GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE motorcycles, rentals, outbox, inbox TO rental_core;
 GRANT SELECT ON TABLE rentals TO media_guard;

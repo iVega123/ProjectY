@@ -17,18 +17,15 @@ namespace MotoHub.Migrations
         {
 #pragma warning disable 612, 618
             modelBuilder
-                .HasAnnotation("ProductVersion", "8.0.4")
+                .HasAnnotation("ProductVersion", "10.0.4")
                 .HasAnnotation("Relational:MaxIdentifierLength", 63);
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
             modelBuilder.Entity("MotoHub.Models.Motorcycle", b =>
                 {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+                    b.Property<string>("Id")
+                        .HasColumnType("text");
 
                     b.Property<string>("LicensePlate")
                         .IsRequired()
@@ -40,15 +37,90 @@ namespace MotoHub.Migrations
                     b.Property<DateTime>("RegistrationDate")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<DateTime?>("RetiredAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("RetirementReason")
+                        .HasColumnType("text");
+
                     b.Property<int>("Year")
                         .HasColumnType("integer");
 
                     b.HasKey("Id");
 
+                    b.HasIndex("Id")
+                        .HasDatabaseName("IX_Motorcycles_Active_Id")
+                        .HasFilter("\"RetiredAtUtc\" IS NULL");
+
                     b.HasIndex("LicensePlate")
                         .IsUnique();
 
                     b.ToTable("Motorcycles");
+                });
+
+            modelBuilder.Entity("ProjectY.Shared.Messaging.OutboxMessage", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("AggregateId")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<long>("AggregateSequence")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("AggregateType")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<Guid?>("ClaimToken")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("ClaimedUntilUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Destination")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("EventType")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("LastError")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<DateTime?>("NextAttemptAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("OccurredAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Payload")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<int>("PublishAttempts")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("PublishedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AggregateType", "AggregateId", "AggregateSequence");
+
+                    b.HasIndex("PublishedAtUtc", "ClaimedUntilUtc", "NextAttemptAtUtc", "OccurredAtUtc")
+                        .HasDatabaseName("IX_OutboxMessages_PendingClaim");
+
+                    b.ToTable("OutboxMessages", (string)null);
                 });
 #pragma warning restore 612, 618
         }
