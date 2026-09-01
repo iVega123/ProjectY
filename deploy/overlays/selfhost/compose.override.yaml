@@ -22,7 +22,6 @@ services:
       - "26080:8080"
 
   cockroach-init:
-    profiles: ["init"]
     command: ["--insecure", "--host=cockroachdb:26257", "--file=/sql/001_init.sql"]
     volumes:
       - ./db/cockroach:/sql:ro
