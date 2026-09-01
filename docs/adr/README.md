@@ -21,14 +21,20 @@ is what separates a decision from a preference.
 | [0008](0008-single-trust-boundary.md) | One trust boundary, at the edge | Why domain services stop parsing tokens, and what is traded for it |
 | [0009](0009-exactly-once-effect.md) | Exactly-once effect is layered and bounded | Which layer provides each guarantee, how it fails, and what is deliberately not promised |
 | [0010](0010-motorcycle-retirement-protocol.md) | Serialize motorcycle retirement with rental claims | How retirement races rentals and how legacy orphan plates remain resolvable |
+| [0011](0011-deployment-variants-as-overlays.md) | Keep deployment variants as overlays | What lives in the base, what lives in an overlay, and why not a branch |
+| [0012](0012-identity-and-rider-domains.md) | The identity and rider domains get their own services | Where AuthGate and RiderManager go, why identity moves to Go, and which identifier is canonical |
+| [0013](0013-asymmetric-token-signing.md) | Tokens are signed asymmetrically and validated from a JWKS | Why every validator currently holds a minting key, and what replaces it |
 
 ## Reading order
 
 Records 0000–0005 are the design trail and read in sequence. ADR 0008 belongs
 to that trail but was written later, after review showed the trust-boundary
 decision was implied everywhere and recorded nowhere; read it after 0001.
-Records 0006 and 0007 are remediation decisions taken while closing individual
-findings, and read on their own. Numbers are never reused or reassigned.
+Records 0006, 0007, 0010 and 0011 are decisions taken while closing individual
+findings or building a specific piece, and read on their own. ADR 0012 refines
+0001 by separating technology role from service inventory; ADR 0013 supersedes
+the signing half of 0006. Numbers are never reused or reassigned — 0011 was
+renumbered once, from a 0008 that collided with an existing record.
 ADR 0009 is the executable consistency contract and refines the shorter
 outbox/inbox statement in ADR 0003.
 ADR 0010 applies that contract to the cross-database motorcycle-retirement race.
