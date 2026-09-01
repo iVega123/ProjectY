@@ -6,7 +6,6 @@ public sealed class IdempotencyOptions
 
     public string ServiceName { get; set; } = "projecty";
     public string RedisConnectionString { get; set; } = "redis:6379";
-    public TimeSpan ClaimTtl { get; set; } = TimeSpan.FromMinutes(1);
     public TimeSpan ResponseTtl { get; set; } = TimeSpan.FromHours(24);
     public int MaximumKeyLength { get; set; } = 200;
 }

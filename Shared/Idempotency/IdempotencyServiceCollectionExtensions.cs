@@ -17,10 +17,9 @@ public static class IdempotencyServiceCollectionExtensions
         options.ServiceName = serviceName;
         options.RedisConnectionString = configuration["Redis:ConnectionString"]
             ?? options.RedisConnectionString;
-        if (options.ClaimTtl <= TimeSpan.Zero || options.ResponseTtl <= options.ClaimTtl)
+        if (options.ResponseTtl <= TimeSpan.Zero)
         {
-            throw new InvalidOperationException(
-                "Idempotency:ClaimTtl must be positive and shorter than Idempotency:ResponseTtl.");
+            throw new InvalidOperationException("Idempotency:ResponseTtl must be positive.");
         }
 
         if (options.MaximumKeyLength <= 0)

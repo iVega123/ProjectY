@@ -20,11 +20,13 @@ used in Redis keys.
 | Same key while the first request is running | `409 Conflict` with `Retry-After: 1`; the second request does not execute. |
 | Invalid or multiple key values | `400 Bad Request`. |
 | Redis unavailable before the claim is acquired | `503 Service Unavailable`; the request does not execute. |
-| Redis fails after the endpoint completes | `503 Service Unavailable` reports an unknown outcome; retry the same key after recovery. |
+| Endpoint execution throws after a possible side effect | `503 Service Unavailable`; the unknown outcome is retained and the same key never executes again. |
+| Redis fails after the endpoint completes | `503 Service Unavailable` reports an unknown outcome; the pending claim is retained. |
 
-A claim is leased for one minute and renewed while the request is running. Successful responses remain replayable for
-24 hours. Both durations and the maximum key length are configurable through
-the `Idempotency` configuration section. The baseline Compose stack stores
+Pending claims and successful responses remain protected for 24 hours. Using
+the full retention TTL for in-flight work prevents a second replica from
+claiming a long-running or ambiguously failed request. The duration and maximum
+key length are configurable through the `Idempotency` configuration section. The baseline Compose stack stores
 Redis data in an append-only, persistent volume.
 
 Example against RentalOperations:

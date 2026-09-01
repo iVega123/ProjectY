@@ -14,17 +14,12 @@ public sealed class RedisIdempotencyMiddleware
 {
     private const string PendingState = "pending";
     private const string CompletedState = "completed";
+    private const string UnknownState = "unknown";
     private const string ReplayHeader = "Idempotency-Replayed";
     private const string CompleteScript = """
         if redis.call('GET', KEYS[1]) == ARGV[1] then
             redis.call('SET', KEYS[1], ARGV[2], 'PX', ARGV[3])
             return 1
-        end
-        return 0
-        """;
-    private const string ReleaseScript = """
-        if redis.call('GET', KEYS[1]) == ARGV[1] then
-            return redis.call('DEL', KEYS[1])
         end
         return 0
         """;
@@ -109,9 +104,10 @@ public sealed class RedisIdempotencyMiddleware
         };
         var pendingJson = JsonSerializer.Serialize(pending);
 
+        IDatabase database;
         try
         {
-            var database = _redis.Value.GetDatabase();
+            database = _redis.Value.GetDatabase();
             var claimed = await TryClaimAsync(database, redisKey, pendingJson);
             if (!claimed)
             {
@@ -129,12 +125,6 @@ public sealed class RedisIdempotencyMiddleware
                 }
             }
 
-            await ExecuteClaimedRequestAsync(context, database, redisKey, pending, pendingJson);
-        }
-        catch (IdempotencyOutcomeUnknownException exception)
-        {
-            await WriteOutcomeUnknownAsync(context, exception);
-            return;
         }
         catch (RedisException exception)
         {
@@ -147,6 +137,14 @@ public sealed class RedisIdempotencyMiddleware
             return;
         }
 
+        try
+        {
+            await ExecuteClaimedRequestAsync(context, database, redisKey, pending, pendingJson);
+        }
+        catch (IdempotencyOutcomeUnknownException exception)
+        {
+            await WriteOutcomeUnknownAsync(context, exception);
+        }
     }
 
     private async Task ExecuteClaimedRequestAsync(
@@ -159,110 +157,58 @@ public sealed class RedisIdempotencyMiddleware
         var originalBody = context.Response.Body;
         await using var responseBuffer = new MemoryStream();
         context.Response.Body = responseBuffer;
-        var handlerCompleted = false;
-        using var renewalCancellation = new CancellationTokenSource();
-        var renewal = RenewClaimUntilCancelledAsync(
-            database,
-            redisKey,
-            pendingJson,
-            renewalCancellation.Token);
 
         try
         {
             await _next(context);
-            handlerCompleted = true;
-            await StopRenewalAsync(renewalCancellation, renewal);
-
-            var completed = new IdempotencyRecord
-            {
-                State = CompletedState,
-                Fingerprint = pending.Fingerprint,
-                OwnerToken = pending.OwnerToken,
-                StatusCode = context.Response.StatusCode,
-                Headers = CaptureHeaders(context.Response.Headers),
-                Body = responseBuffer.ToArray()
-            };
-            var completedJson = JsonSerializer.Serialize(completed);
-            var stored = (long)await database.ScriptEvaluateAsync(
-                CompleteScript,
-                [redisKey],
-                [pendingJson, completedJson, ToMilliseconds(_options.ResponseTtl)]) == 1;
-            if (!stored)
-            {
-                throw new InvalidOperationException("The idempotency claim was lost before the response could be stored.");
-            }
-
-            context.Response.Body = originalBody;
-            responseBuffer.Position = 0;
-            await responseBuffer.CopyToAsync(originalBody, context.RequestAborted);
         }
         catch (Exception exception)
         {
-            await StopRenewalAsync(renewalCancellation, renewal, suppressFailure: true);
             context.Response.Body = originalBody;
-            if (handlerCompleted)
-            {
-                await TryExtendClaimAsync(database, redisKey, pendingJson);
-                throw new IdempotencyOutcomeUnknownException(
-                    "The endpoint completed, but its idempotent response could not be persisted.",
-                    exception);
-            }
-
-            await TryReleaseClaimAsync(database, redisKey, pendingJson);
-            throw;
+            await TryStoreUnknownOutcomeAsync(database, redisKey, pending, pendingJson);
+            throw new IdempotencyOutcomeUnknownException(
+                "The endpoint failed after execution began, so its outcome is unknown.",
+                exception);
         }
-    }
 
-    private async Task RenewClaimUntilCancelledAsync(
-        IDatabase database,
-        RedisKey key,
-        string pendingJson,
-        CancellationToken cancellationToken)
-    {
-        var interval = TimeSpan.FromMilliseconds(
-            Math.Max(100, _options.ClaimTtl.TotalMilliseconds / 3));
-
+        var completed = new IdempotencyRecord
+        {
+            State = CompletedState,
+            Fingerprint = pending.Fingerprint,
+            OwnerToken = pending.OwnerToken,
+            StatusCode = context.Response.StatusCode,
+            Headers = CaptureHeaders(context.Response.Headers),
+            Body = responseBuffer.ToArray()
+        };
+        var completedJson = JsonSerializer.Serialize(completed);
+        bool stored;
         try
         {
-            while (true)
-            {
-                await Task.Delay(interval, cancellationToken);
-                var renewed = (long)await database.ScriptEvaluateAsync(
-                    ExtendScript,
-                    [key],
-                    [pendingJson, ToMilliseconds(_options.ClaimTtl)]) == 1;
-                if (!renewed)
-                {
-                    throw new IdempotencyOutcomeUnknownException(
-                        "The idempotency claim was lost while the endpoint was executing.");
-                }
-            }
+            stored = (long)await database.ScriptEvaluateAsync(
+                CompleteScript,
+                [redisKey],
+                [pendingJson, completedJson, ToMilliseconds(_options.ResponseTtl)]) == 1;
         }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        catch (Exception exception) when (exception is RedisException or TimeoutException)
         {
+            context.Response.Body = originalBody;
+            await TryExtendClaimAsync(database, redisKey, pendingJson);
+            throw new IdempotencyOutcomeUnknownException(
+                "The endpoint completed, but its idempotent response could not be persisted.",
+                exception);
         }
-    }
 
-    private static async Task StopRenewalAsync(
-        CancellationTokenSource cancellation,
-        Task renewal,
-        bool suppressFailure = false)
-    {
-        cancellation.Cancel();
-        if (suppressFailure)
+        if (!stored)
         {
-            try
-            {
-                await renewal;
-            }
-            catch
-            {
-            }
-
-            return;
+            context.Response.Body = originalBody;
+            await TryExtendClaimAsync(database, redisKey, pendingJson);
+            throw new IdempotencyOutcomeUnknownException(
+                "The idempotency claim was lost before the response could be stored.");
         }
 
-        await renewal;
+        context.Response.Body = originalBody;
+        responseBuffer.Position = 0;
+        await responseBuffer.CopyToAsync(originalBody, context.RequestAborted);
     }
 
     private async Task HandleExistingAsync(
@@ -280,7 +226,7 @@ public sealed class RedisIdempotencyMiddleware
             return;
         }
 
-        if (existing.State is not (PendingState or CompletedState))
+        if (existing.State is not (PendingState or CompletedState or UnknownState))
         {
             await WriteProblemAsync(
                 context,
@@ -313,6 +259,13 @@ public sealed class RedisIdempotencyMiddleware
             return;
         }
 
+        if (existing.State == UnknownState)
+        {
+            context.Response.Headers[ReplayHeader] = "true";
+            await WriteUnknownOutcomeProblemAsync(context);
+            return;
+        }
+
         if (existing.StatusCode is null || existing.Body is null)
         {
             await WriteProblemAsync(
@@ -341,7 +294,7 @@ public sealed class RedisIdempotencyMiddleware
         => await database.StringSetAsync(
             key,
             pendingJson,
-            _options.ClaimTtl,
+            _options.ResponseTtl,
             When.NotExists);
 
     private static async Task<IdempotencyRecord?> ReadExistingAsync(IDatabase database, RedisKey key)
@@ -367,15 +320,34 @@ public sealed class RedisIdempotencyMiddleware
         }
     }
 
-    private async Task TryReleaseClaimAsync(IDatabase database, RedisKey key, string pendingJson)
+    private async Task TryStoreUnknownOutcomeAsync(
+        IDatabase database,
+        RedisKey key,
+        IdempotencyRecord pending,
+        string pendingJson)
     {
+        var unknownJson = JsonSerializer.Serialize(new IdempotencyRecord
+        {
+            State = UnknownState,
+            Fingerprint = pending.Fingerprint,
+            OwnerToken = pending.OwnerToken
+        });
+
         try
         {
-            await database.ScriptEvaluateAsync(ReleaseScript, [key], [pendingJson]);
+            var stored = (long)await database.ScriptEvaluateAsync(
+                CompleteScript,
+                [key],
+                [pendingJson, unknownJson, ToMilliseconds(_options.ResponseTtl)]) == 1;
+            if (!stored)
+            {
+                await TryExtendClaimAsync(database, key, pendingJson);
+            }
         }
         catch (Exception exception) when (exception is RedisException or TimeoutException)
         {
-            _logger.LogError(exception, "Could not release failed idempotency claim {RedisKey}.", key);
+            _logger.LogCritical(exception, "Could not store unknown idempotency outcome {RedisKey}.", key);
+            await TryExtendClaimAsync(database, key, pendingJson);
         }
     }
 
@@ -410,12 +382,15 @@ public sealed class RedisIdempotencyMiddleware
     {
         _logger.LogCritical(exception, "An executed write could not be recorded by the idempotency service.");
         context.Response.Clear();
-        await WriteProblemAsync(
+        await WriteUnknownOutcomeProblemAsync(context);
+    }
+
+    private static Task WriteUnknownOutcomeProblemAsync(HttpContext context)
+        => WriteProblemAsync(
             context,
             StatusCodes.Status503ServiceUnavailable,
             "Idempotency outcome unavailable",
-            "The request may have completed, but its response could not be recorded. Retry with the same Idempotency-Key after the service recovers.");
-    }
+            "The request may have completed. Reconcile its outcome before creating a new request; retrying this Idempotency-Key will not execute it again.");
 
     private bool TryReadKey(StringValues header, out string key)
     {
@@ -442,7 +417,7 @@ public sealed class RedisIdempotencyMiddleware
             .Select(pair => new
             {
                 pair.Key,
-                Values = pair.Value.OrderBy(value => value, StringComparer.Ordinal).ToArray()
+                Values = pair.Value.ToArray()
             }));
         var caller = context.User.FindFirstValue(ClaimTypes.NameIdentifier) ?? "anonymous";
         var prefix = string.Join('\n',

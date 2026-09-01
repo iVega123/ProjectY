@@ -100,7 +100,7 @@ public sealed class IdempotencyMiddlewareTests : IAsyncLifetime
 
     [Fact]
     [Trait("Category", "Integration")]
-    public async Task LongRunningRequest_RenewsClaimUntilItCompletes()
+    public async Task LongRunningRequest_RetainsClaimUntilItCompletes()
     {
         var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -111,7 +111,7 @@ public sealed class IdempotencyMiddlewareTests : IAsyncLifetime
             started.TrySetResult();
             await release.Task;
             context.Response.StatusCode = StatusCodes.Status201Created;
-        }, TimeSpan.FromMilliseconds(300));
+        });
         var key = Guid.NewGuid().ToString("D");
         var firstContext = CreateContext(key, "{\"plate\":\"IDEM-0004\"}");
 
@@ -127,16 +127,62 @@ public sealed class IdempotencyMiddlewareTests : IAsyncLifetime
         Assert.Equal(StatusCodes.Status201Created, firstContext.Response.StatusCode);
     }
 
-    private RedisIdempotencyMiddleware CreateMiddleware(
-        RequestDelegate next,
-        TimeSpan? claimTtl = null)
+    [Fact]
+    [Trait("Category", "Integration")]
+    public async Task DownstreamFailure_RetainsUnknownOutcomeWithoutRepeatingEffect()
+    {
+        var effects = 0;
+        var middleware = CreateMiddleware(_ =>
+        {
+            Interlocked.Increment(ref effects);
+            throw new InvalidOperationException("Failure after a possible commit.");
+        });
+        var key = Guid.NewGuid().ToString("D");
+
+        var first = await ExecuteAsync(middleware, key, "{\"plate\":\"IDEM-0005\"}");
+        var replay = await ExecuteAsync(middleware, key, "{\"plate\":\"IDEM-0005\"}");
+
+        Assert.Equal(1, effects);
+        Assert.Equal(StatusCodes.Status503ServiceUnavailable, first.Response.StatusCode);
+        Assert.Equal(StatusCodes.Status503ServiceUnavailable, replay.Response.StatusCode);
+        Assert.Equal("true", replay.Response.Headers["Idempotency-Replayed"]);
+    }
+
+    [Fact]
+    [Trait("Category", "Integration")]
+    public async Task ReusingKeyWithReorderedQueryValues_ReturnsUnprocessableEntity()
+    {
+        var effects = 0;
+        var middleware = CreateMiddleware(context =>
+        {
+            Interlocked.Increment(ref effects);
+            context.Response.StatusCode = StatusCodes.Status200OK;
+            return Task.CompletedTask;
+        });
+        var key = Guid.NewGuid().ToString("D");
+
+        await ExecuteAsync(
+            middleware,
+            key,
+            string.Empty,
+            "?rentalId=A&rentalId=B");
+        var mismatch = await ExecuteAsync(
+            middleware,
+            key,
+            string.Empty,
+            "?rentalId=B&rentalId=A");
+
+        Assert.Equal(1, effects);
+        Assert.Equal(StatusCodes.Status422UnprocessableEntity, mismatch.Response.StatusCode);
+    }
+
+    private RedisIdempotencyMiddleware CreateMiddleware(RequestDelegate next)
         => new(
             next,
             new Lazy<IConnectionMultiplexer>(() => _connection),
             new IdempotencyOptions
             {
                 ServiceName = "idempotency-tests",
-                ClaimTtl = claimTtl ?? TimeSpan.FromMinutes(1),
                 ResponseTtl = TimeSpan.FromHours(1)
             },
             NullLogger<RedisIdempotencyMiddleware>.Instance);
@@ -144,18 +190,20 @@ public sealed class IdempotencyMiddlewareTests : IAsyncLifetime
     private static async Task<HttpContext> ExecuteAsync(
         RedisIdempotencyMiddleware middleware,
         string key,
-        string body)
+        string body,
+        string? query = null)
     {
-        var context = CreateContext(key, body);
+        var context = CreateContext(key, body, query);
         await middleware.InvokeAsync(context);
         return context;
     }
 
-    private static HttpContext CreateContext(string key, string body)
+    private static HttpContext CreateContext(string key, string body, string? query = null)
     {
         var context = new DefaultHttpContext();
         context.Request.Method = HttpMethods.Post;
         context.Request.Path = "/api/rentals";
+        context.Request.QueryString = new QueryString(query ?? string.Empty);
         context.Request.ContentType = "application/json";
         context.Request.Headers[IdempotencyOptions.HeaderName] = key;
         context.Request.Body = new MemoryStream(Encoding.UTF8.GetBytes(body));
