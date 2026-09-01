@@ -41,7 +41,7 @@ x-moto-hub-environment: &moto-hub-environment
 
 services:
   elasticsearch:
-    image: docker.elastic.co/elasticsearch/elasticsearch:7.17.3
+    image: docker.elastic.co/elasticsearch/elasticsearch:9.5.2
     container_name: elasticsearch
     environment:
       - discovery.type=single-node
@@ -53,7 +53,7 @@ services:
       - elk
 
   logstash:
-    image: docker.elastic.co/logstash/logstash:7.17.3
+    image: docker.elastic.co/logstash/logstash:9.5.2
     container_name: logstash
     volumes:
       - ./logstash/config/logstash.yml:/usr/share/logstash/config/logstash.yml
@@ -66,7 +66,7 @@ services:
       - elk
 
   kibana:
-    image: docker.elastic.co/kibana/kibana:7.17.3
+    image: docker.elastic.co/kibana/kibana:9.5.2
     container_name: kibana
     ports:
       - "5601:5601"
@@ -78,7 +78,7 @@ services:
       - elk
 
   postgres:
-    image: postgres:15
+    image: postgres:18
     container_name: postgres
     environment:
       POSTGRES_USER: "${POSTGRES_USER:?Set POSTGRES_USER in .env}"
@@ -101,7 +101,7 @@ services:
       start_period: 10s
 
   redis:
-    image: redis:7.4-alpine
+    image: redis:8.10-alpine
     container_name: redis
     command: ["redis-server", "--appendonly", "yes", "--appendfsync", "always"]
     ports:
@@ -117,7 +117,7 @@ services:
       retries: 12
 
   pgadmin:
-    image: dpage/pgadmin4:9.13
+    image: dpage/pgadmin4:9.17
     container_name: pgadmin
     environment:
       PGADMIN_DEFAULT_EMAIL: "${PGADMIN_EMAIL:?Set PGADMIN_EMAIL in .env}"
@@ -130,7 +130,7 @@ services:
       - elk
 
   mongodb:
-    image: mongo:8.0
+    image: mongo:8.3
     container_name: mongodb
     ports:
       - "27017:27017"
@@ -149,7 +149,7 @@ services:
       start_period: 10s
 
   rabbitmq:
-    image: rabbitmq:3-management
+    image: rabbitmq:4-management
     container_name: rabbitmq
     networks:
       - elk
