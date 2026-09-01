@@ -95,7 +95,7 @@ public sealed class MigrationTests : IAsyncLifetime
         Assert.Null(second.NextCursor);
         Assert.Equal("https://storage.example.test/cnh-rider-0000", first.Items[0].CNHUrl?.Url);
         Assert.Empty(first.Items.Select(item => item.Id).Intersect(second.Items.Select(item => item.Id)));
-        Assert.Contains(sql, command => command.Contains("WHERE \"Id\" >", StringComparison.Ordinal));
+        Assert.Contains(sql, command => command.Contains("\"Id\" > @", StringComparison.Ordinal));
         Assert.DoesNotContain(sql, command => command.Contains("CASE", StringComparison.Ordinal));
     }
 }

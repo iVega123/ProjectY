@@ -97,7 +97,7 @@ public sealed class MotorcycleRetirementTests : IAsyncLifetime
         Assert.NotNull(first.NextCursor);
         Assert.Null(second.NextCursor);
         Assert.Empty(first.Items.Select(item => item.Id).Intersect(second.Items.Select(item => item.Id)));
-        Assert.Contains(sql, command => command.Contains("WHERE \"Id\" >", StringComparison.Ordinal));
+        Assert.Contains(sql, command => command.Contains("\"Id\" > @", StringComparison.Ordinal));
         Assert.DoesNotContain(sql, command => command.Contains("CASE", StringComparison.Ordinal));
 
         context.Motorcycles.AddRange(Enumerable.Range(105, 10_000).Select(index => new Motorcycle
