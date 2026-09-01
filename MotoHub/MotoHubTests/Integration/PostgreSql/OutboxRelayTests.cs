@@ -111,11 +111,16 @@ public sealed class OutboxRelayTests : IAsyncLifetime
                     Password = "unused",
                     LicenceUpdateQueueName = new string('q', 201)
                 });
+            var rentalOperations = new Mock<IRentalOperationService>();
+            rentalOperations.Setup(service => service.TryReserveMotorcycleRenameAsync(
+                    "ATM-0001",
+                    "ATM-0002"))
+                .ReturnsAsync(true);
             var service = new MotorcycleService(
                 new MotorcycleRepository(context),
                 Mock.Of<IMapper>(),
                 publisher,
-                Mock.Of<IRentalOperationService>());
+                rentalOperations.Object);
 
             await Assert.ThrowsAsync<DbUpdateException>(() =>
                 service.UpdateMotorcycleAsync("ATM-0001", "ATM-0002"));

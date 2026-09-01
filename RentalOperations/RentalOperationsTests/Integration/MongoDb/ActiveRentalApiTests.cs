@@ -392,15 +392,15 @@ public sealed class ActiveRentalApiTests : IAsyncLifetime
         string licencePlate,
         string userId,
         DateTime startDate) => new()
-    {
-        ["_id"] = id,
-        ["MotorcycleLicencePlate"] = licencePlate,
-        ["userId"] = userId,
-        ["startDate"] = startDate,
-        ["endDate"] = DateTime.MinValue,
-        ["predictedEndDate"] = DateTime.UtcNow.Date.AddDays(7),
-        ["initCost"] = 210m
-    };
+        {
+            ["_id"] = id,
+            ["MotorcycleLicencePlate"] = licencePlate,
+            ["userId"] = userId,
+            ["startDate"] = startDate,
+            ["endDate"] = DateTime.MinValue,
+            ["predictedEndDate"] = DateTime.UtcNow.Date.AddDays(7),
+            ["initCost"] = 210m
+        };
 
     private static string CreateToken(string role, string userId)
     {
