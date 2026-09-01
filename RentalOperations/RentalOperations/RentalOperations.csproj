@@ -30,6 +30,7 @@
     <Compile Include="..\..\Shared\Health\ServiceHealthChecks.cs" Link="Shared\Health\ServiceHealthChecks.cs" />
     <Compile Include="..\..\Shared\Hosting\SwaggerPolicy.cs" Link="Shared\Hosting\SwaggerPolicy.cs" />
     <Compile Include="..\..\Shared\Idempotency\*.cs" Link="Shared\Idempotency\%(Filename)%(Extension)" />
+    <Compile Include="..\..\Shared\Pagination\*.cs" Link="Shared\Pagination\%(Filename)%(Extension)" />
   </ItemGroup>
 
 </Project>

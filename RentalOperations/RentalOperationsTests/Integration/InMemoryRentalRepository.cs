@@ -2,6 +2,7 @@ using MongoDB.Bson;
 using RentalOperations.Domain;
 using RentalOperations.Model;
 using RentalOperations.Repository;
+using ProjectY.Shared.Pagination;
 using System.Collections.Concurrent;
 
 namespace RentalOperationsTests.Integration;
@@ -44,17 +45,35 @@ public sealed class InMemoryRentalRepository : IRentalRepository
     public Task<Rental> GetRentalByIdAsync(string id) =>
         Task.FromResult(FindRental(id)!);
 
-    public Task<List<Rental>> GetRentalsByUserId(string userId) =>
-        Task.FromResult(_rentals.Values
+    public Task<CursorPage<Rental>> GetRentalsByUserId(
+        string userId,
+        string? cursor,
+        int? pageSize)
+    {
+        var normalizedPageSize = CursorPagination.NormalizePageSize(pageSize);
+        var after = CursorPagination.Decode(cursor);
+        var rentals = _rentals.Values
             .Where(rental => rental.UserId == userId)
+            .Where(rental => after is null || rental._id > ObjectId.Parse(after))
+            .OrderBy(rental => rental._id)
+            .Take(normalizedPageSize + 1)
             .Select(Clone)
-            .ToList());
+            .ToList();
+        return Task.FromResult(CursorPagination.CreatePage(
+            rentals,
+            normalizedPageSize,
+            rental => rental._id!.Value.ToString()));
+    }
 
-    public Task<List<Rental>> GetRentalsByMotorcycleIdAsync(string licencePlate) =>
-        Task.FromResult(_rentals.Values
-            .Where(rental => rental.MotorcycleLicencePlate == licencePlate)
-            .Select(Clone)
-            .ToList());
+    public Task<bool> HasOverlappingRentalAsync(
+        string licencePlate,
+        DateTime startDate,
+        DateTime endDate) =>
+        Task.FromResult(_rentals.Values.Any(rental =>
+            rental.MotorcycleLicencePlate == licencePlate &&
+            rental.Status == RentalStatus.Active &&
+            rental.StartDate < endDate &&
+            rental.PredictedEndDate > startDate));
 
     public Task<bool> IsMotorcycleCurrentlyRentedAsync(string licencePlate)
     {

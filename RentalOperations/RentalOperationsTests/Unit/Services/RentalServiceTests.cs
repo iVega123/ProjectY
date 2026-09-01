@@ -15,8 +15,11 @@ public sealed class RentalServiceTests
     public async Task CreateRental_WhenRetirementClaimWins_RejectsWithoutInsertingRental()
     {
         var repository = new Mock<IRentalRepository>();
-        repository.Setup(candidate => candidate.GetRentalsByMotorcycleIdAsync("RET-0001"))
-            .ReturnsAsync([]);
+        repository.Setup(candidate => candidate.HasOverlappingRentalAsync(
+                "RET-0001",
+                It.IsAny<DateTime>(),
+                It.IsAny<DateTime>()))
+            .ReturnsAsync(false);
         repository.Setup(candidate => candidate.TryClaimRentalAsync("RET-0001", It.IsAny<string>()))
             .ReturnsAsync(MotorcycleClaimResult.Retired);
         var riders = new Mock<IRiderManagerService>();

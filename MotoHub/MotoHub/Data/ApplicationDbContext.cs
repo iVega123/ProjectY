@@ -18,6 +18,10 @@ namespace MotoHub.Data
             modelBuilder.Entity<Motorcycle>()
                 .HasIndex(m => m.LicensePlate)
                 .IsUnique();
+            modelBuilder.Entity<Motorcycle>()
+                .HasIndex(m => m.Id)
+                .HasDatabaseName("IX_Motorcycles_Active_Id")
+                .HasFilter("\"RetiredAtUtc\" IS NULL");
             modelBuilder.ConfigureOutbox();
         }
     }

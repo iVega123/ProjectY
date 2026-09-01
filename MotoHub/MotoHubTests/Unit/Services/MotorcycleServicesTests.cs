@@ -9,13 +9,14 @@ using MotoHub.Models;
 using MotoHub.Repositories;
 using MotoHub.Services;
 using MotoHub.Services.RabbitMQ;
+using ProjectY.Shared.Pagination;
 
 namespace MotoHubTests.Unit.Services
 {
     public class MotorcycleServiceTests
     {
         [Fact]
-        public void GetAllMotorcycles_ReturnsAllMotorcycles()
+        public async Task GetMotorcyclesAsync_ReturnsPageOfMotorcycles()
         {
             // Arrange
             var motorcycles = new List<Motorcycle>
@@ -31,7 +32,7 @@ namespace MotoHubTests.Unit.Services
             };
 
             var mockMapper = new Mock<IMapper>();
-            mockMapper.Setup(m => m.Map<IEnumerable<MotorcycleDTO>>(It.IsAny<IEnumerable<Motorcycle>>()))
+            mockMapper.Setup(m => m.Map<IReadOnlyList<MotorcycleDTO>>(It.IsAny<IReadOnlyList<Motorcycle>>()))
                       .Returns(motorcycleDTOs);
 
             var mockRepository = new Mock<IMotorcycleRepository>();
@@ -40,17 +41,17 @@ namespace MotoHubTests.Unit.Services
 
             var mockCrossCutting = new Mock<IRentalOperationService>();
 
-            mockRepository.Setup(repo => repo.GetAll())
-                          .Returns(motorcycles);
+            mockRepository.Setup(repo => repo.GetPageAsync(null, null))
+                          .ReturnsAsync(new CursorPage<Motorcycle>(motorcycles, null));
 
             var service = new MotorcycleService(mockRepository.Object, mockMapper.Object, mockMessagingPublish.Object, mockCrossCutting.Object);
 
             // Act
-            var result = service.GetAllMotorcycles();
+            var result = await service.GetMotorcyclesAsync(null, null);
 
             // Assert
             Assert.NotNull(result);
-            Assert.Collection(result,
+            Assert.Collection(result.Items,
                 item => Assert.Equal("ABC123", item.LicensePlate),
                 item => Assert.Equal("DEF456", item.LicensePlate)
             );

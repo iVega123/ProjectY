@@ -3,6 +3,8 @@ using RiderManager.DTOs;
 using RiderManager.Models;
 using RiderManager.Repositories;
 
+using ProjectY.Shared.Pagination;
+
 namespace RiderManager.Services.RiderServices
 {
     public class RiderService : IRiderService
@@ -16,10 +18,12 @@ namespace RiderManager.Services.RiderServices
             _mapper = mapper;
         }
 
-        public async Task<IEnumerable<RiderResponseDTO>> GetAllRidersAsync()
+        public async Task<CursorPage<RiderResponseDTO>> GetRidersAsync(string? cursor, int? pageSize)
         {
-            var riders = await _repository.GetAllAsync();
-            return _mapper.Map<IEnumerable<RiderResponseDTO>>(riders);
+            var page = await _repository.GetPageAsync(cursor, pageSize);
+            return new CursorPage<RiderResponseDTO>(
+                _mapper.Map<IReadOnlyList<RiderResponseDTO>>(page.Items),
+                page.NextCursor);
         }
 
         public async Task<RiderResponseDTO> GetRiderByUserIdAsync(string userId)

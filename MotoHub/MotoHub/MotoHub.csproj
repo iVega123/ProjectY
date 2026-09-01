@@ -47,6 +47,7 @@
     <Compile Include="..\..\Shared\Messaging\OutboxRelayOptions.cs" Link="Shared\Messaging\OutboxRelayOptions.cs" />
     <Compile Include="..\..\Shared\Messaging\RabbitMqOutboxTransport.cs" Link="Shared\Messaging\RabbitMqOutboxTransport.cs" />
     <Compile Include="..\..\Shared\Idempotency\*.cs" Link="Shared\Idempotency\%(Filename)%(Extension)" />
+    <Compile Include="..\..\Shared\Pagination\*.cs" Link="Shared\Pagination\%(Filename)%(Extension)" />
   </ItemGroup>
 
 </Project>

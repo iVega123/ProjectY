@@ -23,11 +23,17 @@ namespace MotoHub.Controllers
         [Authorize]
         [ServiceFilter(typeof(AdminAuthorizationFilter))]
         [HttpGet]
-        public IActionResult GetAll()
+        public async Task<IActionResult> GetAll([FromQuery] string? cursor, [FromQuery] int? pageSize)
         {
-            _logger.LogInformation("Fetching all motorcycles.");
-            var motorcycles = _motorcycleService.GetAllMotorcycles();
-            return Ok(motorcycles);
+            _logger.LogInformation("Fetching a page of motorcycles.");
+            try
+            {
+                return Ok(await _motorcycleService.GetMotorcyclesAsync(cursor, pageSize));
+            }
+            catch (FormatException exception)
+            {
+                return BadRequest(exception.Message);
+            }
         }
 
         [ServiceFilter(typeof(AdminAuthorizationFilter))]

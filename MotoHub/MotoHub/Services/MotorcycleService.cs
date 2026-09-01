@@ -6,6 +6,8 @@ using MotoHub.Models;
 using MotoHub.Repositories;
 using MotoHub.Services.RabbitMQ;
 
+using ProjectY.Shared.Pagination;
+
 namespace MotoHub.Services
 {
     public class MotorcycleService : IMotorcycleService
@@ -27,10 +29,12 @@ namespace MotoHub.Services
             _rentalOperationService = rentalOperationService;
         }
 
-        public IEnumerable<MotorcycleDTO> GetAllMotorcycles()
+        public async Task<CursorPage<MotorcycleDTO>> GetMotorcyclesAsync(string? cursor, int? pageSize)
         {
-            var motorcycles = _repository.GetAll();
-            return _mapper.Map<IEnumerable<MotorcycleDTO>>(motorcycles);
+            var page = await _repository.GetPageAsync(cursor, pageSize);
+            return new CursorPage<MotorcycleDTO>(
+                _mapper.Map<IReadOnlyList<MotorcycleDTO>>(page.Items),
+                page.NextCursor);
         }
 
         public async Task<MotorcycleDTO?> GetMotorcycleByLicensePlateAsync(string licensePlate)

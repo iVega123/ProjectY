@@ -10,13 +10,13 @@ namespace MotoHubTests.Unit.Repositories
     public class MotorcycleRepositoryTests
     {
         [Fact]
-        public void GetAll_ReturnsAllMotorcycles()
+        public async Task GetPage_ReturnsAllMotorcyclesInFirstPage()
         {
             // Arrange
             var motorcycles = new List<Motorcycle>
             {
-                new Motorcycle { Id = Guid.NewGuid().ToString(), LicensePlate = "ABC123", Model = "Honda", Year = 2020 },
-                new Motorcycle { Id = Guid.NewGuid().ToString(), LicensePlate = "DEF456", Model = "Yamaha", Year = 2021 }
+                new Motorcycle { Id = "motorcycle-0001", LicensePlate = "ABC123", Model = "Honda", Year = 2020 },
+                new Motorcycle { Id = "motorcycle-0002", LicensePlate = "DEF456", Model = "Yamaha", Year = 2021 }
             };
 
             var mockContext = new Mock<IApplicationDbContext>();
@@ -25,12 +25,12 @@ namespace MotoHubTests.Unit.Repositories
             var repository = new MotorcycleRepository(mockContext.Object);
 
             // Act
-            var result = repository.GetAll();
+            var result = await repository.GetPageAsync(null, null);
 
             // Assert
             Assert.NotNull(result);
-            var returnedMotorcycles = result.ToList();
-            Assert.Equal(2, returnedMotorcycles.Count());
+            var returnedMotorcycles = result.Items;
+            Assert.Equal(2, returnedMotorcycles.Count);
             Assert.Collection(returnedMotorcycles,
                 item => Assert.Equal("ABC123", item.LicensePlate),
                 item => Assert.Equal("DEF456", item.LicensePlate)

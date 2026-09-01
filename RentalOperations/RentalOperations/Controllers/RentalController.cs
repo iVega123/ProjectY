@@ -61,7 +61,9 @@ namespace RentalOperations.Controllers
         [Authorize]
         [ServiceFilter(typeof(AuthorizationFilter))]
         [HttpGet("user")]
-        public async Task<IActionResult> GetRentalsByUser()
+        public async Task<IActionResult> GetRentalsByUser(
+            [FromQuery] string? cursor,
+            [FromQuery] int? pageSize)
         {
             try
             {
@@ -70,11 +72,10 @@ namespace RentalOperations.Controllers
                 {
                     return Forbid();
                 }
-                var rentals = await _rentalService.GetRentalsByUserIdAsync(userIdClaim.Value);
-                if (rentals == null || rentals.Count == 0)
-                    return NotFound($"No rentals found for user ID {userIdClaim.Value}");
-
-                return Ok(rentals);
+                return Ok(await _rentalService.GetRentalsByUserIdAsync(
+                    userIdClaim.Value,
+                    cursor,
+                    pageSize));
             }
             catch (Exception ex)
             {
@@ -85,15 +86,14 @@ namespace RentalOperations.Controllers
         [Authorize]
         [ServiceFilter(typeof(AdminAuthorizationFilter))]
         [HttpGet("user/{userId}")]
-        public async Task<IActionResult> GetRentalsByUserAdmin(string userId)
+        public async Task<IActionResult> GetRentalsByUserAdmin(
+            string userId,
+            [FromQuery] string? cursor,
+            [FromQuery] int? pageSize)
         {
             try
             {
-                var rentals = await _rentalService.GetRentalsByUserIdAsync(userId);
-                if (rentals == null || rentals.Count == 0)
-                    return NotFound($"No rentals found for user ID {userId}");
-
-                return Ok(rentals);
+                return Ok(await _rentalService.GetRentalsByUserIdAsync(userId, cursor, pageSize));
             }
             catch (Exception ex)
             {
