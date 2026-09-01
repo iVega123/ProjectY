@@ -127,6 +127,23 @@ public sealed class ActiveRentalApiTests : IAsyncLifetime
         Assert.Contains("LEGACY-0001", _factory!.MotorcycleService.HistoricalReferences);
     }
 
+    [Fact]
+    public async Task RiderCannotCreatePermanentMotorcycleRetirementClaim()
+    {
+        using var client = CreateAuthenticatedClient();
+
+        var response = await client.PostAsync(
+            "/api/Rental/motorcycle-retirements/ADMIN-ONLY-0001",
+            content: null);
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        var claims = new MongoClient(_database.GetConnectionString())
+            .GetDatabase(DatabaseName)
+            .GetCollection<MotorcycleClaim>("MotorcycleClaims");
+        Assert.Equal(0, await claims.CountDocumentsAsync(claim =>
+            claim.MotorcycleLicencePlate == "ADMIN-ONLY-0001"));
+    }
+
     private HttpClient CreateAuthenticatedClient()
     {
         var factory = _factory ?? throw new InvalidOperationException("The test database has not started.");

@@ -93,6 +93,33 @@ namespace MotoHubTests.Integration
         }
 
         [Fact]
+        public async Task Create_IgnoresClientSuppliedRetirementMetadata()
+        {
+            using var client = _factory.CreateClient();
+            client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
+                "Bearer",
+                GenerateJwtToken());
+            var licensePlate = $"ACTIVE-{Guid.NewGuid():N}";
+            var response = await client.PostAsJsonAsync("/api/motorcycles", new MotorcycleDTO
+            {
+                LicensePlate = licensePlate,
+                Model = "Must remain active",
+                Year = 2026,
+                RetiredAtUtc = DateTime.UtcNow,
+                RetirementReason = "client-controlled"
+            });
+            response.EnsureSuccessStatusCode();
+
+            using var scope = _factory.Services.CreateScope();
+            var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+            var motorcycle = await context.Motorcycles.SingleAsync(candidate =>
+                candidate.LicensePlate == licensePlate);
+
+            Assert.Null(motorcycle.RetiredAtUtc);
+            Assert.Null(motorcycle.RetirementReason);
+        }
+
+        [Fact]
         public async Task GetByLicensePlate_ExistingPlate_ReturnsOk()
         {
             // Arrange

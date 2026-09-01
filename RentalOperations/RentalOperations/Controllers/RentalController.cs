@@ -141,7 +141,7 @@ namespace RentalOperations.Controllers
             }
         }
 
-        [ServiceFilter(typeof(AuthorizationFilter))]
+        [ServiceFilter(typeof(AdminAuthorizationFilter))]
         [HttpPost("motorcycle-retirements/{licencePlate}")]
         public async Task<IActionResult> TryRetireMotorcycle(string licencePlate)
         {
