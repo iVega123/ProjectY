@@ -10,8 +10,8 @@ limiting, resilience and OpenTelemetry arrive in the following Epic 6 tasks.
 | Public path | Current upstream |
 |---|---|
 | `/api/auth/**` | AuthGate |
-| `/api/rider/**`, `/update-image` | RiderManager |
-| `/api/motorcycle/**` | MotoHub |
+| `/api/riders/**`, `/update-image` | RiderManager |
+| `/api/motorcycles/**` | MotoHub |
 | `/api/rental/**` | RentalOperations |
 
 The gateway owns `/health/live` and `/health/ready`. Unknown paths return `404`

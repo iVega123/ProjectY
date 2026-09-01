@@ -130,7 +130,7 @@ Application traffic can now enter through the gateway. Existing service ports
 remain published temporarily so the migration can proceed without modifying
 the domain services in task #57; a later epic task removes direct trust and
 centralizes identity verification at the edge. The gateway routes
-`/api/auth/**`, `/api/rider/**`, `/api/motorcycle/**`, and `/api/rental/**` to
+`/api/auth/**`, `/api/riders/**`, `/api/motorcycles/**`, and `/api/rental/**` to
 their current owners.
 
 Only the HTTP endpoints above are documented as usable. The compose file also

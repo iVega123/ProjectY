@@ -65,10 +65,12 @@ impl Upstreams {
         let path = path.to_ascii_lowercase();
         if path == "/api/auth" || path.starts_with("/api/auth/") {
             Some((UpstreamName::AuthGate, &self.auth_gate))
-        } else if path == "/api/rider" || path.starts_with("/api/rider/") || path == "/update-image"
+        } else if path == "/api/riders"
+            || path.starts_with("/api/riders/")
+            || path == "/update-image"
         {
             Some((UpstreamName::RiderManager, &self.rider_manager))
-        } else if path == "/api/motorcycle" || path.starts_with("/api/motorcycle/") {
+        } else if path == "/api/motorcycles" || path.starts_with("/api/motorcycles/") {
             Some((UpstreamName::MotoHub, &self.moto_hub))
         } else if path == "/api/rental" || path.starts_with("/api/rental/") {
             Some((UpstreamName::RentalOperations, &self.rental_operations))
@@ -142,11 +144,11 @@ mod tests {
             Some(UpstreamName::AuthGate)
         );
         assert_eq!(
-            upstreams.resolve("/api/Rider/123").map(|route| route.0),
+            upstreams.resolve("/api/Riders/123").map(|route| route.0),
             Some(UpstreamName::RiderManager)
         );
         assert_eq!(
-            upstreams.resolve("/api/motorcycle").map(|route| route.0),
+            upstreams.resolve("/api/motorcycles").map(|route| route.0),
             Some(UpstreamName::MotoHub)
         );
         assert_eq!(
@@ -154,6 +156,8 @@ mod tests {
             Some(UpstreamName::RentalOperations)
         );
         assert!(upstreams.resolve("/api/authentic-looking").is_none());
+        assert!(upstreams.resolve("/api/rider/123").is_none());
+        assert!(upstreams.resolve("/api/motorcycle/ABC1234").is_none());
         assert!(upstreams.resolve("/health/ready").is_none());
     }
 
