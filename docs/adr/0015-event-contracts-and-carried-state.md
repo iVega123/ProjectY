@@ -69,7 +69,19 @@ schema id out of the payload and resolves it the same way. **The registry is
 never a hop between a producer and the broker** — it is neither a single point
 of failure for publishing nor a latency contributor.
 
-### Compatibility is FULL, and Avro is the encoding
+### The registry implementation is Apicurio
+
+**Apicurio speaks the Confluent Schema Registry REST API**, so the client
+library is the portable interface — the same argument as "MSK is Kafka", one
+layer up. A schema registry can then be swapped without touching a producer.
+
+It is also Apache 2.0, where Confluent Schema Registry ships under the
+Confluent Community License: source-available with a use restriction. That
+restriction does not bind this project, but it is the same shape as the one-way
+doors ADR 0004 already refuses, and choosing the permissive licence keeps the
+argument consistent rather than convenient.
+
+### Compatibility is FULL, and Protobuf is the encoding
 
 **FULL**, both directions, because both directions are real here: an old
 consumer must survive the producer's upgrade (forward), and a new consumer must
@@ -77,8 +89,39 @@ be able to replay the topic's history (backward). Since these topics are
 retained and replayable by deliberate choice, BACKWARD alone would only
 guarantee half of what the design already promises.
 
-**Avro** for events: evolution by named field with defaults behaves uniformly
-across seven languages, and it is the canonical pairing with a registry.
+**Protobuf** for events. With seven languages reading these topics, evenness of
+code generation outweighs everything else on the list: every language here has
+a first-class, maintained implementation, which is not true of Avro at the Rust
+and Elixir ends. Protobuf also decodes without a registry round trip, where
+Avro strictly requires the writer's schema to read a byte.
+
+Protobuf is only safe for retained topics under four conventions, and they are
+part of this decision rather than style advice:
+
+- **Singular scalar and enum fields are `optional`** (proto3 explicit
+  presence). Without it they cannot distinguish *absent* from *zero*, which is
+  unacceptable for a money or status column read out of a topic written months
+  earlier. The label applies **only** where it is legal: `repeated` fields, map
+  fields and `oneof` members reject it, and message-typed fields already carry
+  explicit presence, so adding it there is redundant.
+- **Where a collection needs to distinguish empty from absent, wrap it.** An
+  empty `repeated` field and a missing one are indistinguishable on the wire,
+  and no label fixes that. When the difference carries meaning — "no penalties
+  were applied" versus "penalties were not computed" — the collection goes
+  inside a message field, whose presence *is* observable. Most collections do
+  not need this; the ones that do are worth the wrapper.
+- **Field numbers are never reused.** Removing a field puts its number in
+  `reserved`. The number is the identity; the name is a label, which is what
+  makes renames free and reuse catastrophic.
+- **Money is `int64` in minor units, with the currency named**, never a float
+  and never a decimal serialised as a string. Avro has a `decimal` logical type
+  and this is the one place it was genuinely better — minor units are the
+  standard answer and are exact, so the loss is smaller than it looks.
+- **Enums carry an `_UNSPECIFIED = 0` member**, so the zero value means "not
+  set" instead of silently meaning the first real case.
+
+The registry checks compatibility for Protobuf as it does for Avro, so nothing
+in the CI gate changes with this choice.
 
 ## Alternatives considered
 
@@ -91,10 +134,26 @@ across seven languages, and it is the canonical pairing with a registry.
 - **BACKWARD-only compatibility.** It means every consumer upgrades before the
   producer. Across seven services on independent release cadences, that is the
   wrong direction to force.
-- **Protobuf for events as well as RPC.** Rejected as a false economy: an RPC
-  contract and an event contract have different lifetimes and different
-  compatibility rules. If gRPC appears between services, Protobuf there is a
-  separate decision, not this one.
+- **Avro.** The canonical Kafka pairing, and the choice this record made first.
+  Its writer/reader schema resolution is genuinely the better evolution model —
+  the reader's schema supplies defaults for fields the writer never had — and
+  its `decimal` logical type fits money better than anything Protobuf offers.
+  Rejected on the one axis that dominates here: **seven languages.** Avro's
+  implementations are uneven at the Rust and Elixir ends of this stack, and an
+  encoding that is excellent in four languages and awkward in two is worse for
+  this architecture than one that is good in all seven. The first version of
+  this record also leaned on a claim that does not hold — that Protobuf cannot
+  distinguish an absent field from a zero. Proto3 `optional` distinguishes them,
+  and the convention above makes it mandatory.
+- **Protobuf for events *as well as* RPC, to share one IDL.** Rejected as a
+  false economy: an RPC contract and an event contract have different lifetimes
+  and different compatibility rules. If gRPC appears between services, Protobuf
+  there is a separate decision, not this one.
+- **AWS Glue Schema Registry.** The first-party AWS option, and rejected for
+  precisely the reason Aurora was rejected in ADR 0004: it does not speak the
+  Confluent API, integrating through its own SDK instead. Adopting it would
+  break the portability thesis one layer up — the producer's serialiser would
+  become cloud-specific, which is exactly what the two seams exist to prevent.
 
 ## Consequences
 
@@ -111,6 +170,13 @@ across seven languages, and it is the canonical pairing with a registry.
 - **CI blocks incompatible schemas.** A job runs the registry's compatibility
   check before merge, in the same spirit as `schema-portability`: the guarantee
   is worth what its test is worth.
+- **Three facts in this record have a shelf life and should be re-checked before
+  the registry is wired up:** Apicurio's licence, the coverage of its
+  Confluent-compatibility endpoint, and its compatibility checking for Protobuf
+  specifically — registry support for Protobuf has historically trailed Avro,
+  and this record now depends on it. All three have moved between releases and
+  all three are load-bearing; an argument from a stale licence, or a CI gate
+  that silently checks nothing, is worse than no argument at all.
 
 ## Follow-up
 
