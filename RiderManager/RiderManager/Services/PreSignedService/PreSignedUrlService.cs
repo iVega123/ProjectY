@@ -14,20 +14,20 @@ namespace RiderManager.Services.PreSignedService
             _context = context;
         }
 
-        public async Task<(bool, UploadFileEntity?)> GetOrCreatePresignedUrlAsync(string riderId)
+        public async Task<(bool, UploadFileEntity?)> GetOrCreatePresignedUrlAsync(string userId)
         {
             var rider = await _context.Riders
                 .Include(r => r.CNHUrl)
-                .FirstOrDefaultAsync(r => r.Id == riderId);
+                .FirstOrDefaultAsync(r => r.UserId == userId);
 
             if (rider?.CNHUrl != null)
             {
                 UploadFileEntity uploadFileEntity = new UploadFileEntity()
                 {
-                    riderId = riderId,
-                    expiryDate = rider.CNHUrl.Expiry,
-                    fileName = rider.CNHUrl.ObjectName,
-                    fileUrl = rider.CNHUrl.Url
+                    UserId = userId,
+                    ExpiryDate = rider.CNHUrl.Expiry,
+                    FileName = rider.CNHUrl.ObjectName,
+                    FileUrl = rider.CNHUrl.Url
                 };
 
                 if (rider.CNHUrl.Expiry > DateTime.UtcNow)
@@ -41,24 +41,24 @@ namespace RiderManager.Services.PreSignedService
 
         public async Task StorePresignedUrlAsync(UploadFileEntity uploadedFile)
         {
-            var rider = await _context.Riders.Include(r => r.CNHUrl).FirstOrDefaultAsync(r => r.UserId == uploadedFile.riderId);
+            var rider = await _context.Riders.Include(r => r.CNHUrl).FirstOrDefaultAsync(r => r.UserId == uploadedFile.UserId);
             if (rider == null) throw new ArgumentException("Rider not found");
 
             if (rider.CNHUrl != null)
             {
-                rider.CNHUrl.ObjectName = uploadedFile.fileName;
-                rider.CNHUrl.Url = uploadedFile.fileUrl;
-                rider.CNHUrl.Expiry = uploadedFile.expiryDate;
+                rider.CNHUrl.ObjectName = uploadedFile.FileName;
+                rider.CNHUrl.Url = uploadedFile.FileUrl;
+                rider.CNHUrl.Expiry = uploadedFile.ExpiryDate;
             }
             else
             {
                 var presignedUrl = new PresignedUrl
                 {
                     Id = Guid.NewGuid().ToString(),
-                    ObjectName = uploadedFile.fileName,
-                    Url = uploadedFile.fileUrl,
-                    Expiry = uploadedFile.expiryDate,
-                    RiderId = uploadedFile.riderId,
+                    ObjectName = uploadedFile.FileName,
+                    Url = uploadedFile.FileUrl,
+                    Expiry = uploadedFile.ExpiryDate,
+                    RiderId = rider.Id,
                     Rider = rider,
                 };
 

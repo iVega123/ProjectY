@@ -19,6 +19,7 @@ namespace MotoHubTests.Integration
 {
     public class IntegrationTests : IClassFixture<CustomWebApplicationFactory<Program>>
     {
+        private static int _plateSequence;
         private readonly WebApplicationFactory<Program> _factory;
 
         public IntegrationTests(CustomWebApplicationFactory<Program> factory)
@@ -76,7 +77,7 @@ namespace MotoHubTests.Integration
         {
             // Arrange
             var client = _factory.CreateClient();
-            var motorcycle = new MotorcycleDTO { LicensePlate = $"CREATE-{Guid.NewGuid():N}", Model = "Honda", Year = 2020 };
+            var motorcycle = new MotorcycleDTO { LicensePlate = NextPlate(), Model = "Honda", Year = 2020 };
 
             var token = GenerateJwtToken();
 
@@ -99,7 +100,7 @@ namespace MotoHubTests.Integration
             client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
                 "Bearer",
                 GenerateJwtToken());
-            var licensePlate = $"ACTIVE-{Guid.NewGuid():N}";
+            var licensePlate = NextPlate();
             var response = await client.PostAsJsonAsync("/api/motorcycles", new MotorcycleDTO
             {
                 LicensePlate = licensePlate,
@@ -124,7 +125,7 @@ namespace MotoHubTests.Integration
         {
             // Arrange
             var client = _factory.CreateClient();
-            var licensePlate = $"GET-{Guid.NewGuid():N}";
+            var licensePlate = NextPlate();
             var token = GenerateJwtToken();
             client.DefaultRequestHeaders.Add("Authorization", $"Bearer {token}");
 
@@ -162,8 +163,8 @@ namespace MotoHubTests.Integration
         {
             // Arrange
             var client = _factory.CreateClient();
-            var originalLicensePlate = "ABC123";
-            var newLicensePlate = "XYZ987";
+            var originalLicensePlate = NextPlate();
+            var newLicensePlate = NextPlate();
             var motorcycle = new MotorcycleDTO { LicensePlate = originalLicensePlate, Model = "Honda", Year = 2020 };
             var updatedMotorcycle = new MotorcycleDTO { LicensePlate = newLicensePlate, Model = "UpdatedModel", Year = 2021 };
 
@@ -206,7 +207,7 @@ namespace MotoHubTests.Integration
         {
             // Arrange
             var client = _factory.CreateClient();
-            var licensePlate = $"DELETE-{Guid.NewGuid():N}";
+            var licensePlate = NextPlate();
 
             var token = GenerateJwtToken();
             client.DefaultRequestHeaders.Add("Authorization", $"Bearer {token}");
@@ -291,7 +292,7 @@ namespace MotoHubTests.Integration
         {
             // Arrange
             var client = _factory.CreateClient();
-            var motorcycle = new MotorcycleDTO { LicensePlate = "ExistingPlate", Model = "Honda", Year = 2020 };
+            var motorcycle = new MotorcycleDTO { LicensePlate = NextPlate(), Model = "Honda", Year = 2020 };
 
             var token = GenerateJwtToken();
             client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
@@ -324,6 +325,68 @@ namespace MotoHubTests.Integration
             Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
         }
 
+        [Theory]
+        [InlineData("ABC123")]
+        [InlineData("ABC-1234")]
+        [InlineData("prefixABC1234suffix")]
+        public async Task Create_InvalidLicensePlate_ReturnsValidationError(string licensePlate)
+        {
+            using var client = _factory.CreateClient();
+            client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
+                "Bearer",
+                GenerateJwtToken());
+
+            var response = await client.PostAsJsonAsync("/api/motorcycles", new MotorcycleDTO
+            {
+                LicensePlate = licensePlate,
+                Model = "Honda",
+                Year = 2020
+            });
+
+            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+            Assert.Contains("placa", await response.Content.ReadAsStringAsync(), StringComparison.OrdinalIgnoreCase);
+        }
+
+        [Theory]
+        [InlineData(1899)]
+        [InlineData(3000)]
+        public async Task Create_ImplausibleYear_ReturnsValidationError(int year)
+        {
+            using var client = _factory.CreateClient();
+            client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
+                "Bearer",
+                GenerateJwtToken());
+
+            var response = await client.PostAsJsonAsync("/api/motorcycles", new MotorcycleDTO
+            {
+                LicensePlate = NextPlate(),
+                Model = "Honda",
+                Year = year
+            });
+
+            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+            Assert.Contains("ano", await response.Content.ReadAsStringAsync(), StringComparison.OrdinalIgnoreCase);
+        }
+
+        [Fact]
+        public async Task Create_ModelThatBecomesTooShortAfterTrimming_ReturnsValidationError()
+        {
+            using var client = _factory.CreateClient();
+            client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
+                "Bearer",
+                GenerateJwtToken());
+
+            var response = await client.PostAsJsonAsync("/api/motorcycles", new MotorcycleDTO
+            {
+                LicensePlate = NextPlate(),
+                Model = " A",
+                Year = 2020
+            });
+
+            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+            Assert.Contains("Model", await response.Content.ReadAsStringAsync(), StringComparison.OrdinalIgnoreCase);
+        }
+
         [Fact]
         public async Task GetAll_WithInvalidApiKey_ReturnsUnauthorized()
         {
@@ -344,6 +407,9 @@ namespace MotoHubTests.Integration
         {
             return "30cee9e2-9a38-4aad-8fe6-0398bd7f2a25";
         }
+
+        private static string NextPlate() =>
+            $"TST{Interlocked.Increment(ref _plateSequence) % 10000:D4}";
 
         private string GenerateInvalidJwtToken()
         {

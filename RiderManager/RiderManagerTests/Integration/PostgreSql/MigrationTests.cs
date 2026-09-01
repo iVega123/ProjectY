@@ -41,10 +41,50 @@ public sealed class MigrationTests : IAsyncLifetime
         await context.SaveChangesAsync();
 
         Assert.Empty(await context.Database.GetPendingMigrationsAsync());
-        Assert.Equal(2, (await context.Database.GetAppliedMigrationsAsync()).Count());
+        Assert.Equal(3, (await context.Database.GetAppliedMigrationsAsync()).Count());
         Assert.Equal(1, await context.Riders.CountAsync());
         Assert.Empty(await context.InboxMessages.ToListAsync());
     }
+
+    [Fact]
+    [Trait("Category", "Integration")]
+    public async Task CnpjMigration_NormalizesWinnerAndQuarantinesDuplicateProjection()
+    {
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseNpgsql(_database.GetConnectionString())
+            .Options;
+        await using var context = new ApplicationDbContext(options);
+        await context.Database.MigrateAsync("20260831221805_AddInboxDeduplication");
+        context.Riders.AddRange(
+            CreateRider("rider-a", "auth-user-a", "92.805.586/0001-80", "12345678901"),
+            CreateRider("rider-b", "auth-user-b", "92805586000180", "12345678902"));
+        await context.SaveChangesAsync();
+
+        await context.Database.MigrateAsync();
+        context.ChangeTracker.Clear();
+
+        var winner = await context.Riders.SingleAsync(rider => rider.Id == "rider-a");
+        var duplicate = await context.Riders.SingleAsync(rider => rider.Id == "rider-b");
+        Assert.Equal("92805586000180", winner.CNPJ);
+        Assert.StartsWith("QUAR:", duplicate.CNPJ, StringComparison.Ordinal);
+        Assert.Equal(
+            2,
+            await context.Database.SqlQueryRaw<int>(
+                "SELECT COUNT(*)::int AS \"Value\" FROM \"LegacyRiderCnpjReconciliations\"")
+                .SingleAsync());
+    }
+
+    private static Rider CreateRider(string id, string userId, string cnpj, string cnh) => new()
+    {
+        Id = id,
+        UserId = userId,
+        Email = $"{userId}@example.test",
+        Name = id,
+        CNPJ = cnpj,
+        DateOfBirth = new DateTime(1990, 1, 1, 0, 0, 0, DateTimeKind.Utc),
+        CNHNumber = cnh,
+        CNHType = "A"
+    };
 
     [Fact]
     [Trait("Category", "Integration")]
@@ -106,7 +146,7 @@ public sealed class DbContextConstructionTests
     public void Constructor_DoesNotAccessDatabase()
     {
         var options = new DbContextOptionsBuilder<ApplicationDbContext>()
-            .UseNpgsql("Host=database.invalid;Timeout=1;Database=rider_manager;Username=projecty")
+            .UseNpgsql("Host=database.invalid;Timeout=1;Database=RiderManagerDB;Username=projecty")
             .Options;
 
         using var context = new ApplicationDbContext(options);

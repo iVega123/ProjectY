@@ -2,9 +2,9 @@
 {
     public class UploadFileEntity
     {
-        public required string riderId { get; set; }
-        public required string fileName { get; set; }
-        public required string fileUrl { get; set; }
-        public DateTime expiryDate { get; set; }
+        public required string UserId { get; set; }
+        public required string FileName { get; set; }
+        public required string FileUrl { get; set; }
+        public DateTime ExpiryDate { get; set; }
     }
 }

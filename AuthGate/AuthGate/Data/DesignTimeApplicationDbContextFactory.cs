@@ -8,8 +8,9 @@ public sealed class DesignTimeApplicationDbContextFactory
 {
     public ApplicationDbContext CreateDbContext(string[] args)
     {
+        var databaseName = Environment.GetEnvironmentVariable("AUTH_GATE_POSTGRES_DB") ?? "AuthGateDB";
         var connectionString = Environment.GetEnvironmentVariable("ConnectionStrings__Postgresql")
-            ?? "Host=localhost;Database=auth_gate;Username=postgres";
+            ?? $"Host=localhost;Database={databaseName};Username=postgres";
         var options = new DbContextOptionsBuilder<ApplicationDbContext>()
             .UseNpgsql(connectionString)
             .Options;
