@@ -154,7 +154,6 @@ services:
       GF_SECURITY_ADMIN_USER: "${GRAFANA_USER:?Set GRAFANA_USER in .env}"
       GF_SECURITY_ADMIN_PASSWORD: "${GRAFANA_PASSWORD:?Set GRAFANA_PASSWORD in .env}"
       GF_USERS_DEFAULT_THEME: system
-      GF_FEATURE_TOGGLES_ENABLE: traceqlEditor,traceToMetrics
       GF_INSTALL_PLUGINS: ""
     ports:
       - "3001:3000"
@@ -270,7 +269,7 @@ services:
 
   k6:
     profiles: ["load"]
-    command: ["run", "--out", "experimental-prometheus-rw", "/scripts/rental-flow.js"]
+    command: ["run", "--out", "prometheus-rw", "/scripts/rental-flow.js"]
     environment:
       K6_PROMETHEUS_RW_SERVER_URL: http://prometheus:9090/api/v1/write
       K6_PROMETHEUS_RW_TREND_STATS: "p(95),p(99),min,max"
