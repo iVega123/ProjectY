@@ -11,9 +11,15 @@ updates:
       time: "09:00"
       timezone: America/Manaus
     groups:
+      # Minor and patch bumps travel together; majors arrive as individual PRs
+      # so each one can be reviewed and smoke-tested on its own. A bundle of
+      # sixteen updates where one breaks the stack is not reviewable.
       container-images:
         patterns:
           - "*"
+        update-types:
+          - "minor"
+          - "patch"
 
   - package-ecosystem: docker
     directories:
@@ -30,3 +36,6 @@ updates:
       dotnet-base-images:
         patterns:
           - "mcr.microsoft.com/dotnet/*"
+        update-types:
+          - "minor"
+          - "patch"
