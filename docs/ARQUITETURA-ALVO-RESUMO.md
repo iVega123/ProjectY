@@ -234,7 +234,7 @@ e não desloga ninguém.
 |---|---|---|
 | 01 | O DDL alvo não rodava no engine que o ADR 0004 declarava | ✅ **fechada** — schema portátil, provado em CI nos dois engines |
 | 02 | A garantia de reserva dupla vive no MongoDB, não no schema alvo | ⬜ **aberta** — depende da fusão do Piso 2 |
-| 03 | Identidade não tem lugar no schema nem entre os serviços | ⬜ **aberta** — `identity` decidido nos ADRs 0012 e 0013 (PR #129, ainda aberto); tabelas não escritas |
+| 03 | Identidade não tem lugar no schema nem entre os serviços | ⬜ **aberta** — `identity` decidido nos ADRs 0012 e 0013; tabelas não escritas |
 
 Nenhuma caixa é marcada por decisão tomada. Só por código que roda.
 
