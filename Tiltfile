@@ -51,7 +51,7 @@ if missing_local_files:
     ) % ', '.join(missing_local_files)
     fail(missing_files_message)
 
-profiles = ['init', 'full'] if full else ['init']
+profiles = ['full'] if full else []
 docker_compose(
     'deploy/overlays/selfhost/compose.yaml',
     env_file = '.env',
