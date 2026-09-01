@@ -98,9 +98,18 @@ Avro strictly requires the writer's schema to read a byte.
 Protobuf is only safe for retained topics under four conventions, and they are
 part of this decision rather than style advice:
 
-- **Every field is `optional`** (proto3 explicit presence). Without it a scalar
-  cannot distinguish *absent* from *zero*, which is unacceptable for a money or
-  status column read out of a topic written months earlier.
+- **Singular scalar and enum fields are `optional`** (proto3 explicit
+  presence). Without it they cannot distinguish *absent* from *zero*, which is
+  unacceptable for a money or status column read out of a topic written months
+  earlier. The label applies **only** where it is legal: `repeated` fields, map
+  fields and `oneof` members reject it, and message-typed fields already carry
+  explicit presence, so adding it there is redundant.
+- **Where a collection needs to distinguish empty from absent, wrap it.** An
+  empty `repeated` field and a missing one are indistinguishable on the wire,
+  and no label fixes that. When the difference carries meaning — "no penalties
+  were applied" versus "penalties were not computed" — the collection goes
+  inside a message field, whose presence *is* observable. Most collections do
+  not need this; the ones that do are worth the wrapper.
 - **Field numbers are never reused.** Removing a field puts its number in
   `reserved`. The number is the identity; the name is a label, which is what
   makes renames free and reuse catastrophic.

@@ -205,9 +205,12 @@ the topic at the moment of the correction. For the same reason `rentals` now
 references `motorcycles (id)`.
 
 Compatibility is **FULL** — an old consumer survives the producer's upgrade, and
-a new consumer can replay the history. **Protobuf** is the encoding, under four
-mandatory conventions: every field `optional`, field numbers never reused, money
-as `int64` minor units, and enums with an `_UNSPECIFIED = 0` member.
+a new consumer can replay the history. **Protobuf** is the encoding, under
+mandatory conventions: `optional` on singular scalar and enum fields — the only
+place the label is legal and the only place presence is otherwise lost — a
+wrapper message where a collection must distinguish empty from absent, field
+numbers never reused, money as `int64` minor units, and enums carrying an
+`_UNSPECIFIED = 0` member.
 
 ### 4.5 Fraud scoring — off the request path
 
