@@ -38,7 +38,7 @@ namespace MotoHubTests.Integration
             var motorcycle = new Motorcycle
             {
                 Id = Guid.NewGuid().ToString(),
-                LicensePlate = $"OUT-{Guid.NewGuid():N}",
+                LicensePlate = $"OUT-{Guid.NewGuid():N}".ToUpperInvariant(),
                 Model = "Transactional outbox",
                 Year = 2026,
                 RegistrationDate = DateTime.UtcNow
@@ -47,7 +47,7 @@ namespace MotoHubTests.Integration
             await context.SaveChangesAsync();
 
             var service = scope.ServiceProvider.GetRequiredService<IMotorcycleService>();
-            var newLicencePlate = $"NEW-{Guid.NewGuid():N}";
+            var newLicencePlate = $"NEW-{Guid.NewGuid():N}".ToUpperInvariant();
             await service.UpdateMotorcycleAsync(motorcycle.LicensePlate, newLicencePlate);
 
             var message = Assert.Single(context.OutboxMessages.Local);

@@ -37,7 +37,11 @@ namespace MotoHubTests.Integration
                 mockService.Setup(service => service.GetRentalsByMotorcycleLicencePlateAsync("mock"))
                            .ReturnsAsync(true);
                 mockService.Setup(service => service.TryRetireMotorcycleAsync(It.IsAny<string>()))
-                           .ReturnsAsync(true);
+                    .ReturnsAsync(true);
+                mockService.Setup(service => service.TryReserveMotorcycleRenameAsync(
+                        It.IsAny<string>(),
+                        It.IsAny<string>()))
+                    .ReturnsAsync(true);
 
                 services.AddSingleton<IRentalOperationService>(mockService.Object);
 

@@ -31,6 +31,7 @@
     <Compile Include="..\..\Shared\Hosting\SwaggerPolicy.cs" Link="Shared\Hosting\SwaggerPolicy.cs" />
     <Compile Include="..\..\Shared\Idempotency\*.cs" Link="Shared\Idempotency\%(Filename)%(Extension)" />
     <Compile Include="..\..\Shared\Pagination\*.cs" Link="Shared\Pagination\%(Filename)%(Extension)" />
+    <Compile Include="..\..\Shared\Validation\VehicleAttributes.cs" Link="Shared\Validation\VehicleAttributes.cs" />
   </ItemGroup>
 
 </Project>

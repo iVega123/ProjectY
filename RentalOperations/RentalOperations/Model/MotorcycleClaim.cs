@@ -15,6 +15,10 @@ public sealed class MotorcycleClaim
     [BsonIgnoreIfNull]
     public string? RentalId { get; init; }
 
+    [BsonElement("sourceLicencePlate")]
+    [BsonIgnoreIfNull]
+    public string? SourceLicencePlate { get; init; }
+
     [BsonElement("createdAtUtc")]
     public DateTime CreatedAtUtc { get; init; }
 }
@@ -22,5 +26,6 @@ public sealed class MotorcycleClaim
 public enum MotorcycleClaimKind
 {
     ActiveRental,
-    Retired
+    Retired,
+    RenameReservation
 }

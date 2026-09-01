@@ -14,6 +14,7 @@ namespace RentalOperations.Repository
         Task<bool> IsMotorcycleCurrentlyRentedAsync(string licencePlate);
         Task UpdateRentalAsync(Rental rental);
         Task UpdateLicensePlateForAllRentalsAsync(string oldLicensePlate, string newLicensePlate);
+        Task<bool> TryReserveLicensePlateRenameAsync(string oldLicensePlate, string newLicensePlate);
         Task<MotorcycleClaimResult> TryClaimRentalAsync(string licencePlate, string rentalId);
         Task<MotorcycleClaimResult> TryClaimRetirementAsync(string licencePlate);
         Task ReleaseRentalClaimAsync(string licencePlate, string rentalId);

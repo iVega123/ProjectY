@@ -22,8 +22,18 @@ namespace RiderManager.Services.RiderServices
         public async Task<CursorPage<RiderResponseDTO>> GetRidersAsync(string? cursor, int? pageSize)
         {
             var page = await _repository.GetPageAsync(cursor, pageSize);
+            var riders = _mapper.Map<IReadOnlyList<RiderResponseDTO>>(page.Items);
+            var now = DateTime.UtcNow;
+            for (var index = 0; index < riders.Count; index++)
+            {
+                if (page.Items[index].CNHUrl?.Expiry <= now)
+                {
+                    riders[index].CNHUrl = null;
+                }
+            }
+
             return new CursorPage<RiderResponseDTO>(
-                _mapper.Map<IReadOnlyList<RiderResponseDTO>>(page.Items),
+                riders,
                 page.NextCursor);
         }
 

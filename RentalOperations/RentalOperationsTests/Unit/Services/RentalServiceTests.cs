@@ -45,13 +45,14 @@ public sealed class RentalServiceTests
             motorcycles.Object);
         var request = new RentalCreateDto
         {
-            MotocycleLicencePlate = "RET-0001",
+            MotocycleLicencePlate = " ret-0001 ",
             StartDate = DateTime.UtcNow.Date.AddDays(1),
             PredictedEndDate = DateTime.UtcNow.Date.AddDays(8)
         };
 
         await Assert.ThrowsAsync<MotorcycleRetiredException>(() =>
             service.CreateRentalAsync(request, "rider-1"));
+        Assert.Equal("RET-0001", request.MotocycleLicencePlate);
         repository.Verify(candidate => candidate.CreateRentalAsync(It.IsAny<RentalOperations.Model.Rental>()), Times.Never);
     }
 
@@ -67,6 +68,25 @@ public sealed class RentalServiceTests
             Mock.Of<IRiderManagerService>(),
             Mock.Of<IMotorcycleService>());
 
-        Assert.False(await service.TryRetireMotorcycleAsync("BUSY-0001"));
+        Assert.False(await service.TryRetireMotorcycleAsync(" busy-0001 "));
+    }
+
+    [Fact]
+    public async Task TryReserveLicensePlateRename_NormalizesBothClaimKeys()
+    {
+        var repository = new Mock<IRentalRepository>();
+        repository.Setup(candidate => candidate.TryReserveLicensePlateRenameAsync(
+                "OLD-0001",
+                "NEW-0001"))
+            .ReturnsAsync(true);
+        var service = new RentalService(
+            repository.Object,
+            Mock.Of<IMapper>(),
+            Mock.Of<IRiderManagerService>(),
+            Mock.Of<IMotorcycleService>());
+
+        Assert.True(await service.TryReserveLicensePlateRenameAsync(
+            " old-0001 ",
+            " new-0001 "));
     }
 }

@@ -155,5 +155,23 @@ namespace RentalOperations.Controllers
                     Detail = $"Motorcycle {licencePlate} has an active rental."
                 });
         }
+
+        [ServiceFilter(typeof(AdminAuthorizationFilter))]
+        [HttpPost("motorcycle-renames/reservations")]
+        public async Task<IActionResult> TryReserveMotorcycleRename(
+            [FromBody] MotorcycleRenameReservationDto request)
+        {
+            var acquired = await _rentalService.TryReserveLicensePlateRenameAsync(
+                request.OldLicencePlate,
+                request.NewLicencePlate);
+            return acquired
+                ? NoContent()
+                : Conflict(new ProblemDetails
+                {
+                    Status = StatusCodes.Status409Conflict,
+                    Title = "Motorcycle claim conflict",
+                    Detail = $"Motorcycle {request.NewLicencePlate} is already claimed."
+                });
+        }
     }
 }

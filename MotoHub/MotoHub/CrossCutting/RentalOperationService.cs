@@ -1,5 +1,6 @@
 ﻿using Microsoft.Extensions.Options;
 using MotoHub.Configurations;
+using System.Net.Http.Json;
 using System.Text.Json;
 
 namespace MotoHub.CrossCutting
@@ -62,6 +63,41 @@ namespace MotoHub.CrossCutting
             {
                 throw new Exception(
                     $"Unable to reserve motorcycle retirement: {exception.Message}",
+                    exception);
+            }
+        }
+
+        public async Task<bool> TryReserveMotorcycleRenameAsync(
+            string oldLicensePlate,
+            string newLicensePlate)
+        {
+            try
+            {
+                var response = await _httpClient.PostAsJsonAsync(
+                    "api/Rental/motorcycle-renames/reservations",
+                    new
+                    {
+                        OldLicencePlate = oldLicensePlate,
+                        NewLicencePlate = newLicensePlate
+                    });
+                if (response.IsSuccessStatusCode)
+                {
+                    return true;
+                }
+
+                if (response.StatusCode == System.Net.HttpStatusCode.Conflict)
+                {
+                    return false;
+                }
+
+                var errorContent = await response.Content.ReadAsStringAsync();
+                throw new HttpRequestException(
+                    $"Request failed with status {response.StatusCode}: {errorContent}");
+            }
+            catch (HttpRequestException exception)
+            {
+                throw new Exception(
+                    $"Unable to reserve motorcycle rename: {exception.Message}",
                     exception);
             }
         }

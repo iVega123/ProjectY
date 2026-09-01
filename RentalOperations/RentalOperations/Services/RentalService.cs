@@ -6,6 +6,7 @@ using RentalOperations.Model;
 using RentalOperations.Repository;
 
 using ProjectY.Shared.Pagination;
+using ProjectY.Shared.Validation;
 
 namespace RentalOperations.Services
 {
@@ -30,7 +31,8 @@ namespace RentalOperations.Services
 
         public async Task CreateRentalAsync(RentalCreateDto createDto, string userId)
         {
-
+            createDto.MotocycleLicencePlate = BrazilianLicensePlateAttribute.Normalize(
+                createDto.MotocycleLicencePlate);
             if (createDto.StartDate.AddDays(1) >= createDto.PredictedEndDate)
             {
                 throw new InvalidOperationException("The Rent time must at least one day");
@@ -163,17 +165,28 @@ namespace RentalOperations.Services
 
         public async Task UpdateMotorcycleLicensePlateAsync(string oldLicensePlate, string newLicensePlate)
         {
-            await _repository.UpdateLicensePlateForAllRentalsAsync(oldLicensePlate, newLicensePlate);
+            await _repository.UpdateLicensePlateForAllRentalsAsync(
+                BrazilianLicensePlateAttribute.Normalize(oldLicensePlate),
+                BrazilianLicensePlateAttribute.Normalize(newLicensePlate));
         }
+
+        public Task<bool> TryReserveLicensePlateRenameAsync(
+            string oldLicensePlate,
+            string newLicensePlate) =>
+            _repository.TryReserveLicensePlateRenameAsync(
+                BrazilianLicensePlateAttribute.Normalize(oldLicensePlate),
+                BrazilianLicensePlateAttribute.Normalize(newLicensePlate));
 
         public async Task<bool> IsMotorcycleCurrentlyRentedAsync(string licencePlate)
         {
-            return await _repository.IsMotorcycleCurrentlyRentedAsync(licencePlate);
+            return await _repository.IsMotorcycleCurrentlyRentedAsync(
+                BrazilianLicensePlateAttribute.Normalize(licencePlate));
         }
 
         public async Task<bool> TryRetireMotorcycleAsync(string licencePlate)
         {
-            var result = await _repository.TryClaimRetirementAsync(licencePlate);
+            var result = await _repository.TryClaimRetirementAsync(
+                BrazilianLicensePlateAttribute.Normalize(licencePlate));
             return result is MotorcycleClaimResult.Acquired or MotorcycleClaimResult.Retired;
         }
 

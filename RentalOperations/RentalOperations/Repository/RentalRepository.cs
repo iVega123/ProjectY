@@ -115,30 +115,122 @@ namespace RentalOperations.Repository
 
         public async Task UpdateLicensePlateForAllRentalsAsync(string oldLicensePlate, string newLicensePlate)
         {
-            var activeClaim = await _motorcycleClaims
+            var sourceClaim = await _motorcycleClaims
                 .Find(claim => claim.MotorcycleLicencePlate == oldLicensePlate &&
                                claim.Kind == MotorcycleClaimKind.ActiveRental)
                 .FirstOrDefaultAsync();
-            if (activeClaim is not null)
+            var targetClaim = await _motorcycleClaims
+                .Find(claim => claim.MotorcycleLicencePlate == newLicensePlate)
+                .FirstOrDefaultAsync();
+
+            if (sourceClaim is not null)
             {
-                var claimResult = await TryClaimRentalAsync(newLicensePlate, activeClaim.RentalId!);
-                if (claimResult != MotorcycleClaimResult.Acquired)
+                if (sourceClaim.RentalId is null)
+                {
+                    throw new InvalidOperationException(
+                        $"Active rental claim for {oldLicensePlate} has no rental identifier.");
+                }
+
+                if (targetClaim?.Kind == MotorcycleClaimKind.RenameReservation &&
+                    targetClaim.SourceLicencePlate == oldLicensePlate)
+                {
+                    var replacement = new MotorcycleClaim
+                    {
+                        MotorcycleLicencePlate = newLicensePlate,
+                        Kind = MotorcycleClaimKind.ActiveRental,
+                        RentalId = sourceClaim.RentalId,
+                        SourceLicencePlate = oldLicensePlate,
+                        CreatedAtUtc = sourceClaim.CreatedAtUtc
+                    };
+                    var replaceResult = await _motorcycleClaims.ReplaceOneAsync(
+                        claim => claim.MotorcycleLicencePlate == newLicensePlate &&
+                                 claim.Kind == MotorcycleClaimKind.RenameReservation &&
+                                 claim.SourceLicencePlate == oldLicensePlate,
+                        replacement);
+                    targetClaim = replaceResult.ModifiedCount == 1
+                        ? replacement
+                        : await _motorcycleClaims
+                            .Find(claim => claim.MotorcycleLicencePlate == newLicensePlate)
+                            .FirstOrDefaultAsync();
+                }
+
+                if (targetClaim?.Kind != MotorcycleClaimKind.ActiveRental ||
+                    targetClaim.RentalId != sourceClaim.RentalId)
                 {
                     throw new InvalidOperationException(
                         $"Cannot move the active rental claim to licence plate {newLicensePlate}.");
                 }
+            }
+            else if (targetClaim is not null &&
+                     (targetClaim.Kind != MotorcycleClaimKind.RenameReservation ||
+                      targetClaim.SourceLicencePlate != oldLicensePlate) &&
+                     (targetClaim.Kind != MotorcycleClaimKind.ActiveRental ||
+                      targetClaim.SourceLicencePlate != oldLicensePlate))
+            {
+                throw new InvalidOperationException(
+                    $"Cannot complete the licence plate update to {newLicensePlate}.");
+            }
+
+            else if (targetClaim is null &&
+                     await _rentals.Find(rental =>
+                             rental.MotorcycleLicencePlate == oldLicensePlate)
+                         .Limit(1)
+                         .AnyAsync())
+            {
+                throw new InvalidOperationException(
+                    $"Licence plate update to {newLicensePlate} has no reservation.");
             }
 
             var filter = Builders<Rental>.Filter.Eq(r => r.MotorcycleLicencePlate, oldLicensePlate);
             var update = Builders<Rental>.Update.Set(r => r.MotorcycleLicencePlate, newLicensePlate);
 
             var updateResult = await _rentals.UpdateManyAsync(filter, update);
-            if (activeClaim is not null)
+            if (sourceClaim is not null)
             {
-                await ReleaseRentalClaimAsync(oldLicensePlate, activeClaim.RentalId!);
+                await ReleaseRentalClaimAsync(oldLicensePlate, sourceClaim.RentalId!);
+            }
+            else if (targetClaim?.Kind == MotorcycleClaimKind.RenameReservation &&
+                     targetClaim.SourceLicencePlate == oldLicensePlate)
+            {
+                await _motorcycleClaims.DeleteOneAsync(claim =>
+                    claim.MotorcycleLicencePlate == newLicensePlate &&
+                    claim.Kind == MotorcycleClaimKind.RenameReservation &&
+                    claim.SourceLicencePlate == oldLicensePlate);
             }
 
             Console.WriteLine($"{updateResult.ModifiedCount} rentals updated.");
+        }
+
+        public async Task<bool> TryReserveLicensePlateRenameAsync(
+            string oldLicensePlate,
+            string newLicensePlate)
+        {
+            if (string.Equals(oldLicensePlate, newLicensePlate, StringComparison.Ordinal))
+            {
+                return true;
+            }
+
+            var reservation = new MotorcycleClaim
+            {
+                MotorcycleLicencePlate = newLicensePlate,
+                Kind = MotorcycleClaimKind.RenameReservation,
+                SourceLicencePlate = oldLicensePlate,
+                CreatedAtUtc = DateTime.UtcNow
+            };
+            try
+            {
+                await _motorcycleClaims.InsertOneAsync(reservation);
+                return true;
+            }
+            catch (MongoWriteException exception)
+                when (exception.WriteError?.Category == ServerErrorCategory.DuplicateKey)
+            {
+                var existing = await _motorcycleClaims
+                    .Find(claim => claim.MotorcycleLicencePlate == newLicensePlate)
+                    .FirstOrDefaultAsync();
+                return existing?.Kind == MotorcycleClaimKind.RenameReservation &&
+                       existing.SourceLicencePlate == oldLicensePlate;
+            }
         }
 
         public Task<MotorcycleClaimResult> TryClaimRentalAsync(string licencePlate, string rentalId) =>
@@ -192,6 +284,11 @@ namespace RentalOperations.Repository
                         return existing.RentalId == claim.RentalId
                             ? MotorcycleClaimResult.Acquired
                             : MotorcycleClaimResult.ActiveRental;
+                    }
+
+                    if (existing?.Kind == MotorcycleClaimKind.RenameReservation)
+                    {
+                        return MotorcycleClaimResult.ActiveRental;
                     }
                 }
             }

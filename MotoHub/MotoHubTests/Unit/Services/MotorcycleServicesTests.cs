@@ -129,6 +129,10 @@ namespace MotoHubTests.Unit.Services
 
             var mockMessagingPublish = new Mock<IMessagingPublisherService>();
             var mockCrossCutting = new Mock<IRentalOperationService>();
+            mockCrossCutting.Setup(service => service.TryReserveMotorcycleRenameAsync(
+                    existingLicensePlate,
+                    newLicensePlate))
+                .ReturnsAsync(true);
 
             var mockMessagingPublisherService = new Mock<IMessagingPublisherService>();
             mockMessagingPublisherService.Setup(p => p.PublishLicenceUpdate(It.Is<LicencePlateRabbitMQEntity>(m =>
@@ -147,6 +151,42 @@ namespace MotoHubTests.Unit.Services
             mockMessagingPublisherService.Verify();
 
             Assert.Equal(newLicensePlate, existingMotorcycle.LicensePlate);
+        }
+
+        [Fact]
+        public async Task UpdateMotorcycle_WhenNewPlateCannotBeReserved_DoesNotCommitRename()
+        {
+            const string existingLicensePlate = "ABC123";
+            const string newLicensePlate = "XYZ987";
+            var motorcycle = new Motorcycle
+            {
+                Id = Guid.NewGuid().ToString(),
+                LicensePlate = existingLicensePlate,
+                Model = "Honda",
+                Year = 2020
+            };
+            var repository = new Mock<IMotorcycleRepository>();
+            repository.Setup(instance => instance.GetByLicensePlateAsync(existingLicensePlate))
+                .ReturnsAsync(motorcycle);
+            var rentalOperations = new Mock<IRentalOperationService>();
+            rentalOperations.Setup(instance => instance.TryReserveMotorcycleRenameAsync(
+                    existingLicensePlate,
+                    newLicensePlate))
+                .ReturnsAsync(false);
+            var publisher = new Mock<IMessagingPublisherService>();
+            var service = new MotorcycleService(
+                repository.Object,
+                Mock.Of<IMapper>(),
+                publisher.Object,
+                rentalOperations.Object);
+
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                service.UpdateMotorcycleAsync(existingLicensePlate, newLicensePlate));
+
+            Assert.Equal(existingLicensePlate, motorcycle.LicensePlate);
+            repository.Verify(instance => instance.Update(It.IsAny<Motorcycle>()), Times.Never);
+            publisher.Verify(instance => instance.PublishLicenceUpdate(
+                It.IsAny<LicencePlateRabbitMQEntity>()), Times.Never);
         }
 
         [Fact]

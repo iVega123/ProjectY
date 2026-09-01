@@ -89,6 +89,24 @@ namespace MotoHubTests.Unit.Controllers
         }
 
         [Fact]
+        public async Task Update_WhenNewPlateClaimConflicts_ReturnsConflict()
+        {
+            var motorcycleService = new Mock<IMotorcycleService>();
+            motorcycleService.Setup(service => service.GetMotorcycleByLicensePlateAsync("ABC123"))
+                .ReturnsAsync(new MotorcycleDTO { LicensePlate = "ABC123" });
+            motorcycleService.Setup(service => service.UpdateMotorcycleAsync("ABC123", "XYZ987"))
+                .ThrowsAsync(new InvalidOperationException("Plate is already claimed."));
+            var controller = new MotorcyclesController(
+                motorcycleService.Object,
+                Mock.Of<ILogger<MotorcyclesController>>());
+
+            var result = await controller.Update("abc123", "xyz987");
+
+            var conflict = Assert.IsType<ConflictObjectResult>(result);
+            Assert.Equal("Plate is already claimed.", conflict.Value);
+        }
+
+        [Fact]
         public async Task Delete_WithExistingLicensePlate_ReturnsOkResult()
         {
             // Arrange

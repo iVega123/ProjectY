@@ -10,7 +10,9 @@ namespace RentalOperationsTests.Integration;
 public sealed class InMemoryRentalRepository : IRentalRepository
 {
     private readonly ConcurrentDictionary<ObjectId, Rental> _rentals = new();
-    private readonly ConcurrentDictionary<string, (MotorcycleClaimKind Kind, string? RentalId)> _claims = new();
+    private readonly ConcurrentDictionary<
+        string,
+        (MotorcycleClaimKind Kind, string? RentalId, string? SourceLicencePlate)> _claims = new();
 
     public InMemoryRentalRepository()
     {
@@ -106,7 +108,40 @@ public sealed class InMemoryRentalRepository : IRentalRepository
             _rentals[entry.Key] = updated;
         }
 
+        if (_claims.TryGetValue(oldLicensePlate, out var sourceClaim) &&
+            sourceClaim.Kind == MotorcycleClaimKind.ActiveRental)
+        {
+            _claims[newLicensePlate] = (
+                MotorcycleClaimKind.ActiveRental,
+                sourceClaim.RentalId,
+                oldLicensePlate);
+            _claims.TryRemove(oldLicensePlate, out _);
+        }
+        else if (_claims.TryGetValue(newLicensePlate, out var reservation) &&
+                 reservation.Kind == MotorcycleClaimKind.RenameReservation &&
+                 reservation.SourceLicencePlate == oldLicensePlate)
+        {
+            _claims.TryRemove(newLicensePlate, out _);
+        }
+
         return Task.CompletedTask;
+    }
+
+    public Task<bool> TryReserveLicensePlateRenameAsync(
+        string oldLicensePlate,
+        string newLicensePlate)
+    {
+        if (_claims.TryAdd(
+                newLicensePlate,
+                (MotorcycleClaimKind.RenameReservation, null, oldLicensePlate)))
+        {
+            return Task.FromResult(true);
+        }
+
+        var existing = _claims[newLicensePlate];
+        return Task.FromResult(
+            existing.Kind == MotorcycleClaimKind.RenameReservation &&
+            existing.SourceLicencePlate == oldLicensePlate);
     }
 
     public Task DeleteRentalAsync(string id)
@@ -117,7 +152,7 @@ public sealed class InMemoryRentalRepository : IRentalRepository
 
     public Task<MotorcycleClaimResult> TryClaimRentalAsync(string licencePlate, string rentalId)
     {
-        if (_claims.TryAdd(licencePlate, (MotorcycleClaimKind.ActiveRental, rentalId)))
+        if (_claims.TryAdd(licencePlate, (MotorcycleClaimKind.ActiveRental, rentalId, null)))
         {
             return Task.FromResult(MotorcycleClaimResult.Acquired);
         }
@@ -132,7 +167,7 @@ public sealed class InMemoryRentalRepository : IRentalRepository
 
     public Task<MotorcycleClaimResult> TryClaimRetirementAsync(string licencePlate)
     {
-        if (_claims.TryAdd(licencePlate, (MotorcycleClaimKind.Retired, null)))
+        if (_claims.TryAdd(licencePlate, (MotorcycleClaimKind.Retired, null, null)))
         {
             return Task.FromResult(MotorcycleClaimResult.Acquired);
         }
@@ -145,9 +180,11 @@ public sealed class InMemoryRentalRepository : IRentalRepository
     public Task ReleaseRentalClaimAsync(string licencePlate, string rentalId)
     {
         _claims.TryRemove(
-            new KeyValuePair<string, (MotorcycleClaimKind Kind, string? RentalId)>(
+            new KeyValuePair<
+                string,
+                (MotorcycleClaimKind Kind, string? RentalId, string? SourceLicencePlate)>(
                 licencePlate,
-                (MotorcycleClaimKind.ActiveRental, rentalId)));
+                (MotorcycleClaimKind.ActiveRental, rentalId, null)));
         return Task.CompletedTask;
     }
 

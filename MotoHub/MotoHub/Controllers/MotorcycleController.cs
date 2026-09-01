@@ -74,6 +74,8 @@ namespace MotoHub.Controllers
         [HttpPut("{licensePlate}")]
         public async Task<IActionResult> Update(string licensePlate, string newLicencePlate)
         {
+            licensePlate = BrazilianLicensePlateAttribute.Normalize(licensePlate);
+            newLicencePlate = BrazilianLicensePlateAttribute.Normalize(newLicencePlate);
             _logger.LogInformation("Updating motorcycle with license plate {LicensePlate}.", licensePlate);
             var existingMotorcycle = await _motorcycleService.GetMotorcycleByLicensePlateAsync(licensePlate);
             if (existingMotorcycle == null)
@@ -82,8 +84,15 @@ namespace MotoHub.Controllers
                 return NotFound();
             }
 
-            await _motorcycleService.UpdateMotorcycleAsync(licensePlate, newLicencePlate);
-            return NoContent();
+            try
+            {
+                await _motorcycleService.UpdateMotorcycleAsync(licensePlate, newLicencePlate);
+                return NoContent();
+            }
+            catch (InvalidOperationException exception)
+            {
+                return Conflict(exception.Message);
+            }
         }
 
         [Authorize]

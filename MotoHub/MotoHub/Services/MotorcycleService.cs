@@ -7,6 +7,7 @@ using MotoHub.Repositories;
 using MotoHub.Services.RabbitMQ;
 
 using ProjectY.Shared.Pagination;
+using ProjectY.Shared.Validation;
 
 namespace MotoHub.Services
 {
@@ -51,6 +52,8 @@ namespace MotoHub.Services
 
         public async Task UpdateMotorcycleAsync(string licensePlate, string newLicencePlate)
         {
+            licensePlate = BrazilianLicensePlateAttribute.Normalize(licensePlate);
+            newLicencePlate = BrazilianLicensePlateAttribute.Normalize(newLicencePlate);
             var existingMotorcycle = await _repository.GetByLicensePlateAsync(licensePlate);
             if (existingMotorcycle == null)
             {
@@ -60,6 +63,26 @@ namespace MotoHub.Services
             if (existingMotorcycle.RetiredAtUtc is not null)
             {
                 return;
+            }
+
+            if (string.Equals(licensePlate, newLicencePlate, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            if (_repository.LicensePlateExists(newLicencePlate))
+            {
+                throw new InvalidOperationException(
+                    $"Motorcycle with plate {newLicencePlate} already exists.");
+            }
+
+            var renameReserved = await _rentalOperationService.TryReserveMotorcycleRenameAsync(
+                licensePlate,
+                newLicencePlate);
+            if (!renameReserved)
+            {
+                throw new InvalidOperationException(
+                    $"Motorcycle plate {newLicencePlate} is already claimed by a rental or retirement.");
             }
 
             existingMotorcycle.LicensePlate = newLicencePlate;

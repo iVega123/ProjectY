@@ -30,8 +30,31 @@ public sealed class OutboxRelay<TContext> : BackgroundService
     {
         while (!stoppingToken.IsCancellationRequested)
         {
-            await DispatchOnceAsync(stoppingToken);
-            await Task.Delay(_options.PollInterval, stoppingToken);
+            try
+            {
+                await DispatchOnceAsync(stoppingToken);
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                break;
+            }
+            catch (Exception exception)
+            {
+                _logger.LogError(
+                    exception,
+                    "Outbox relay infrastructure failure in {ServiceName}; retrying in {RetryDelay}.",
+                    _options.ServiceName,
+                    _options.PollInterval);
+            }
+
+            try
+            {
+                await Task.Delay(_options.PollInterval, stoppingToken);
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                break;
+            }
         }
     }
 

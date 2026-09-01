@@ -34,14 +34,30 @@ public sealed class ActiveRentalApiTests : IAsyncLifetime
     public async Task InitializeAsync()
     {
         await _database.StartAsync();
-        var rentals = new MongoClient(_database.GetConnectionString())
-            .GetDatabase(DatabaseName)
-            .GetCollection<BsonDocument>("Rentals");
+        var database = new MongoClient(_database.GetConnectionString()).GetDatabase(DatabaseName);
+        var rentals = database.GetCollection<BsonDocument>("Rentals");
+        var legacyWinnerId = ObjectId.GenerateNewId();
         await rentals.InsertManyAsync(
         [
-            CreateLegacyOpenRental("legacy-rider-1", DateTime.UtcNow.Date.AddDays(-14)),
-            CreateLegacyOpenRental("legacy-rider-2", DateTime.UtcNow.Date.AddDays(-7))
+            CreateLegacyOpenRental(
+                legacyWinnerId,
+                " legacy-0001 ",
+                "legacy-rider-1",
+                DateTime.UtcNow.Date.AddDays(-14)),
+            CreateLegacyOpenRental(
+                ObjectId.GenerateNewId(),
+                "LEGACY-0001",
+                "legacy-rider-2",
+                DateTime.UtcNow.Date.AddDays(-7))
         ]);
+        await database.GetCollection<MotorcycleClaim>("MotorcycleClaims").InsertOneAsync(
+            new MotorcycleClaim
+            {
+                MotorcycleLicencePlate = " legacy-0001 ",
+                Kind = MotorcycleClaimKind.ActiveRental,
+                RentalId = legacyWinnerId.ToString(),
+                CreatedAtUtc = DateTime.UtcNow.AddDays(-14)
+            });
         _factory = new MongoRentalApiFactory(_database.GetConnectionString(), DatabaseName);
     }
 
@@ -100,6 +116,17 @@ public sealed class ActiveRentalApiTests : IAsyncLifetime
             legacyRentals[1].StatusMessage);
         Assert.All(legacyRentals, rental => Assert.Null(rental.EndDate));
 
+        var claims = new MongoClient(_database.GetConnectionString())
+            .GetDatabase(DatabaseName)
+            .GetCollection<MotorcycleClaim>("MotorcycleClaims");
+        var legacyClaim = await claims.Find(claim =>
+                claim.MotorcycleLicencePlate == "LEGACY-0001")
+            .SingleAsync();
+        Assert.Equal(MotorcycleClaimKind.ActiveRental, legacyClaim.Kind);
+        Assert.Equal(legacyRentals[0]._id!.Value.ToString(), legacyClaim.RentalId);
+        Assert.Equal(0, await claims.CountDocumentsAsync(claim =>
+            claim.MotorcycleLicencePlate == " legacy-0001 "));
+
         var indexes = await (await rentals.Indexes.ListAsync()).ToListAsync();
         Assert.Contains(indexes, index =>
             index["name"] == MongoRentalIndexInitializer.ActiveRentalIndexName &&
@@ -126,6 +153,7 @@ public sealed class ActiveRentalApiTests : IAsyncLifetime
             rental => rental.MotorcycleLicencePlate == request.MotocycleLicencePlate &&
                       rental.Status == RentalStatus.Active));
         Assert.Contains("LEGACY-0001", _factory!.MotorcycleService.HistoricalReferences);
+        Assert.DoesNotContain(" legacy-0001 ", _factory.MotorcycleService.HistoricalReferences);
     }
 
     [Fact]
@@ -144,6 +172,58 @@ public sealed class ActiveRentalApiTests : IAsyncLifetime
             .GetCollection<MotorcycleClaim>("MotorcycleClaims");
         Assert.Equal(0, await claims.CountDocumentsAsync(claim =>
             claim.MotorcycleLicencePlate == "ADMIN-ONLY-0001"));
+    }
+
+    [Fact]
+    [Trait("Category", "Integration")]
+    public async Task RiderCannotReserveInternalMotorcycleRename()
+    {
+        using var client = CreateAuthenticatedClient();
+
+        var response = await client.PostAsJsonAsync(
+            "/api/Rental/motorcycle-renames/reservations",
+            new MotorcycleRenameReservationDto
+            {
+                OldLicencePlate = "LEGACY-0001",
+                NewLicencePlate = "RENAMED-0001"
+            });
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+    }
+
+    [Fact]
+    [Trait("Category", "Integration")]
+    [Trait("Guarantee", "ADR-0009#database-serialized-rental-claim")]
+    public async Task RenameReservation_BlocksCompetingClaimsAndMovesTheActiveClaim()
+    {
+        using var client = CreateAuthenticatedClient();
+        _ = await client.GetAsync("/api/Rental/user?pageSize=1");
+        var context = new MongoDbContext(_database.GetConnectionString(), DatabaseName);
+        var repository = new RentalRepository(context);
+
+        Assert.True(await repository.TryReserveLicensePlateRenameAsync(
+            "LEGACY-0001",
+            "RENAMED-0001"));
+        Assert.Equal(
+            RentalOperations.Domain.MotorcycleClaimResult.ActiveRental,
+            await repository.TryClaimRetirementAsync("RENAMED-0001"));
+
+        await repository.UpdateLicensePlateForAllRentalsAsync(
+            "LEGACY-0001",
+            "RENAMED-0001");
+
+        var claims = context.Database.GetCollection<MotorcycleClaim>("MotorcycleClaims");
+        Assert.Equal(0, await claims.CountDocumentsAsync(claim =>
+            claim.MotorcycleLicencePlate == "LEGACY-0001"));
+        var movedClaim = await claims.Find(claim =>
+                claim.MotorcycleLicencePlate == "RENAMED-0001")
+            .SingleAsync();
+        Assert.Equal(MotorcycleClaimKind.ActiveRental, movedClaim.Kind);
+        Assert.Equal("LEGACY-0001", movedClaim.SourceLicencePlate);
+
+        var rentals = context.Database.GetCollection<Rental>("Rentals");
+        Assert.Equal(2, await rentals.CountDocumentsAsync(rental =>
+            rental.MotorcycleLicencePlate == "RENAMED-0001"));
     }
 
     [Fact]
@@ -307,9 +387,14 @@ public sealed class ActiveRentalApiTests : IAsyncLifetime
         return explanation["queryPlanner"]["winningPlan"].ToJson();
     }
 
-    private static BsonDocument CreateLegacyOpenRental(string userId, DateTime startDate) => new()
+    private static BsonDocument CreateLegacyOpenRental(
+        ObjectId id,
+        string licencePlate,
+        string userId,
+        DateTime startDate) => new()
     {
-        ["MotorcycleLicencePlate"] = "LEGACY-0001",
+        ["_id"] = id,
+        ["MotorcycleLicencePlate"] = licencePlate,
         ["userId"] = userId,
         ["startDate"] = startDate,
         ["endDate"] = DateTime.MinValue,
@@ -452,6 +537,11 @@ internal sealed class SynchronizingRentalRepository : IRentalRepository
 
     public Task UpdateLicensePlateForAllRentalsAsync(string oldLicensePlate, string newLicensePlate) =>
         _repository.UpdateLicensePlateForAllRentalsAsync(oldLicensePlate, newLicensePlate);
+
+    public Task<bool> TryReserveLicensePlateRenameAsync(
+        string oldLicensePlate,
+        string newLicensePlate) =>
+        _repository.TryReserveLicensePlateRenameAsync(oldLicensePlate, newLicensePlate);
 
     public Task DeleteRentalAsync(string id) => _repository.DeleteRentalAsync(id);
 
