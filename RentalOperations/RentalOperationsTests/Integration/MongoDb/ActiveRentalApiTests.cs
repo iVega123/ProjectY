@@ -56,6 +56,7 @@ public sealed class ActiveRentalApiTests : IAsyncLifetime
 
     [Fact]
     [Trait("Category", "Integration")]
+    [Trait("Guarantee", "ADR-0009#database-serialized-rental-claim")]
     public async Task ConcurrentCreateRequestsForSameMotorcycle_OneSucceedsAndOneReturnsConflict()
     {
         using var client = CreateAuthenticatedClient();

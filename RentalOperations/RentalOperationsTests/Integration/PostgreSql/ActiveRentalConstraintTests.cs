@@ -14,6 +14,7 @@ public sealed class ActiveRentalConstraintTests
 
     [Fact]
     [Trait("Category", "Integration")]
+    [Trait("Guarantee", "ADR-0009#database-serialized-rental-claim")]
     public async Task ConcurrentClaimsForSameMotorcycle_OneIsRejectedByDatabaseConstraint()
     {
         await _database.ResetAsync();

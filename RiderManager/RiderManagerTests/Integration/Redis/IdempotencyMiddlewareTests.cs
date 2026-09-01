@@ -26,6 +26,7 @@ public sealed class IdempotencyMiddlewareTests : IAsyncLifetime
 
     [Fact]
     [Trait("Category", "Integration")]
+    [Trait("Guarantee", "ADR-0009#http-idempotency")]
     public async Task ReplayingCreateWithSameKey_ReturnsOriginalResponseAndOneEffect()
     {
         var effects = 0;
@@ -51,6 +52,7 @@ public sealed class IdempotencyMiddlewareTests : IAsyncLifetime
 
     [Fact]
     [Trait("Category", "Integration")]
+    [Trait("Guarantee", "ADR-0009#http-idempotency")]
     public async Task ReusingKeyWithDifferentBody_ReturnsUnprocessableEntity()
     {
         var effects = 0;
@@ -71,6 +73,7 @@ public sealed class IdempotencyMiddlewareTests : IAsyncLifetime
 
     [Fact]
     [Trait("Category", "Integration")]
+    [Trait("Guarantee", "ADR-0009#http-idempotency")]
     public async Task ConcurrentRequestWithSameKey_ReturnsConflictUntilFirstCompletes()
     {
         var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -100,6 +103,7 @@ public sealed class IdempotencyMiddlewareTests : IAsyncLifetime
 
     [Fact]
     [Trait("Category", "Integration")]
+    [Trait("Guarantee", "ADR-0009#http-idempotency")]
     public async Task LongRunningRequest_RetainsClaimUntilItCompletes()
     {
         var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -129,6 +133,7 @@ public sealed class IdempotencyMiddlewareTests : IAsyncLifetime
 
     [Fact]
     [Trait("Category", "Integration")]
+    [Trait("Guarantee", "ADR-0009#http-idempotency")]
     public async Task DownstreamFailure_RetainsUnknownOutcomeWithoutRepeatingEffect()
     {
         var effects = 0;
@@ -150,6 +155,7 @@ public sealed class IdempotencyMiddlewareTests : IAsyncLifetime
 
     [Fact]
     [Trait("Category", "Integration")]
+    [Trait("Guarantee", "ADR-0009#http-idempotency")]
     public async Task ReusingKeyWithReorderedQueryValues_ReturnsUnprocessableEntity()
     {
         var effects = 0;

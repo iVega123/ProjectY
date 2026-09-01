@@ -30,6 +30,7 @@ public sealed class InboxProcessorTests : IAsyncLifetime
 
     [Fact]
     [Trait("Category", "Integration")]
+    [Trait("Guarantee", "ADR-0009#mongo-inbox-convergence")]
     public async Task SameMessageDeliveredTwice_ExecutesHandlerOnce()
     {
         var processor = new MongoInboxProcessor(_context, _options, TimeProvider.System);
@@ -47,6 +48,7 @@ public sealed class InboxProcessorTests : IAsyncLifetime
 
     [Fact]
     [Trait("Category", "Integration")]
+    [Trait("Guarantee", "ADR-0009#mongo-inbox-convergence")]
     public async Task CrashAfterIdempotentEffect_RedeliveryConvergesAndCompletesInbox()
     {
         var processor = new MongoInboxProcessor(_context, _options, TimeProvider.System);
@@ -89,6 +91,7 @@ public sealed class InboxProcessorTests : IAsyncLifetime
 
     [Fact]
     [Trait("Category", "Integration")]
+    [Trait("Guarantee", "ADR-0009#retention-boundaries")]
     public async Task Initializer_SchedulesRetentionWithTtlIndex()
     {
         var messages = _context.Database.GetCollection<InboxMessage>("InboxMessages");
