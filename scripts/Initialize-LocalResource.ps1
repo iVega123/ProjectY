@@ -71,13 +71,19 @@ Push-Location $repositoryRoot
 try {
     switch ($Resource) {
         'Cockroach' {
-            $migrations = @(Get-OrderedMigration -Directory 'deploy/db/cockroach' -Extension '.sql')
+            # O bootstrap de outro engine vive no mesmo diretorio (o schema e
+            # compartilhado de proposito) e nao deve ser aplicado aqui.
+            $migrations = @(
+                Get-OrderedMigration -Directory 'deploy/db/sql' -Extension '.sql' |
+                    Where-Object { $_.Name -notlike '*.postgres.sql' }
+            )
             foreach ($migration in $migrations) {
                 Write-Host "Applying Cockroach migration $($migration.Name)..."
+                # O bootstrap cria o banco, entao roda sem apontar para ele.
+                $database = if ($migration.Name -like '000_bootstrap.*') { '' } else { ' --database=projecty' }
                 Invoke-Compose -Arguments @(
                     'run', '--rm', '--no-deps', 'cockroach-init',
-                    '--insecure', '--host=cockroachdb:26257',
-                    "--file=/sql/$($migration.Name)"
+                    "cockroach sql --insecure --host=cockroachdb:26257$database --file=/sql/$($migration.Name)"
                 )
             }
         }

@@ -1,0 +1,118 @@
+# O ADR 0004 diz que o núcleo transacional é escolhido por protocolo, não por
+# fornecedor — e que trocar de store custa uma string de conexão.
+#
+# O engine local e o gerenciado são os dois CockroachDB, então nenhum deploy
+# jamais falharia se o schema escorregasse para o dialeto do Cockroach. Este
+# workflow existe para que essa afirmação não apodreça sem ninguém notar: o
+# mesmo arquivo é aplicado ao Cockroach e ao PostgreSQL, e nos dois o banco
+# precisa recusar o segundo aluguel ativo da mesma placa.
+
+name: Schema portability
+
+on:
+  pull_request:
+    paths:
+      - "deploy/db/sql/**"
+      - "deploy/db/tests/**"
+      - "scripts/verify-schema-portability.sh"
+      - ".github/workflows/schema-portability.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "deploy/db/sql/**"
+      - "deploy/db/tests/**"
+      - "scripts/verify-schema-portability.sh"
+      - ".github/workflows/schema-portability.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: schema-portability-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  cockroachdb:
+    name: Apply to CockroachDB
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Install psql
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends postgresql-client
+
+      - name: Start CockroachDB
+        run: |
+          set -euo pipefail
+          docker run -d --name crdb -p 26257:26257 \
+            cockroachdb/cockroach:v26.3.1 \
+            start-single-node --insecure --http-addr=0.0.0.0:8080
+
+      - name: Wait for CockroachDB
+        run: |
+          set -euo pipefail
+          for _ in $(seq 1 60); do
+            if psql "postgresql://root@127.0.0.1:26257/defaultdb?sslmode=disable" \
+                 -c 'SELECT 1' >/dev/null 2>&1; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "CockroachDB did not become ready in time." >&2
+          docker logs crdb >&2
+          exit 1
+
+      - name: Apply schema and assert the invariant
+        run: |
+          ./scripts/verify-schema-portability.sh \
+            "postgresql://root@127.0.0.1:26257/defaultdb?sslmode=disable" \
+            "postgresql://root@127.0.0.1:26257/projecty?sslmode=disable" \
+            deploy/db/sql/000_bootstrap.cockroach.sql
+
+  postgres:
+    name: Apply to PostgreSQL
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Install psql
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends postgresql-client
+
+      - name: Start PostgreSQL
+        run: |
+          set -euo pipefail
+          docker run -d --name pg -p 5432:5432 \
+            -e POSTGRES_PASSWORD=portability \
+            -e POSTGRES_DB=projecty \
+            postgres:18-alpine
+
+      - name: Wait for PostgreSQL
+        run: |
+          set -euo pipefail
+          for _ in $(seq 1 60); do
+            if psql "postgresql://postgres:portability@127.0.0.1:5432/projecty?sslmode=disable" \
+                 -c 'SELECT 1' >/dev/null 2>&1; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "PostgreSQL did not become ready in time." >&2
+          docker logs pg >&2
+          exit 1
+
+      - name: Apply schema and assert the invariant
+        run: |
+          ./scripts/verify-schema-portability.sh \
+            "postgresql://postgres:portability@127.0.0.1:5432/projecty?sslmode=disable" \
+            "postgresql://postgres:portability@127.0.0.1:5432/projecty?sslmode=disable" \
+            deploy/db/sql/000_bootstrap.postgres.sql

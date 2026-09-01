@@ -22,9 +22,15 @@ services:
       - "26080:8080"
 
   cockroach-init:
-    command: ["--insecure", "--host=cockroachdb:26257", "--file=/sql/001_init.sql"]
+    command:
+      - |
+        set -e
+        cockroach sql --insecure --host=cockroachdb:26257 \
+          --file=/sql/000_bootstrap.cockroach.sql
+        cockroach sql --insecure --host=cockroachdb:26257 --database=projecty \
+          --file=/sql/001_schema.sql
     volumes:
-      - ./db/cockroach:/sql:ro
+      - ./db/sql:/sql:ro
 
   redis:
     <<: *restart

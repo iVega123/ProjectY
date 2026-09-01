@@ -38,7 +38,9 @@ services:
 
   cockroach-init:
     image: cockroachdb/cockroach:v26.3.1
-    entrypoint: ["cockroach", "sql"]
+    # Duas invocações: o bootstrap cria o banco, o schema portátil preenche.
+    # Por isso o entrypoint é um shell e não `cockroach sql` direto.
+    entrypoint: ["/bin/sh", "-c"]
     networks: [projecty]
     depends_on:
       cockroachdb:
