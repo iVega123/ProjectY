@@ -118,8 +118,11 @@ Once downstream execution starts, an exception is retained as an `unknown`
 outcome rather than releasing the key. That chooses duplicate prevention over
 automatic retry when the database may already have committed. Redis uses AOF
 with `appendfsync always` in both Compose stacks so a claim is fsynced before it
-is acknowledged. This is not atomic with a service database: loss or corruption
-of the Redis volume can still remove request history.
+is acknowledged. The memory-limited self-hosted overlay uses `noeviction`:
+when Redis is full, protected writes fail closed instead of silently evicting
+idempotency history before its TTL. This trades write availability for the
+stated duplicate-prevention guarantee. Redis is still not atomic with a service
+database: loss or corruption of the Redis volume can remove request history.
 
 <a id="retention-boundaries"></a>
 ## Retention boundaries
