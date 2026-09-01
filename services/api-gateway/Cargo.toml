@@ -1,0 +1,20 @@
+[package]
+name = "api-gateway"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.98"
+
+[dependencies]
+axum = "0.8.9"
+http = "1.4.0"
+reqwest = { version = "0.13.4", default-features = false, features = ["http2", "rustls", "stream"] }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"
+tokio = { version = "1.53.1", features = ["macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
+tracing = "0.1.44"
+tracing-appender = "0.2.4"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter", "json"] }
+url = "2.5.8"
+
+[dev-dependencies]
+tower = { version = "0.5.3", features = ["util"] }

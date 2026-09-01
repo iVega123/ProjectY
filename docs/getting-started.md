@@ -1,9 +1,10 @@
 # Running the audited baseline locally
 
 This guide starts the original four-service system that was reviewed in the
-[architecture and security audit](AUDITORIA-ARQUITETURA-SEGURANCA.md). It does
-not start the modernization topology under `deploy/`; that file is currently a
-design scaffold and references services that have not been implemented yet.
+[architecture and security audit](AUDITORIA-ARQUITETURA-SEGURANCA.md), with the
+Rust gateway in front as the first strangler-migration component. The remaining
+topology under `deploy/` is still a design scaffold for services that have not
+been implemented yet.
 
 ## Safety warning
 
@@ -39,6 +40,7 @@ starting.
 
 | Application service | Required host ports |
 |---|---|
+| API Gateway | `8090` |
 | Auth Gate | `8080`, `8181` |
 | Rider Manager | `8000`, `8001` |
 | MotoHub | `8100`, `8101` |
@@ -91,6 +93,12 @@ Then start the stack:
 docker compose up --build
 ```
 
+Tilt uses the same Compose model and adds live update for the Rust gateway:
+
+```bash
+tilt up
+```
+
 PostgreSQL must become healthy before the one-shot AuthGate, MotoHub, and
 RiderManager migration containers run. Each application starts only after its
 migration container exits successfully. See
@@ -104,6 +112,7 @@ depends on the network connection and Docker cache.
 
 | Service | Local URL |
 |---|---|
+| API Gateway | <http://localhost:8090> |
 | Auth Gate | <http://localhost:8080> |
 | Rider Manager | <http://localhost:8000> |
 | MotoHub | <http://localhost:8100> |
@@ -116,6 +125,13 @@ Swagger explicitly. Both conditions are required: setting `Swagger:Enabled`
 alone never exposes Swagger from a `Production` process. Set
 `SWAGGER_ENABLED=false` in `.env` to disable Swagger in the self-hosted
 development overlay without editing its Compose files.
+
+Application traffic can now enter through the gateway. Existing service ports
+remain published temporarily so the migration can proceed without modifying
+the domain services in task #57; a later epic task removes direct trust and
+centralizes identity verification at the edge. The gateway routes
+`/api/auth/**`, `/api/rider/**`, `/api/motorcycle/**`, and `/api/rental/**` to
+their current owners.
 
 Only the HTTP endpoints above are documented as usable. The compose file also
 publishes ports that older documentation described as HTTPS, but it configures
