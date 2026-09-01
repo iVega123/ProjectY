@@ -106,7 +106,7 @@ public sealed class DbContextConstructionTests
     public void Constructor_DoesNotAccessDatabase()
     {
         var options = new DbContextOptionsBuilder<ApplicationDbContext>()
-            .UseNpgsql("Host=database.invalid;Timeout=1;Database=rider_manager;Username=projecty")
+            .UseNpgsql("Host=database.invalid;Timeout=1;Database=RiderManagerDB;Username=projecty")
             .Options;
 
         using var context = new ApplicationDbContext(options);

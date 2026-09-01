@@ -16,6 +16,7 @@ using ProjectY.Shared.Hosting;
 using Serilog.Sinks.Elasticsearch;
 using ProjectY.Shared.Messaging;
 using ProjectY.Shared.Idempotency;
+using AuthGate.Validators;
 
 if (await HealthProbeCommand.TryRunAsync(args))
 {
@@ -88,6 +89,7 @@ builder.Services.AddIdentity<ApplicationUser, IdentityRole>(options =>
     options.User.RequireUniqueEmail = true;
     options.SignIn.RequireConfirmedEmail = false;
 })
+.AddUserValidator<RiderUserDataAnnotationValidator>()
 .AddEntityFrameworkStores<ApplicationDbContext>()
 .AddDefaultTokenProviders();
 

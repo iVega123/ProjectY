@@ -69,7 +69,7 @@ namespace RiderManager.Services.MinioStorageService
             }
         }
 
-        public async Task<UploadFileEntity> GetPresignedUrlAsync(string objectName, string riderId, int expirationInSeconds = 86400)
+        public async Task<UploadFileEntity> GetPresignedUrlAsync(string objectName, string userId, int expirationInSeconds = 86400)
         {
             var bucketKey = _configuration.GetSection("MinIO").Get<MinIOOptions>()?.BucketName ?? throw new InvalidOperationException("bucketKey is not set in the configuration.");
             try
@@ -80,7 +80,13 @@ namespace RiderManager.Services.MinioStorageService
                     .WithExpiry(expirationInSeconds);
 
                 string url = await _minioClient.PresignedGetObjectAsync(args);
-                return new UploadFileEntity() { expiryDate = DateTime.UtcNow.AddSeconds(expirationInSeconds), fileName = objectName, fileUrl = url, riderId = riderId };
+                return new UploadFileEntity
+                {
+                    ExpiryDate = DateTime.UtcNow.AddSeconds(expirationInSeconds),
+                    FileName = objectName,
+                    FileUrl = url,
+                    UserId = userId
+                };
             }
             catch (MinioException e)
             {

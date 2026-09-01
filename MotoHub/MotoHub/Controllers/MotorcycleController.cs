@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 using MotoHub.DTOs;
 using MotoHub.Filters;
 using MotoHub.Services;
+using ProjectY.Shared.Validation;
 
 namespace MotoHub.Controllers
 {
@@ -55,6 +56,8 @@ namespace MotoHub.Controllers
         [HttpPost]
         public IActionResult Create([FromBody] MotorcycleDTO motorcycle)
         {
+            motorcycle.LicensePlate = BrazilianLicensePlateAttribute.Normalize(motorcycle.LicensePlate);
+            motorcycle.Model = motorcycle.Model?.Trim();
             _logger.LogInformation("Creating motorcycle with license plate {LicensePlate}.", motorcycle.LicensePlate);
             if (_motorcycleService.LicensePlateExists(motorcycle.LicensePlate))
             {

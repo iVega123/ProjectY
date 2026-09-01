@@ -10,6 +10,7 @@ using AuthGate.Services;
 using AuthGate.Entities;
 using AuthGate.Data;
 using Microsoft.EntityFrameworkCore;
+using ProjectY.Shared.Validation;
 
 namespace AuthGate.Controllers
 {
@@ -74,7 +75,7 @@ namespace AuthGate.Controllers
                 UserName = model.Email,
                 Name = model.Name,
                 Email = model.Email,
-                CNPJ = model.CNPJ,
+                CNPJ = BrazilianCnpj.Normalize(model.CNPJ),
                 DateOfBirth = model.DateOfBirth,
                 CNHNumber = model.CNHNumber,
                 CNHType = parsedCNHType
@@ -208,7 +209,7 @@ namespace AuthGate.Controllers
                 Name = model.Name,
                 UserId = id,
                 CNHNumber = model.CNHNumber,
-                CNPJ = model.CNPJ,
+                CNPJ = BrazilianCnpj.Normalize(model.CNPJ),
                 CNHType = model.CNHType,
                 DateOfBirth = model.DateOfBirth,
                 Email = model.Email,

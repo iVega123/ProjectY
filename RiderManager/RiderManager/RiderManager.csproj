@@ -38,6 +38,7 @@
     <Compile Include="..\..\Shared\Messaging\QueueMessageAuthenticator.cs" Link="Shared\Messaging\QueueMessageAuthenticator.cs" />
     <Compile Include="..\..\Shared\Idempotency\*.cs" Link="Shared\Idempotency\%(Filename)%(Extension)" />
     <Compile Include="..\..\Shared\Pagination\*.cs" Link="Shared\Pagination\%(Filename)%(Extension)" />
+    <Compile Include="..\..\Shared\Validation\*.cs" Link="Shared\Validation\%(Filename)%(Extension)" />
   </ItemGroup>
 
 </Project>
