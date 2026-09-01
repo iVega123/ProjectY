@@ -4,6 +4,8 @@ using RentalOperations.Data;
 using RentalOperations.Domain;
 using RentalOperations.Model;
 
+using ProjectY.Shared.Pagination;
+
 namespace RentalOperations.Repository
 {
     public class RentalRepository : IRentalRepository
@@ -38,25 +40,66 @@ namespace RentalOperations.Repository
             return await _rentals.Find(r => r._id == objectId).FirstOrDefaultAsync();
         }
 
-        public async Task<List<Rental>> GetRentalsByUserId(string userId)
+        public async Task<CursorPage<Rental>> GetRentalsByUserId(
+            string userId,
+            string? cursor,
+            int? pageSize)
         {
-            return await _rentals.Find(r => r.UserId == userId).ToListAsync();
+            var size = CursorPagination.NormalizePageSize(pageSize);
+            var cursorValue = CursorPagination.Decode(cursor);
+            var filter = Builders<Rental>.Filter.Eq(rental => rental.UserId, userId);
+            if (cursorValue is not null)
+            {
+                if (!ObjectId.TryParse(cursorValue, out var afterId))
+                {
+                    throw new FormatException("The pagination cursor is invalid.");
+                }
+
+                filter &= Builders<Rental>.Filter.Gt(rental => rental._id, afterId);
+            }
+
+            var fetched = await _rentals.Find(filter)
+                .SortBy(rental => rental._id)
+                .Limit(size + 1)
+                .ToListAsync();
+            return CursorPagination.CreatePage(
+                fetched,
+                size,
+                rental => rental._id!.Value.ToString());
         }
 
-        public async Task<List<Rental>> GetRentalsByMotorcycleIdAsync(string licencePlate)
+        public Task<bool> HasOverlappingRentalAsync(
+            string licencePlate,
+            DateTime startDate,
+            DateTime endDate)
         {
-            return await _rentals.Find(r => r.MotorcycleLicencePlate == licencePlate).ToListAsync();
+            var schedulableStatuses = Builders<Rental>.Filter.In(
+                rental => rental.Status,
+                [RentalStatus.Active, RentalStatus.Completed]);
+            var existingPeriodEndsAfterRequestedStart = Builders<Rental>.Filter.Or(
+                Builders<Rental>.Filter.And(
+                    Builders<Rental>.Filter.Ne(rental => rental.EndDate, null),
+                    Builders<Rental>.Filter.Gt(rental => rental.EndDate, startDate)),
+                Builders<Rental>.Filter.And(
+                    Builders<Rental>.Filter.Eq(rental => rental.EndDate, null),
+                    Builders<Rental>.Filter.Gt(rental => rental.PredictedEndDate, startDate)));
+            var filter = Builders<Rental>.Filter.And(
+                Builders<Rental>.Filter.Eq(rental => rental.MotorcycleLicencePlate, licencePlate),
+                schedulableStatuses,
+                Builders<Rental>.Filter.Lt(rental => rental.StartDate, endDate),
+                existingPeriodEndsAfterRequestedStart);
+            return _rentals.Find(filter).Limit(1).AnyAsync();
         }
 
         public async Task<bool> IsMotorcycleCurrentlyRentedAsync(string licencePlate)
         {
             var today = DateTime.UtcNow;
-            var rentals = await _rentals.Find(r => r.MotorcycleLicencePlate == licencePlate).ToListAsync();
-
-            return rentals.Any(r =>
-                r.Status == RentalStatus.Active &&
-                r.StartDate <= today &&
-                r.PredictedEndDate >= today);
+            var filter = Builders<Rental>.Filter.And(
+                Builders<Rental>.Filter.Eq(rental => rental.MotorcycleLicencePlate, licencePlate),
+                Builders<Rental>.Filter.Eq(rental => rental.Status, RentalStatus.Active),
+                Builders<Rental>.Filter.Lte(rental => rental.StartDate, today),
+                Builders<Rental>.Filter.Gte(rental => rental.PredictedEndDate, today));
+            return await _rentals.Find(filter).Limit(1).AnyAsync();
         }
 
         public async Task UpdateRentalAsync(Rental rental)

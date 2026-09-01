@@ -9,6 +9,9 @@ namespace RentalOperations.Data;
 public sealed class MongoRentalIndexInitializer : IHostedService
 {
     public const string ActiveRentalIndexName = "ux_rentals_one_active_per_motorcycle";
+    public const string UserRentalPageIndexName = "ix_rentals_user_cursor";
+    public const string MotorcycleAvailabilityIndexName = "ix_rentals_motorcycle_availability";
+    public const string MotorcycleScheduleIndexName = "ix_rentals_motorcycle_schedule";
     public const string LegacyDuplicateQuarantineMessage =
         "Quarantined during active-rental index migration: duplicate open rental; review required.";
     public const string RetiredMotorcycleQuarantineMessage =
@@ -40,7 +43,36 @@ public sealed class MongoRentalIndexInitializer : IHostedService
                     RentalStatus.Active)
             });
 
-        await rentals.Indexes.CreateOneAsync(index, cancellationToken: cancellationToken);
+        var userPageIndex = new CreateIndexModel<Rental>(
+            Builders<Rental>.IndexKeys
+                .Ascending(rental => rental.UserId)
+                .Ascending(rental => rental._id),
+            new CreateIndexOptions { Name = UserRentalPageIndexName });
+        var availabilityIndex = new CreateIndexModel<Rental>(
+            Builders<Rental>.IndexKeys
+                .Ascending(rental => rental.MotorcycleLicencePlate)
+                .Ascending(rental => rental.Status)
+                .Ascending(rental => rental.StartDate)
+                .Ascending(rental => rental.PredictedEndDate),
+            new CreateIndexOptions<Rental>
+            {
+                Name = MotorcycleAvailabilityIndexName,
+                PartialFilterExpression = Builders<Rental>.Filter.Eq(
+                    rental => rental.Status,
+                    RentalStatus.Active)
+            });
+        var scheduleIndex = new CreateIndexModel<Rental>(
+            Builders<Rental>.IndexKeys
+                .Ascending(rental => rental.MotorcycleLicencePlate)
+                .Ascending(rental => rental.Status)
+                .Ascending(rental => rental.StartDate)
+                .Ascending(rental => rental.EndDate)
+                .Ascending(rental => rental.PredictedEndDate),
+            new CreateIndexOptions { Name = MotorcycleScheduleIndexName });
+
+        await rentals.Indexes.CreateManyAsync(
+            [index, userPageIndex, availabilityIndex, scheduleIndex],
+            cancellationToken);
         await ReconcileMotorcycleClaimsAsync(cancellationToken);
         await EnsureHistoricalMotorcycleReferencesAsync(cancellationToken);
     }

@@ -5,6 +5,8 @@ using RentalOperations.DTOs;
 using RentalOperations.Model;
 using RentalOperations.Repository;
 
+using ProjectY.Shared.Pagination;
+
 namespace RentalOperations.Services
 {
     public class RentalService : IRentalService
@@ -34,11 +36,10 @@ namespace RentalOperations.Services
                 throw new InvalidOperationException("The Rent time must at least one day");
             }
 
-            var existingRentals = await _repository.GetRentalsByMotorcycleIdAsync(createDto.MotocycleLicencePlate);
-            if (existingRentals.Any(rent => RentalPeriod.Overlaps(
-                rent,
+            if (await _repository.HasOverlappingRentalAsync(
+                createDto.MotocycleLicencePlate,
                 createDto.StartDate,
-                createDto.PredictedEndDate)))
+                createDto.PredictedEndDate))
             {
                 throw new ActiveRentalConflictException(createDto.MotocycleLicencePlate);
             }
@@ -149,11 +150,15 @@ namespace RentalOperations.Services
             return response;
         }
 
-        public async Task<List<ResponseRentalDTO>> GetRentalsByUserIdAsync(string userId)
+        public async Task<CursorPage<ResponseRentalDTO>> GetRentalsByUserIdAsync(
+            string userId,
+            string? cursor,
+            int? pageSize)
         {
-            var rentals = await _repository.GetRentalsByUserId(userId);
-            var rentalDtos = _mapper.Map<List<ResponseRentalDTO>>(rentals);
-            return rentalDtos;
+            var page = await _repository.GetRentalsByUserId(userId, cursor, pageSize);
+            return new CursorPage<ResponseRentalDTO>(
+                _mapper.Map<IReadOnlyList<ResponseRentalDTO>>(page.Items),
+                page.NextCursor);
         }
 
         public async Task UpdateMotorcycleLicensePlateAsync(string oldLicensePlate, string newLicensePlate)

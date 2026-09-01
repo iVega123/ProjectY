@@ -2,6 +2,7 @@
 using RiderManager.Services.MinioStorageService;
 using RiderManager.Services.PreSignedService;
 using RiderManager.Services.RiderServices;
+using ProjectY.Shared.Pagination;
 
 namespace RiderManager.Managers
 {
@@ -62,31 +63,11 @@ namespace RiderManager.Managers
             return;
         }
 
-        public async Task<IEnumerable<RiderResponseDTO>> GetAllRidersAsync()
+        public Task<CursorPage<RiderResponseDTO>> GetRidersAsync(string? cursor, int? pageSize)
         {
-            var riders = await _riderService.GetAllRidersAsync();
-            var riderDtos = new List<RiderResponseDTO>();
-
-            foreach (var rider in riders)
-            {
-                var (isExpired, uploadFile) = await _preSignedUrlService.GetOrCreatePresignedUrlAsync(rider.Id);
-                if (uploadFile != null)
-                {
-                    if (isExpired)
-                    {
-                        var link = await _minioFileStorageService.GetPresignedUrlAsync(uploadFile.fileName, uploadFile.riderId);
-                        await _preSignedUrlService.StorePresignedUrlAsync(link);
-                    }
-                    rider.CNHUrl = uploadFile.fileUrl;
-                    riderDtos.Add(rider);
-                }
-                else
-                {
-                    riderDtos.Add(rider);
-                }
-            }
-
-            return riderDtos;
+            // Listing is a read-only database operation. URL refresh remains on the
+            // single-rider path so a page never performs one object-storage call per row.
+            return _riderService.GetRidersAsync(cursor, pageSize);
         }
 
         public async Task<RiderResponseDTO> GetRiderByUserIdAsync(string userId)

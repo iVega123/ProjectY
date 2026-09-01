@@ -1,11 +1,13 @@
 ﻿using MotoHub.DTOs;
 using MotoHub.Entities;
 
+using ProjectY.Shared.Pagination;
+
 namespace MotoHub.Services
 {
     public interface IMotorcycleService
     {
-        IEnumerable<MotorcycleDTO> GetAllMotorcycles();
+        Task<CursorPage<MotorcycleDTO>> GetMotorcyclesAsync(string? cursor, int? pageSize);
         Task<MotorcycleDTO?> GetMotorcycleByLicensePlateAsync(string licensePlate);
         void CreateMotorcycle(MotorcycleDTO motorcycleDto);
         Task UpdateMotorcycleAsync(string licensePlate, string newLicencePlate);

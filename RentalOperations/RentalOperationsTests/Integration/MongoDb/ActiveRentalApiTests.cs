@@ -14,6 +14,7 @@ using RentalOperations.Data;
 using RentalOperations.DTOs;
 using RentalOperations.Model;
 using RentalOperations.Repository;
+using ProjectY.Shared.Pagination;
 using System.IdentityModel.Tokens.Jwt;
 using System.Net;
 using System.Net.Http.Headers;
@@ -128,6 +129,7 @@ public sealed class ActiveRentalApiTests : IAsyncLifetime
     }
 
     [Fact]
+    [Trait("Category", "Integration")]
     public async Task RiderCannotCreatePermanentMotorcycleRetirementClaim()
     {
         using var client = CreateAuthenticatedClient();
@@ -144,6 +146,129 @@ public sealed class ActiveRentalApiTests : IAsyncLifetime
             claim.MotorcycleLicencePlate == "ADMIN-ONLY-0001"));
     }
 
+    [Fact]
+    [Trait("Category", "Integration")]
+    public async Task UserListing_IsCursorPagedAndEnforcesTheServerMaximum()
+    {
+        using var client = CreateAuthenticatedClient();
+        _ = await client.GetAsync("/api/Rental/user?pageSize=1");
+        var rentals = new MongoClient(_database.GetConnectionString())
+            .GetDatabase(DatabaseName)
+            .GetCollection<Rental>("Rentals");
+        await rentals.InsertManyAsync(Enumerable.Range(0, 105).Select(index => new Rental
+        {
+            MotorcycleLicencePlate = $"PAGE-{index:D4}",
+            UserId = "rider-1",
+            StartDate = DateTime.UtcNow.Date.AddDays(-14),
+            EndDate = DateTime.UtcNow.Date.AddDays(-7),
+            PredictedEndDate = DateTime.UtcNow.Date.AddDays(-7),
+            InitCost = 210m,
+            Status = RentalStatus.Completed
+        }));
+
+        var first = await client.GetFromJsonAsync<CursorPage<ResponseRentalDTO>>(
+            "/api/Rental/user?pageSize=1000");
+        Assert.NotNull(first);
+        Assert.Equal(100, first.Items.Count);
+        Assert.NotNull(first.NextCursor);
+
+        var second = await client.GetFromJsonAsync<CursorPage<ResponseRentalDTO>>(
+            $"/api/Rental/user?pageSize=1000&cursor={Uri.EscapeDataString(first.NextCursor)}");
+        Assert.NotNull(second);
+        Assert.Equal(5, second.Items.Count);
+        Assert.Null(second.NextCursor);
+        Assert.Empty(first.Items.Select(item => item.RentalId)
+            .Intersect(second.Items.Select(item => item.RentalId)));
+    }
+
+    [Fact]
+    [Trait("Category", "Integration")]
+    public async Task ListingAndAvailabilityQueries_HaveIndexBackedPlans()
+    {
+        using var client = CreateAuthenticatedClient();
+        _ = await client.GetAsync("/api/Rental/user?pageSize=1");
+        var database = new MongoClient(_database.GetConnectionString()).GetDatabase(DatabaseName);
+
+        var userPlan = await ExplainFindAsync(database, new BsonDocument
+        {
+            ["userId"] = "rider-1",
+            ["_id"] = new BsonDocument("$gt", ObjectId.Empty)
+        }, new BsonDocument("_id", 1));
+        Assert.Contains(MongoRentalIndexInitializer.UserRentalPageIndexName, userPlan);
+        Assert.DoesNotContain("COLLSCAN", userPlan);
+
+        var now = DateTime.UtcNow;
+        var availabilityPlan = await ExplainFindAsync(database, new BsonDocument
+        {
+            ["MotorcycleLicencePlate"] = "LEGACY-0001",
+            ["status"] = RentalStatus.Active.ToString(),
+            ["startDate"] = new BsonDocument("$lte", now),
+            ["predictedEndDate"] = new BsonDocument("$gte", now)
+        });
+        Assert.Contains("IXSCAN", availabilityPlan);
+        Assert.DoesNotContain("COLLSCAN", availabilityPlan);
+
+        var schedulePlan = await ExplainFindAsync(database, new BsonDocument
+        {
+            ["MotorcycleLicencePlate"] = "LEGACY-0001",
+            ["status"] = new BsonDocument("$in", new BsonArray
+            {
+                RentalStatus.Active.ToString(),
+                RentalStatus.Completed.ToString()
+            }),
+            ["startDate"] = new BsonDocument("$lt", now.AddDays(1)),
+            ["$or"] = new BsonArray
+            {
+                new BsonDocument
+                {
+                    ["endDate"] = new BsonDocument
+                    {
+                        ["$ne"] = BsonNull.Value,
+                        ["$gt"] = now.AddDays(-1)
+                    }
+                },
+                new BsonDocument
+                {
+                    ["endDate"] = BsonNull.Value,
+                    ["predictedEndDate"] = new BsonDocument("$gt", now.AddDays(-1))
+                }
+            }
+        });
+        Assert.Contains(MongoRentalIndexInitializer.MotorcycleScheduleIndexName, schedulePlan);
+        Assert.DoesNotContain("COLLSCAN", schedulePlan);
+    }
+
+    [Fact]
+    [Trait("Category", "Integration")]
+    public async Task OverlapQuery_RejectsPeriodsInsideCompletedRentalHistory()
+    {
+        using var client = CreateAuthenticatedClient();
+        _ = await client.GetAsync("/api/Rental/user?pageSize=1");
+        var context = new MongoDbContext(_database.GetConnectionString(), DatabaseName);
+        var repository = new RentalRepository(context);
+        var existingStart = new DateTime(2026, 8, 1, 0, 0, 0, DateTimeKind.Utc);
+        var existingEnd = existingStart.AddDays(7);
+        await repository.CreateRentalAsync(new Rental
+        {
+            MotorcycleLicencePlate = "HISTORY-0001",
+            UserId = "rider-history",
+            StartDate = existingStart,
+            EndDate = existingEnd,
+            PredictedEndDate = existingEnd,
+            InitCost = 210m,
+            Status = RentalStatus.Completed
+        });
+
+        Assert.True(await repository.HasOverlappingRentalAsync(
+            "HISTORY-0001",
+            existingStart.AddDays(1),
+            existingEnd.AddDays(-1)));
+        Assert.False(await repository.HasOverlappingRentalAsync(
+            "HISTORY-0001",
+            existingEnd,
+            existingEnd.AddDays(7)));
+    }
+
     private HttpClient CreateAuthenticatedClient()
     {
         var factory = _factory ?? throw new InvalidOperationException("The test database has not started.");
@@ -156,6 +281,30 @@ public sealed class ActiveRentalApiTests : IAsyncLifetime
             "Bearer",
             CreateToken("Rider", "rider-1"));
         return client;
+    }
+
+    private static async Task<string> ExplainFindAsync(
+        IMongoDatabase database,
+        BsonDocument filter,
+        BsonDocument? sort = null)
+    {
+        var find = new BsonDocument
+        {
+            ["find"] = "Rentals",
+            ["filter"] = filter,
+            ["limit"] = 101
+        };
+        if (sort is not null)
+        {
+            find["sort"] = sort;
+        }
+
+        var explanation = await database.RunCommandAsync<BsonDocument>(new BsonDocument
+        {
+            ["explain"] = find,
+            ["verbosity"] = "queryPlanner"
+        });
+        return explanation["queryPlanner"]["winningPlan"].ToJson();
     }
 
     private static BsonDocument CreateLegacyOpenRental(string userId, DateTime startDate) => new()
@@ -285,11 +434,16 @@ internal sealed class SynchronizingRentalRepository : IRentalRepository
 
     public Task<Rental> GetRentalByIdAsync(string id) => _repository.GetRentalByIdAsync(id);
 
-    public Task<List<Rental>> GetRentalsByUserId(string userId) =>
-        _repository.GetRentalsByUserId(userId);
+    public Task<CursorPage<Rental>> GetRentalsByUserId(
+        string userId,
+        string? cursor,
+        int? pageSize) => _repository.GetRentalsByUserId(userId, cursor, pageSize);
 
-    public Task<List<Rental>> GetRentalsByMotorcycleIdAsync(string licencePlate) =>
-        _repository.GetRentalsByMotorcycleIdAsync(licencePlate);
+    public Task<bool> HasOverlappingRentalAsync(
+        string licencePlate,
+        DateTime startDate,
+        DateTime endDate) =>
+        _repository.HasOverlappingRentalAsync(licencePlate, startDate, endDate);
 
     public Task<bool> IsMotorcycleCurrentlyRentedAsync(string licencePlate) =>
         _repository.IsMotorcycleCurrentlyRentedAsync(licencePlate);

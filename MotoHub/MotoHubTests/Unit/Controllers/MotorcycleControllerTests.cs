@@ -6,6 +6,7 @@ using MotoHub.Controllers;
 using MotoHub.DTOs;
 using MotoHub.Entities;
 using MotoHub.Services;
+using ProjectY.Shared.Pagination;
 using System.Security.Claims;
 
 namespace MotoHubTests.Unit.Controllers
@@ -13,16 +14,19 @@ namespace MotoHubTests.Unit.Controllers
     public class MotorcyclesControllerTests
     {
         [Fact]
-        public void GetAll_ReturnsOkObjectResult()
+        public async Task GetAll_ReturnsOkObjectResult()
         {
             // Arrange
             var motorcycleServiceMock = new Mock<IMotorcycleService>();
             var mockLogger = new Mock<ILogger<MotorcyclesController>>();
-            motorcycleServiceMock.Setup(service => service.GetAllMotorcycles()).Returns(new[] { new MotorcycleDTO() { LicensePlate = "test-584" } });
+            motorcycleServiceMock.Setup(service => service.GetMotorcyclesAsync(null, null))
+                .ReturnsAsync(new CursorPage<MotorcycleDTO>(
+                    [new MotorcycleDTO { LicensePlate = "test-584" }],
+                    null));
             var controller = new MotorcyclesController(motorcycleServiceMock.Object, mockLogger.Object);
 
             // Act
-            var result = controller.GetAll();
+            var result = await controller.GetAll(null, null);
 
             // Assert
             Assert.IsType<OkObjectResult>(result);
@@ -154,7 +158,7 @@ namespace MotoHubTests.Unit.Controllers
         }
 
         [Fact]
-        public void GetAll_AuthorizedUser_ReturnsOkResult()
+        public async Task GetAll_AuthorizedUser_ReturnsOkResult()
         {
             // Arrange
             var controller = new MotorcyclesController(Mock.Of<IMotorcycleService>(), Mock.Of<ILogger<MotorcyclesController>>());
@@ -172,7 +176,7 @@ namespace MotoHubTests.Unit.Controllers
             };
 
             // Act
-            var result = controller.GetAll();
+            var result = await controller.GetAll(null, null);
 
             // Assert
             Assert.IsType<OkObjectResult>(result);

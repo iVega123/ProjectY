@@ -2,6 +2,8 @@
 using MotoHub.Data;
 using MotoHub.Models;
 
+using ProjectY.Shared.Pagination;
+
 namespace MotoHub.Repositories
 {
     public class MotorcycleRepository : IMotorcycleRepository
@@ -13,11 +15,24 @@ namespace MotoHub.Repositories
             _context = context;
         }
 
-        public IEnumerable<Motorcycle> GetAll()
+        public async Task<CursorPage<Motorcycle>> GetPageAsync(string? cursor, int? pageSize)
         {
-            return _context.Motorcycles
+            var size = CursorPagination.NormalizePageSize(pageSize);
+            var afterId = CursorPagination.Decode(cursor);
+            var source = afterId is null
+                ? _context.Motorcycles
+                : _context.Motorcycles.FromSqlInterpolated($$"""
+                    SELECT * FROM "Motorcycles"
+                    WHERE "RetiredAtUtc" IS NULL AND "Id" > {{afterId}}
+                    """);
+            var query = source
+                .AsNoTracking()
                 .Where(motorcycle => motorcycle.RetiredAtUtc == null)
-                .ToList();
+                .OrderBy(motorcycle => motorcycle.Id)
+                .AsQueryable();
+
+            var fetched = await query.Take(size + 1).ToListAsync();
+            return CursorPagination.CreatePage(fetched, size, motorcycle => motorcycle.Id);
         }
 
         public Motorcycle? GetById(string id)
