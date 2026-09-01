@@ -21,6 +21,10 @@ is what separates a decision from a preference.
 | [0008](0008-single-trust-boundary.md) | One trust boundary, at the edge | Why domain services stop parsing tokens, and what is traded for it |
 | [0009](0009-exactly-once-effect.md) | Exactly-once effect is layered and bounded | Which layer provides each guarantee, how it fails, and what is deliberately not promised |
 | [0010](0010-motorcycle-retirement-protocol.md) | Serialize motorcycle retirement with rental claims | How retirement races rentals and how legacy orphan plates remain resolvable |
+| [0014](0014-read-aggregation-at-the-bff.md) | Read aggregation belongs to the BFF | Why there is no GraphQL, and what would bring it back |
+| [0015](0015-event-contracts-and-carried-state.md) | Event contracts: keys, compatibility and carried state | Why the partition key is never the licence plate, and why compatibility is FULL |
+| [0016](0016-risk-scoring-off-the-request-path.md) | Risk scoring stays off the request path | Why a circuit breaker in front of fraud scoring is an attack surface |
+| [0017](0017-session-lifetime-and-revocation.md) | Session lifetime, revocation and refresh tokens | Why revocation takes five minutes, and why Redis is never the source of truth |
 
 ## Reading order
 

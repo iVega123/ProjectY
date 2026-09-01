@@ -53,7 +53,7 @@ apply "$APP_DSN" "$TEST_DIR/double_booking_release.sql"
 
 echo "==> limpando"
 psql -v ON_ERROR_STOP=1 --quiet "$APP_DSN" \
-     -c "DELETE FROM rentals WHERE license_plate = 'CI0T35T';" \
+     -c "DELETE FROM rentals WHERE motorcycle_id IN (SELECT id FROM motorcycles WHERE license_plate = 'CI0T35T');" \
      -c "DELETE FROM motorcycles WHERE license_plate = 'CI0T35T';" >/dev/null
 
 echo "OK"

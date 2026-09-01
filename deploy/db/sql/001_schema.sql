@@ -22,10 +22,17 @@ CREATE TABLE IF NOT EXISTS motorcycles (
     UNIQUE (license_plate)
 );
 
+-- A referência é o id da moto, não a placa. A placa é identificador de
+-- negócio e já foi reescrita neste sistema uma vez (a migração
+-- CanonicalizeLegacyMotorcyclePlates, no MotoHub). Chave de negócio mutável
+-- não serve como identidade: quebraria a integridade referencial na correção,
+-- e quebraria a ordenação no Kafka, onde esta mesma coluna é a partition key.
+-- A placa continua acessível por junção, e uma correção de placa passa a
+-- aparecer corretamente no histórico em vez de bifurcá-lo.
 CREATE TABLE IF NOT EXISTS rentals (
     id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     rider_id          TEXT NOT NULL,
-    license_plate     TEXT NOT NULL REFERENCES motorcycles (license_plate),
+    motorcycle_id     UUID NOT NULL REFERENCES motorcycles (id),
     starts_at         TIMESTAMPTZ NOT NULL,
     predicted_ends_at TIMESTAMPTZ NOT NULL,
     ends_at           TIMESTAMPTZ,
@@ -37,11 +44,14 @@ CREATE TABLE IF NOT EXISTS rentals (
     CHECK (predicted_ends_at > starts_at)
 );
 
--- Impede que a mesma placa tenha dois aluguéis ativos ao mesmo tempo.
+-- Impede que a mesma moto tenha dois aluguéis ativos ao mesmo tempo.
 -- Duas requisições simultâneas: uma passa, a outra recebe violação de unicidade.
 -- Sem lock na aplicação, sem janela de corrida.
-CREATE UNIQUE INDEX IF NOT EXISTS one_active_rental_per_plate
-    ON rentals (license_plate)
+--
+-- O predicado é o que torna a restrição correta: sem ele, uma moto devolvida
+-- nunca mais poderia ser alugada. deploy/db/tests cobre os dois lados.
+CREATE UNIQUE INDEX IF NOT EXISTS one_active_rental_per_motorcycle
+    ON rentals (motorcycle_id)
     WHERE status = 'active';
 
 CREATE INDEX IF NOT EXISTS rentals_by_rider ON rentals (rider_id, created_at DESC);
