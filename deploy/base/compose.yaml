@@ -215,8 +215,6 @@ services:
     image: projecty/api-gateway:dev
     networks: [projecty]
     depends_on:
-      redis:
-        condition: service_healthy
       toxiproxy:
         condition: service_healthy
       otel-collector:

@@ -150,6 +150,13 @@ the immediate-revocation check defined by ADR 0017. The denylist key is
 failure blocks only that high-value operation; ordinary token verification
 continues from the bounded JWKS cache.
 
+The gateway rate limiter is already active for public and protected routes. It
+uses an atomic Redis token bucket shared by every gateway replica, with a
+stricter bucket for `/api/auth/**`. Unlike the high-value denylist, it fails
+open: stopping Redis allows ordinary traffic, omits the remaining-token header,
+and increments `gateway_ratelimit_degraded_total` on the gateway `/metrics`
+endpoint and the platform Grafana dashboard.
+
 ## Bootstrap the first administrator
 
 Administrator creation is deliberately unavailable over HTTP. Open a second

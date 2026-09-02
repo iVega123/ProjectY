@@ -2,8 +2,8 @@
 
 The Rust/Axum gateway is the strangler entry point in front of ProjectY's four
 audited ASP.NET Core services. It owns routing and process lifecycle in task
-[#57](https://github.com/iVega123/ProjectY/issues/57); authentication, rate
-limiting, resilience and OpenTelemetry arrive in the following Epic 6 tasks.
+[#57](https://github.com/iVega123/ProjectY/issues/57); authentication and the
+shared Redis rate limiter are now enforced at this edge boundary.
 
 ## Routes
 
@@ -45,6 +45,11 @@ All runtime configuration comes from environment variables.
 | `GATEWAY_IDENTITY_SIGNING_KEY_ID` | Yes | Rotation identifier forwarded with the signed envelope |
 | `GATEWAY_REDIS_URL` | Yes | Redis URL used by the high-value revocation denylist |
 | `GATEWAY_REDIS_TIMEOUT_MS` | No (`250`) | Fail-closed timeout for a denylist operation |
+| `GATEWAY_RATE_LIMIT_REDIS_TIMEOUT_MS` | No (`100`) | Fail-open timeout for a token-bucket operation |
+| `GATEWAY_RATE_LIMIT_GENERAL_CAPACITY` | No (`120`) | Burst capacity for non-auth routes |
+| `GATEWAY_RATE_LIMIT_GENERAL_REFILL_PER_MINUTE` | No (`120`) | Sustained refill for non-auth routes |
+| `GATEWAY_RATE_LIMIT_AUTH_CAPACITY` | No (`10`) | Stricter burst capacity for `/api/auth/**` |
+| `GATEWAY_RATE_LIMIT_AUTH_REFILL_PER_MINUTE` | No (`5`) | Stricter sustained refill for `/api/auth/**` |
 
 `POST /api/auth/login` and `POST /api/auth/register/rider` are public. Every
 other proxied route requires an EdDSA access token with `kid`, `sub`, `jti`,
@@ -59,6 +64,16 @@ not put Redis in their authentication path. Ambiguous paths (percent encoding,
 backslashes, duplicate/trailing separators, and dot segments) are rejected
 before route policy is selected so an upstream cannot normalize into a more
 privileged route.
+
+Every proxied request also consumes one token from an atomic Redis Lua token
+bucket. Authenticated traffic is keyed by a SHA-256 digest of the verified
+subject; public traffic is keyed by the direct peer IP. The auth bucket is
+deliberately stricter than the general bucket. A depleted bucket returns an RFC
+9457 `429` with `Retry-After` and `X-RateLimit-Remaining`; successful checks
+also expose the remaining count. If Redis is unavailable, rate limiting fails
+open and increments `gateway_ratelimit_degraded_total`. This is intentionally
+the opposite posture from the high-value revocation check, which fails closed.
+Prometheus scrapes the counter from `/metrics`.
 
 The gateway rejects every client-supplied `x-identity-*` header and never sends
 the caller's `Authorization` or `Cookie` headers upstream. After verification it

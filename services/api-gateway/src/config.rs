@@ -12,6 +12,21 @@ pub struct Config {
     pub healthcheck_timeout: Duration,
     pub upstreams: Upstreams,
     pub auth: AuthConfig,
+    pub rate_limit: RateLimitConfig,
+}
+
+#[derive(Clone, Debug)]
+pub struct RateLimitConfig {
+    pub redis_url: SensitiveString,
+    pub operation_timeout: Duration,
+    pub general: TokenBucketConfig,
+    pub auth: TokenBucketConfig,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct TokenBucketConfig {
+    pub capacity: u64,
+    pub refill_per_minute: u64,
 }
 
 #[derive(Clone, Debug)]
@@ -142,6 +157,15 @@ impl Config {
                     250,
                 )?),
             },
+            rate_limit: RateLimitConfig {
+                redis_url: SensitiveString::new(required_value("GATEWAY_REDIS_URL")?),
+                operation_timeout: Duration::from_millis(positive_u64_from_env(
+                    "GATEWAY_RATE_LIMIT_REDIS_TIMEOUT_MS",
+                    100,
+                )?),
+                general: token_bucket_from_env("GENERAL", 120, 120)?,
+                auth: token_bucket_from_env("AUTH", 10, 5)?,
+            },
         })
     }
 
@@ -241,6 +265,30 @@ fn positive_u64_from_env(name: &str, default: u64) -> Result<u64, String> {
                 Ok(value)
             }
         })
+}
+
+fn token_bucket_from_env(
+    name: &str,
+    default_capacity: u64,
+    default_refill_per_minute: u64,
+) -> Result<TokenBucketConfig, String> {
+    let capacity = positive_u64_from_env(
+        &format!("GATEWAY_RATE_LIMIT_{name}_CAPACITY"),
+        default_capacity,
+    )?;
+    let refill_per_minute = positive_u64_from_env(
+        &format!("GATEWAY_RATE_LIMIT_{name}_REFILL_PER_MINUTE"),
+        default_refill_per_minute,
+    )?;
+    if capacity > 1_000_000 || refill_per_minute > 1_000_000 {
+        return Err(format!(
+            "GATEWAY_RATE_LIMIT_{name}_* values must not exceed 1000000"
+        ));
+    }
+    Ok(TokenBucketConfig {
+        capacity,
+        refill_per_minute,
+    })
 }
 
 fn normalize_base_url(mut url: Url) -> Url {
