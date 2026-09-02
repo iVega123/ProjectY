@@ -87,7 +87,9 @@ builder.Services
                 ?? throw new InvalidOperationException(
                     "MotoHubSettings:BaseUrl is not configured."));
     })
-    .AddGatewayIdentityPropagation("projecty.moto-hub");
+    .AddGatewayIdentityPropagation(
+        "projecty.moto-hub",
+        "service:rental-operations");
 
 builder.Services.AddScoped<IRiderManagerService, RiderManagerService>();
 

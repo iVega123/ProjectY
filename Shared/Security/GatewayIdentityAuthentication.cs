@@ -85,12 +85,31 @@ public static class GatewayIdentityServiceCollectionExtensions
 
     public static IHttpClientBuilder AddGatewayIdentityPropagation(
         this IHttpClientBuilder builder,
-        string targetAudience)
+        string targetAudience,
+        string? backgroundServiceSubject = null)
     {
+        ClaimsPrincipal? backgroundServicePrincipal = null;
+        if (backgroundServiceSubject is not null)
+        {
+            if (string.IsNullOrWhiteSpace(backgroundServiceSubject))
+            {
+                throw new ArgumentException(
+                    "The background service subject cannot be empty.",
+                    nameof(backgroundServiceSubject));
+            }
+
+            backgroundServicePrincipal = new ClaimsPrincipal(new ClaimsIdentity(
+            [
+                new Claim(ClaimTypes.NameIdentifier, backgroundServiceSubject),
+                new Claim(ClaimTypes.Name, backgroundServiceSubject)
+            ], GatewayIdentityDefaults.AuthenticationScheme));
+        }
+
         return builder.AddHttpMessageHandler(services => new GatewayIdentityPropagationHandler(
             services.GetRequiredService<IHttpContextAccessor>(),
             services.GetRequiredService<GatewayIdentitySigner>(),
-            targetAudience));
+            targetAudience,
+            backgroundServicePrincipal));
     }
 }
 
@@ -318,15 +337,18 @@ public sealed class GatewayIdentitySigner
 public sealed class GatewayIdentityPropagationHandler(
     IHttpContextAccessor httpContextAccessor,
     GatewayIdentitySigner signer,
-    string targetAudience) : DelegatingHandler
+    string targetAudience,
+    ClaimsPrincipal? backgroundServicePrincipal = null) : DelegatingHandler
 {
     protected override Task<HttpResponseMessage> SendAsync(
         HttpRequestMessage request,
         CancellationToken cancellationToken)
     {
-        var principal = httpContextAccessor.HttpContext?.User
-            ?? throw new InvalidOperationException(
-                "Gateway identity propagation requires an active HTTP request.");
+        var principal = httpContextAccessor.HttpContext is { } httpContext
+            ? httpContext.User
+            : backgroundServicePrincipal
+                ?? throw new InvalidOperationException(
+                    "Gateway identity propagation requires an active HTTP request or a configured background service identity.");
         signer.Sign(request, principal, targetAudience);
         return base.SendAsync(request, cancellationToken);
     }
