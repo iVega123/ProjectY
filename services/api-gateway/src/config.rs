@@ -26,6 +26,8 @@ pub struct AuthConfig {
     pub max_token_lifetime: Duration,
     pub identity_signing_key: Secret,
     pub identity_signing_key_id: String,
+    pub redis_url: SensitiveString,
+    pub redis_timeout: Duration,
 }
 
 #[derive(Clone, Debug)]
@@ -38,6 +40,9 @@ pub struct Audiences {
 
 #[derive(Clone)]
 pub struct Secret(Arc<[u8]>);
+
+#[derive(Clone)]
+pub struct SensitiveString(Arc<str>);
 
 impl Secret {
     pub(crate) fn new(value: Vec<u8>) -> Result<Self, String> {
@@ -53,6 +58,22 @@ impl Secret {
 }
 
 impl fmt::Debug for Secret {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("<redacted>")
+    }
+}
+
+impl SensitiveString {
+    pub(crate) fn new(value: String) -> Self {
+        Self(Arc::from(value))
+    }
+
+    pub fn expose(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Debug for SensitiveString {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str("<redacted>")
     }
@@ -115,6 +136,11 @@ impl Config {
                 max_token_lifetime: duration_from_env("GATEWAY_JWT_MAX_LIFETIME_SECS", 300)?,
                 identity_signing_key: signing_secret()?,
                 identity_signing_key_id: identity_key_id()?,
+                redis_url: SensitiveString::new(required_value("GATEWAY_REDIS_URL")?),
+                redis_timeout: Duration::from_millis(positive_u64_from_env(
+                    "GATEWAY_REDIS_TIMEOUT_MS",
+                    250,
+                )?),
             },
         })
     }
@@ -310,5 +336,7 @@ mod tests {
     fn redacts_the_internal_signing_key_from_debug_output() {
         let secret = Secret::new(b"test-only-key-with-at-least-32-bytes".to_vec()).unwrap();
         assert_eq!(format!("{secret:?}"), "<redacted>");
+        let redis_url = SensitiveString::new("redis://:password@redis:6379/".to_owned());
+        assert_eq!(format!("{redis_url:?}"), "<redacted>");
     }
 }

@@ -43,12 +43,22 @@ All runtime configuration comes from environment variables.
 | `GATEWAY_JWT_MAX_LIFETIME_SECS` | No (`300`) | Maximum `exp - iat` access-token lifetime |
 | `GATEWAY_IDENTITY_SIGNING_KEY` | Yes | At least 32 bytes; HMAC key for the internal identity envelope |
 | `GATEWAY_IDENTITY_SIGNING_KEY_ID` | Yes | Rotation identifier forwarded with the signed envelope |
+| `GATEWAY_REDIS_URL` | Yes | Redis URL used by the high-value revocation denylist |
+| `GATEWAY_REDIS_TIMEOUT_MS` | No (`250`) | Fail-closed timeout for a denylist operation |
 
 `POST /api/auth/login` and `POST /api/auth/register/rider` are public. Every
-other proxied route requires an EdDSA access token with `kid`, `sub`, `iat`,
-`exp`, exact `iss`, and the route owner's exact `aud`. MotoHub routes and the
+other proxied route requires an EdDSA access token with `kid`, `sub`, `jti`,
+`iat`, `exp`, exact `iss`, and the route owner's exact `aud`. MotoHub routes and the
 legacy admin endpoints in RiderManager and RentalOperations also require the
 `Admin` role.
+
+`POST /api/rental/create` additionally checks
+`projecty:revoked:jti:<jti>` in Redis. A present key rejects the token, and a
+Redis error or timeout returns `503` with `Retry-After: 1`; ordinary requests do
+not put Redis in their authentication path. Ambiguous paths (percent encoding,
+backslashes, duplicate/trailing separators, and dot segments) are rejected
+before route policy is selected so an upstream cannot normalize into a more
+privileged route.
 
 The gateway rejects every client-supplied `x-identity-*` header and never sends
 the caller's `Authorization` or `Cookie` headers upstream. After verification it

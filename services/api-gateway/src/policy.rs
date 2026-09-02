@@ -9,6 +9,22 @@ pub enum Access {
     Admin,
 }
 
+pub fn is_canonical_path(path: &str) -> bool {
+    if path.len() > 1 && path.ends_with('/') {
+        return false;
+    }
+    if path.contains('%') || path.contains('\\') || path.contains("//") {
+        return false;
+    }
+    !path.split('/').any(|segment| matches!(segment, "." | ".."))
+}
+
+pub fn requires_revocation_check(method: &Method, path: &str, upstream: UpstreamName) -> bool {
+    upstream == UpstreamName::RentalOperations
+        && method == Method::POST
+        && path.eq_ignore_ascii_case("/api/rental/create")
+}
+
 pub fn access_for(method: &Method, path: &str, upstream: UpstreamName) -> Access {
     let path = path.to_ascii_lowercase();
     match upstream {
@@ -100,5 +116,29 @@ mod tests {
             ),
             Access::Admin
         );
+    }
+
+    #[test]
+    fn rejects_paths_that_an_upstream_could_normalize_differently() {
+        assert!(is_canonical_path("/api/rental/user/victim"));
+        assert!(!is_canonical_path("/api/rental/us%65r/victim"));
+        assert!(!is_canonical_path("/api/rental/user/victim/"));
+        assert!(!is_canonical_path("/api//rental/user/victim"));
+        assert!(!is_canonical_path("/api/rental/../riders"));
+        assert!(!is_canonical_path("/api\\rental\\user\\victim"));
+    }
+
+    #[test]
+    fn checks_revocation_only_for_high_value_operations() {
+        assert!(requires_revocation_check(
+            &Method::POST,
+            "/api/rental/create",
+            UpstreamName::RentalOperations
+        ));
+        assert!(!requires_revocation_check(
+            &Method::GET,
+            "/api/rental/user",
+            UpstreamName::RentalOperations
+        ));
     }
 }

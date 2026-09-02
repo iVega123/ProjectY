@@ -1,8 +1,9 @@
 pub mod auth;
 pub mod config;
 pub mod policy;
+pub mod revocation;
 
-use std::{future::Future, sync::Arc};
+use std::{fmt, future::Future, sync::Arc};
 
 use auth::{AuthError, Authenticator, IdentitySigner, has_reserved_identity_header, is_admin};
 use axum::{
@@ -14,8 +15,9 @@ use axum::{
     routing::get,
 };
 use config::{Config, UpstreamName};
-use policy::{Access, access_for};
+use policy::{Access, access_for, is_canonical_path, requires_revocation_check};
 use reqwest::redirect::Policy;
+use revocation::{RedisRevocationStore, RevocationError, RevocationStore};
 use serde::Serialize;
 use tokio::net::TcpListener;
 use tracing::{info, warn};
@@ -26,6 +28,7 @@ struct AppState {
     client: reqwest::Client,
     authenticator: Authenticator,
     identity_signer: IdentitySigner,
+    revocation: Arc<dyn RevocationStore>,
 }
 
 #[derive(Serialize)]
@@ -43,7 +46,35 @@ struct Problem {
     instance: String,
 }
 
-pub fn build_app(config: Config) -> Result<Router, reqwest::Error> {
+#[derive(Debug)]
+pub enum BuildError {
+    Http(reqwest::Error),
+    Redis,
+}
+
+impl fmt::Display for BuildError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Http(error) => write!(formatter, "could not build HTTP client: {error}"),
+            Self::Redis => formatter.write_str("GATEWAY_REDIS_URL is invalid"),
+        }
+    }
+}
+
+impl std::error::Error for BuildError {}
+
+pub fn build_app(config: Config) -> Result<Router, BuildError> {
+    let revocation = Arc::new(
+        RedisRevocationStore::new(config.auth.redis_url.expose(), config.auth.redis_timeout)
+            .map_err(|_| BuildError::Redis)?,
+    );
+    build_app_with_revocation(config, revocation).map_err(BuildError::Http)
+}
+
+fn build_app_with_revocation(
+    config: Config,
+    revocation: Arc<dyn RevocationStore>,
+) -> Result<Router, reqwest::Error> {
     let client = reqwest::Client::builder()
         .redirect(Policy::none())
         .build()?;
@@ -58,6 +89,7 @@ pub fn build_app(config: Config) -> Result<Router, reqwest::Error> {
             client,
             authenticator,
             identity_signer,
+            revocation,
         })))
 }
 
@@ -98,6 +130,15 @@ async fn health() -> Json<HealthStatus> {
 
 async fn proxy(State(state): State<Arc<AppState>>, request: Request) -> Response {
     let path = request.uri().path().to_owned();
+    if !is_canonical_path(&path) {
+        return problem(
+            StatusCode::BAD_REQUEST,
+            "urn:projecty:problem:non-canonical-path",
+            "Non-canonical request path",
+            "Percent-encoded, ambiguous, or trailing path separators are not accepted.",
+            request.uri().to_string(),
+        );
+    }
     if has_reserved_identity_header(request.headers()) {
         return problem(
             StatusCode::BAD_REQUEST,
@@ -138,6 +179,17 @@ async fn proxy(State(state): State<Arc<AppState>>, request: Request) -> Response
                     "This route requires the Admin role.",
                     request.uri().to_string(),
                 );
+            }
+            if requires_revocation_check(request.method(), &path, upstream_name) {
+                match state.revocation.is_revoked(&identity.token_id).await {
+                    Ok(false) => {}
+                    Ok(true) => {
+                        return authentication_problem(AuthError::InvalidToken, request.uri());
+                    }
+                    Err(RevocationError::Unavailable) => {
+                        return revocation_unavailable_problem(request.uri());
+                    }
+                }
             }
             match state.identity_signer.headers(
                 &identity,
@@ -276,6 +328,21 @@ fn authentication_problem(error: AuthError, instance: &axum::http::Uri) -> Respo
     response
 }
 
+fn revocation_unavailable_problem(instance: &axum::http::Uri) -> Response {
+    let mut response = problem(
+        StatusCode::SERVICE_UNAVAILABLE,
+        "urn:projecty:problem:revocation-unavailable",
+        "Revocation check unavailable",
+        "This high-value operation cannot proceed without a revocation check.",
+        instance.to_string(),
+    );
+    response.headers_mut().insert(
+        http::header::RETRY_AFTER,
+        http::HeaderValue::from_static("1"),
+    );
+    response
+}
+
 fn problem(
     status: StatusCode,
     problem_type: &'static str,
@@ -323,7 +390,7 @@ mod tests {
         routing::get,
     };
     use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
-    use config::{Audiences, AuthConfig, Secret, Upstreams};
+    use config::{Audiences, AuthConfig, Secret, SensitiveString, Upstreams};
     use hmac::{Hmac, Mac};
     use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
     use serde::Serialize;
@@ -361,6 +428,8 @@ mod tests {
                 max_token_lifetime: Duration::from_secs(300),
                 identity_signing_key: Secret::new(vec![b'x'; 32]).unwrap(),
                 identity_signing_key_id: "local-v1".to_owned(),
+                redis_url: SensitiveString::new("redis://127.0.0.1:1/".to_owned()),
+                redis_timeout: Duration::from_millis(50),
             },
         }
     }
@@ -407,6 +476,7 @@ mod tests {
         exp: u64,
         nbf: u64,
         iat: u64,
+        jti: &'a str,
         role: &'a [&'a str],
     }
 
@@ -452,6 +522,7 @@ mod tests {
                     exp: now + lifetime,
                     nbf: now.saturating_sub(1),
                     iat: now,
+                    jti: "test-token-id",
                     role: roles,
                 },
                 &EncodingKey::from_ed_der(&self.private_key),
@@ -524,6 +595,36 @@ mod tests {
     async fn response_json(response: Response) -> Value {
         let body = to_bytes(response.into_body(), 4096).await.unwrap();
         serde_json::from_slice(&body).unwrap()
+    }
+
+    struct StubRevocationStore {
+        result: Result<bool, RevocationError>,
+        checks: AtomicUsize,
+    }
+
+    impl RevocationStore for StubRevocationStore {
+        fn is_revoked<'a>(
+            &'a self,
+            _token_id: &'a str,
+        ) -> std::pin::Pin<Box<dyn Future<Output = Result<bool, RevocationError>> + Send + 'a>>
+        {
+            Box::pin(async move {
+                self.checks.fetch_add(1, Ordering::SeqCst);
+                self.result
+            })
+        }
+    }
+
+    fn app_with_revocation(
+        config: Config,
+        result: Result<bool, RevocationError>,
+    ) -> (Router, Arc<StubRevocationStore>) {
+        let store = Arc::new(StubRevocationStore {
+            result,
+            checks: AtomicUsize::new(0),
+        });
+        let app = build_app_with_revocation(config, store.clone()).unwrap();
+        (app, store)
     }
 
     #[tokio::test]
@@ -607,6 +708,22 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn rejects_encoded_and_trailing_paths_before_policy_classification() {
+        let (upstream, state) = spawn_security_upstream(None).await;
+        let app = build_app(test_config(upstream)).unwrap();
+
+        for path in ["/api/rental/us%65r/victim", "/api/rental/user/victim/"] {
+            let response = app
+                .clone()
+                .oneshot(HttpRequest::get(path).body(Body::empty()).unwrap())
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::BAD_REQUEST, "{path}");
+        }
+        assert_eq!(state.upstream_requests.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
     async fn verifies_eddsa_and_forwards_only_gateway_signed_identity() {
         let issuer = TestIssuer::new("active-key");
         let (upstream, state) = spawn_security_upstream(Some(issuer.jwks())).await;
@@ -616,7 +733,7 @@ mod tests {
         let token = issuer.token("projecty.rental-operations", &["Rider"]);
         let response = app
             .oneshot(
-                HttpRequest::post("/api/rental/create?plan=weekly")
+                HttpRequest::post("/api/rental/calculate-final-cost?plan=weekly")
                     .header(AUTHORIZATION, format!("Bearer {token}"))
                     .header(http::header::COOKIE, "session=must-not-cross")
                     .body(Body::empty())
@@ -639,7 +756,7 @@ mod tests {
             .strip_prefix("v1=")
             .unwrap();
         let canonical = format!(
-            "v1\nlocal-v1\nrider-123\nRider\n{issued_at}\nPOST\n/api/rental/create?plan=weekly\nprojecty.rental-operations"
+            "v1\nlocal-v1\nrider-123\nRider\n{issued_at}\nPOST\n/api/rental/calculate-final-cost?plan=weekly\nprojecty.rental-operations"
         );
         let mut mac = Hmac::<Sha256>::new_from_slice(&[b'x'; 32]).unwrap();
         mac.update(canonical.as_bytes());
@@ -671,6 +788,76 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn allows_a_non_revoked_token_on_rental_creation() {
+        let issuer = TestIssuer::new("active-rental-key");
+        let (upstream, state) = spawn_security_upstream(Some(issuer.jwks())).await;
+        let mut config = test_config(upstream.clone());
+        config.auth.jwks_url = upstream.join(".well-known/jwks.json").unwrap();
+        let (app, revocation) = app_with_revocation(config, Ok(false));
+        let token = issuer.token("projecty.rental-operations", &["Rider"]);
+        let response = app
+            .oneshot(
+                HttpRequest::post("/api/rental/create")
+                    .header(AUTHORIZATION, format!("Bearer {token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(revocation.checks.load(Ordering::SeqCst), 1);
+        assert_eq!(state.upstream_requests.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn refuses_a_revoked_token_on_rental_creation() {
+        let issuer = TestIssuer::new("revoked-rental-key");
+        let (upstream, state) = spawn_security_upstream(Some(issuer.jwks())).await;
+        let mut config = test_config(upstream.clone());
+        config.auth.jwks_url = upstream.join(".well-known/jwks.json").unwrap();
+        let (app, revocation) = app_with_revocation(config, Ok(true));
+        let token = issuer.token("projecty.rental-operations", &["Rider"]);
+        let response = app
+            .oneshot(
+                HttpRequest::post("/api/rental/create")
+                    .header(AUTHORIZATION, format!("Bearer {token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        assert_eq!(revocation.checks.load(Ordering::SeqCst), 1);
+        assert_eq!(state.upstream_requests.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn fails_closed_when_revocation_cannot_be_checked() {
+        let issuer = TestIssuer::new("redis-failure-key");
+        let (upstream, state) = spawn_security_upstream(Some(issuer.jwks())).await;
+        let mut config = test_config(upstream.clone());
+        config.auth.jwks_url = upstream.join(".well-known/jwks.json").unwrap();
+        let (app, revocation) = app_with_revocation(config, Err(RevocationError::Unavailable));
+        let token = issuer.token("projecty.rental-operations", &["Rider"]);
+        let response = app
+            .oneshot(
+                HttpRequest::post("/api/rental/create")
+                    .header(AUTHORIZATION, format!("Bearer {token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(response.headers()[http::header::RETRY_AFTER], "1");
+        assert_eq!(revocation.checks.load(Ordering::SeqCst), 1);
+        assert_eq!(state.upstream_requests.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
     async fn enforces_the_route_specific_audience() {
         let issuer = TestIssuer::new("audience-key");
         let (upstream, state) = spawn_security_upstream(Some(issuer.jwks())).await;
@@ -680,7 +867,7 @@ mod tests {
         let token = issuer.token("projecty.rider-manager", &["Rider"]);
         let response = app
             .oneshot(
-                HttpRequest::post("/api/rental/create")
+                HttpRequest::post("/api/rental/calculate-final-cost")
                     .header(AUTHORIZATION, format!("Bearer {token}"))
                     .body(Body::empty())
                     .unwrap(),
@@ -706,7 +893,7 @@ mod tests {
         let token = issuer.token_with_lifetime("projecty.rental-operations", &["Rider"], 301);
         let response = app
             .oneshot(
-                HttpRequest::post("/api/rental/create")
+                HttpRequest::post("/api/rental/calculate-final-cost")
                     .header(AUTHORIZATION, format!("Bearer {token}"))
                     .body(Body::empty())
                     .unwrap(),
@@ -731,7 +918,7 @@ mod tests {
         let first_response = app
             .clone()
             .oneshot(
-                HttpRequest::post("/api/rental/create")
+                HttpRequest::post("/api/rental/calculate-final-cost")
                     .header(AUTHORIZATION, format!("Bearer {first_token}"))
                     .body(Body::empty())
                     .unwrap(),
@@ -745,7 +932,7 @@ mod tests {
         let second_response = app
             .clone()
             .oneshot(
-                HttpRequest::post("/api/rental/create")
+                HttpRequest::post("/api/rental/calculate-final-cost")
                     .header(AUTHORIZATION, format!("Bearer {second_token}"))
                     .body(Body::empty())
                     .unwrap(),
@@ -757,7 +944,7 @@ mod tests {
 
         let retired_response = app
             .oneshot(
-                HttpRequest::post("/api/rental/create")
+                HttpRequest::post("/api/rental/calculate-final-cost")
                     .header(AUTHORIZATION, format!("Bearer {first_token}"))
                     .body(Body::empty())
                     .unwrap(),
@@ -778,7 +965,7 @@ mod tests {
         let token = issuer.token("projecty.rental-operations", &["Rider"]);
         let response = app
             .oneshot(
-                HttpRequest::post("/api/rental/create")
+                HttpRequest::post("/api/rental/calculate-final-cost")
                     .header(AUTHORIZATION, format!("Bearer {token}"))
                     .body(Body::empty())
                     .unwrap(),
@@ -800,7 +987,7 @@ mod tests {
         let app = build_app(config).unwrap();
         let token = issuer.token("projecty.rental-operations", &["Rider"]);
         let request = || {
-            HttpRequest::post("/api/rental/create")
+            HttpRequest::post("/api/rental/calculate-final-cost")
                 .header(AUTHORIZATION, format!("Bearer {token}"))
                 .body(Body::empty())
                 .unwrap()

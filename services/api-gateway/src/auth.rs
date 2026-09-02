@@ -26,6 +26,7 @@ const DOTNET_ROLE_CLAIM: &str = "http://schemas.microsoft.com/ws/2008/06/identit
 pub struct Identity {
     pub subject: String,
     pub roles: Vec<String>,
+    pub token_id: String,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -54,6 +55,7 @@ struct Claims {
     sub: String,
     exp: u64,
     iat: u64,
+    jti: String,
     #[serde(default)]
     role: RoleClaim,
     #[serde(default)]
@@ -110,7 +112,7 @@ impl Authenticator {
         let mut validation = Validation::new(Algorithm::EdDSA);
         validation.set_issuer(&[&self.config.issuer]);
         validation.set_audience(&[expected_audience]);
-        validation.set_required_spec_claims(&["sub", "iss", "aud", "exp", "iat"]);
+        validation.set_required_spec_claims(&["sub", "iss", "aud", "exp", "iat", "jti"]);
         validation.validate_nbf = true;
         validation.leeway = self.config.clock_skew.as_secs();
 
@@ -124,7 +126,10 @@ impl Authenticator {
         {
             return Err(AuthError::InvalidToken);
         }
-        if !is_safe_header_component(&claims.sub) {
+        if !is_safe_header_component(&claims.sub)
+            || claims.jti.len() > 128
+            || !is_safe_header_component(&claims.jti)
+        {
             return Err(AuthError::InvalidToken);
         }
 
@@ -144,6 +149,7 @@ impl Authenticator {
         Ok(Identity {
             subject: claims.sub,
             roles,
+            token_id: claims.jti,
         })
     }
 
@@ -399,6 +405,7 @@ mod tests {
         assert!(is_admin(&Identity {
             subject: "admin-1".to_owned(),
             roles: vec!["admin".to_owned()],
+            token_id: "token-1".to_owned(),
         }));
     }
 
