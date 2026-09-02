@@ -137,6 +137,19 @@ Only the HTTP endpoints above are documented as usable. The compose file also
 publishes ports that older documentation described as HTTPS, but it configures
 no certificates or HTTPS listener; the audit records this as finding A4.
 
+The gateway already enforces the target EdDSA/JWKS trust boundary. The legacy
+.NET AuthGate still emits HMAC tokens, so authenticated traffic continues to use
+the directly published legacy ports until the Go identity service in issue #136
+provides the issuer and JWKS. The gateway rejects those legacy tokens instead of
+silently weakening the new boundary; login and rider registration remain public
+through port `8090`.
+
+Once the identity issuer is available, rental creation also requires Redis for
+the immediate-revocation check defined by ADR 0017. The denylist key is
+`projecty:revoked:jti:<jti>` and expires no later than the access token. Redis
+failure blocks only that high-value operation; ordinary token verification
+continues from the bounded JWKS cache.
+
 ## Bootstrap the first administrator
 
 Administrator creation is deliberately unavailable over HTTP. Open a second

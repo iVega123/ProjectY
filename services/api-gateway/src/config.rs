@@ -1,4 +1,4 @@
-use std::{env, net::SocketAddr, time::Duration};
+use std::{env, fmt, net::SocketAddr, sync::Arc, time::Duration};
 
 use url::Url;
 
@@ -11,6 +11,72 @@ pub struct Config {
     pub health_url: Url,
     pub healthcheck_timeout: Duration,
     pub upstreams: Upstreams,
+    pub auth: AuthConfig,
+}
+
+#[derive(Clone, Debug)]
+pub struct AuthConfig {
+    pub jwks_url: Url,
+    pub issuer: String,
+    pub audiences: Audiences,
+    pub jwks_cache_ttl: Duration,
+    pub unknown_kid_refresh_interval: Duration,
+    pub jwks_timeout: Duration,
+    pub clock_skew: Duration,
+    pub max_token_lifetime: Duration,
+    pub identity_signing_key: Secret,
+    pub identity_signing_key_id: String,
+    pub redis_url: SensitiveString,
+    pub redis_timeout: Duration,
+}
+
+#[derive(Clone, Debug)]
+pub struct Audiences {
+    pub auth_gate: String,
+    pub rider_manager: String,
+    pub moto_hub: String,
+    pub rental_operations: String,
+}
+
+#[derive(Clone)]
+pub struct Secret(Arc<[u8]>);
+
+#[derive(Clone)]
+pub struct SensitiveString(Arc<str>);
+
+impl Secret {
+    pub(crate) fn new(value: Vec<u8>) -> Result<Self, String> {
+        if value.len() < 32 {
+            return Err("identity signing key must contain at least 32 bytes".to_owned());
+        }
+        Ok(Self(Arc::from(value)))
+    }
+
+    pub fn expose(&self) -> &[u8] {
+        &self.0
+    }
+}
+
+impl fmt::Debug for Secret {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("<redacted>")
+    }
+}
+
+impl SensitiveString {
+    pub(crate) fn new(value: String) -> Self {
+        Self(Arc::from(value))
+    }
+
+    pub fn expose(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Debug for SensitiveString {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("<redacted>")
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -48,6 +114,34 @@ impl Config {
                 moto_hub: required_url("GATEWAY_UPSTREAM_MOTO_HUB")?,
                 rental_operations: required_url("GATEWAY_UPSTREAM_RENTAL_OPERATIONS")?,
             },
+            auth: AuthConfig {
+                jwks_url: required_absolute_url("GATEWAY_JWKS_URL")?,
+                issuer: required_value("GATEWAY_JWT_ISSUER")?,
+                audiences: Audiences {
+                    auth_gate: required_value("GATEWAY_JWT_AUDIENCE_AUTH_GATE")?,
+                    rider_manager: required_value("GATEWAY_JWT_AUDIENCE_RIDER_MANAGER")?,
+                    moto_hub: required_value("GATEWAY_JWT_AUDIENCE_MOTO_HUB")?,
+                    rental_operations: required_value("GATEWAY_JWT_AUDIENCE_RENTAL_OPERATIONS")?,
+                },
+                jwks_cache_ttl: duration_from_env("GATEWAY_JWKS_CACHE_TTL_SECS", 300)?,
+                unknown_kid_refresh_interval: duration_from_env(
+                    "GATEWAY_JWKS_UNKNOWN_KID_REFRESH_SECS",
+                    5,
+                )?,
+                jwks_timeout: Duration::from_millis(positive_u64_from_env(
+                    "GATEWAY_JWKS_TIMEOUT_MS",
+                    2000,
+                )?),
+                clock_skew: duration_from_env("GATEWAY_JWT_CLOCK_SKEW_SECS", 30)?,
+                max_token_lifetime: duration_from_env("GATEWAY_JWT_MAX_LIFETIME_SECS", 300)?,
+                identity_signing_key: signing_secret()?,
+                identity_signing_key_id: identity_key_id()?,
+                redis_url: SensitiveString::new(required_value("GATEWAY_REDIS_URL")?),
+                redis_timeout: Duration::from_millis(positive_u64_from_env(
+                    "GATEWAY_REDIS_TIMEOUT_MS",
+                    250,
+                )?),
+            },
         })
     }
 
@@ -80,14 +174,73 @@ impl Upstreams {
     }
 }
 
+impl Audiences {
+    pub fn for_upstream(&self, upstream: UpstreamName) -> &str {
+        match upstream {
+            UpstreamName::AuthGate => &self.auth_gate,
+            UpstreamName::RiderManager => &self.rider_manager,
+            UpstreamName::MotoHub => &self.moto_hub,
+            UpstreamName::RentalOperations => &self.rental_operations,
+        }
+    }
+}
+
 fn env_value(name: &str, default: &str) -> String {
     env::var(name).unwrap_or_else(|_| default.to_owned())
 }
 
 fn required_url(name: &str) -> Result<Url, String> {
-    let value = env::var(name).map_err(|_| format!("{name} is required"))?;
+    let value = required_value(name)?;
     let url = parse_absolute_url(name, &value)?;
     Ok(normalize_base_url(url))
+}
+
+fn required_absolute_url(name: &str) -> Result<Url, String> {
+    let value = required_value(name)?;
+    parse_absolute_url(name, &value)
+}
+
+fn required_value(name: &str) -> Result<String, String> {
+    let value = env::var(name).map_err(|_| format!("{name} is required"))?;
+    if value.trim().is_empty() {
+        Err(format!("{name} must not be empty"))
+    } else {
+        Ok(value)
+    }
+}
+
+fn signing_secret() -> Result<Secret, String> {
+    let value = required_value("GATEWAY_IDENTITY_SIGNING_KEY")?;
+    Secret::new(value.into_bytes())
+        .map_err(|_| "GATEWAY_IDENTITY_SIGNING_KEY must contain at least 32 bytes".to_owned())
+}
+
+fn identity_key_id() -> Result<String, String> {
+    let value = required_value("GATEWAY_IDENTITY_SIGNING_KEY_ID")?;
+    if value.len() > 128 || !value.bytes().all(|byte| matches!(byte, 0x21..=0x7e)) {
+        return Err(
+            "GATEWAY_IDENTITY_SIGNING_KEY_ID must be at most 128 visible ASCII characters"
+                .to_owned(),
+        );
+    }
+    Ok(value)
+}
+
+fn duration_from_env(name: &str, default: u64) -> Result<Duration, String> {
+    Ok(Duration::from_secs(positive_u64_from_env(name, default)?))
+}
+
+fn positive_u64_from_env(name: &str, default: u64) -> Result<u64, String> {
+    env_value(name, &default.to_string())
+        .parse::<u64>()
+        .map_err(|error| format!("{name} must be an integer: {error}"))
+        .and_then(|value| {
+            if value == 0 {
+                Err(format!("{name} must be greater than zero"))
+            } else {
+                Ok(value)
+            }
+        })
 }
 
 fn normalize_base_url(mut url: Url) -> Url {
@@ -170,5 +323,20 @@ mod tests {
         let upstream =
             normalize_base_url(parse_absolute_url("UPSTREAM", "http://service:8080/base").unwrap());
         assert_eq!(upstream.path(), "/base/");
+
+        let jwks = parse_absolute_url(
+            "GATEWAY_JWKS_URL",
+            "http://identity:8080/.well-known/jwks.json",
+        )
+        .unwrap();
+        assert_eq!(jwks.path(), "/.well-known/jwks.json");
+    }
+
+    #[test]
+    fn redacts_the_internal_signing_key_from_debug_output() {
+        let secret = Secret::new(b"test-only-key-with-at-least-32-bytes".to_vec()).unwrap();
+        assert_eq!(format!("{secret:?}"), "<redacted>");
+        let redis_url = SensitiveString::new("redis://:password@redis:6379/".to_owned());
+        assert_eq!(format!("{redis_url:?}"), "<redacted>");
     }
 }
