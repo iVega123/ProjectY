@@ -1,6 +1,4 @@
 ﻿using System.Text.Json;
-using Microsoft.Extensions.Options;
-using RentalOperations.Configurations;
 using RentalOperations.CrossCutting.Model;
 
 namespace RentalOperations.CrossCutting.Services
@@ -8,14 +6,9 @@ namespace RentalOperations.CrossCutting.Services
     public class MotorcycleService : IMotorcycleService
     {
         private readonly HttpClient _httpClient;
-        private readonly MotoHubSettings _settings;
-
-        public MotorcycleService(IHttpClientFactory httpClientFactory, IOptions<MotoHubSettings> settings)
+        public MotorcycleService(IHttpClientFactory httpClientFactory)
         {
-            _httpClient = httpClientFactory.CreateClient();
-            _settings = settings.Value;
-            _httpClient.BaseAddress = new Uri(_settings.BaseUrl);
-            _httpClient.DefaultRequestHeaders.Add("X-API-Key", _settings.ApiKey);
+            _httpClient = httpClientFactory.CreateClient("moto-hub");
         }
 
         public async Task<Motorcycle> GetMotorcycleByIdAsync(string licensePlate)

@@ -9,18 +9,22 @@ using Microsoft.Extensions.Hosting;
 using Moq;
 using MotoHub.CrossCutting;
 using MotoHub.Data;
+using ProjectY.Shared.Security;
 using RabbitMQ.Client;
+using System.Security.Claims;
 
 namespace MotoHubTests.Integration
 {
     public class CustomWebApplicationFactory<TStartup> : WebApplicationFactory<TStartup> where TStartup : class
     {
-        public const string JwtKey = "test-only-moto-hub-key-with-32-bytes";
-        public const string JwtIssuer = "projecty.auth-gate";
-        public const string JwtAudience = "projecty.moto-hub";
+        public const string GatewayIdentityKey = "test-only-gateway-identity-key-32-bytes";
+        public const string GatewayIdentityAudience = "projecty.moto-hub";
 
         protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
+            builder.UseSetting("GatewayIdentity:SigningKey", GatewayIdentityKey);
+            builder.UseSetting("GatewayIdentity:SigningKeyId", "test-v1");
+            builder.UseSetting("RentalOperationsSettings:BaseUrl", "http://unused/");
             builder.ConfigureServices(services =>
             {
                 services.RemoveAll<IHostedService>();
@@ -79,10 +83,9 @@ namespace MotoHubTests.Integration
 
                 var integrationTestConfig = new Dictionary<string, string>
                 {
-                    {"Jwt:SigningKey", JwtKey},
-                    {"Jwt:Issuer", JwtIssuer},
-                    {"Jwt:Audience", JwtAudience},
-                    {"MotoHubApiKey", "" },
+                    {"GatewayIdentity:SigningKey", GatewayIdentityKey},
+                    {"GatewayIdentity:SigningKeyId", "test-v1"},
+                    {"RentalOperationsSettings:BaseUrl", "http://unused/"},
                     {"RabbitMQ:HostName", "unused"},
                     {"RabbitMQ:VirtualHost", "unused"},
                     {"RabbitMQ:UserName", "unused"},
@@ -93,6 +96,35 @@ namespace MotoHubTests.Integration
                 configBuilder.Sources.Clear();
                 configBuilder.AddInMemoryCollection(integrationTestConfig);
             });
+        }
+
+        public new HttpClient CreateClient()
+        {
+            var client = CreateDefaultClient(new TestGatewayIdentityMarkerHandler());
+            client.BaseAddress = new Uri("https://localhost");
+            return client;
+        }
+
+        private sealed class TestGatewayIdentityMarkerHandler : DelegatingHandler
+        {
+            protected override Task<HttpResponseMessage> SendAsync(
+                HttpRequestMessage request,
+                CancellationToken cancellationToken)
+            {
+                if (request.Headers.Authorization is { Scheme: "Bearer", Parameter: "valid-admin" })
+                {
+                    var principal = new ClaimsPrincipal(new ClaimsIdentity(
+                    [
+                        new Claim(ClaimTypes.NameIdentifier, "test-user"),
+                        new Claim(ClaimTypes.Role, "Admin")
+                    ], "TestGatewayIdentity"));
+                    new GatewayIdentitySigner(GatewayIdentityKey, "test-v1")
+                        .Sign(request, principal, GatewayIdentityAudience);
+                }
+
+                request.Headers.Authorization = null;
+                return base.SendAsync(request, cancellationToken);
+            }
         }
     }
 }

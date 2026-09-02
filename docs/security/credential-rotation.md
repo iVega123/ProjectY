@@ -12,7 +12,8 @@ copies in clones, caches, images, logs, or running infrastructure.
 | Root and modernization Compose defaults | 2026-08-29 | Removed | Known defaults were replaced by required environment interpolation. |
 | Local development credentials | On first run after 2026-08-29 | Operator action required | Run `scripts/New-LocalSecrets.ps1`; its `.env` header records the precise UTC generation time. Recreate volumes initialized with old credentials. |
 | Shared JWT signing key | On first deployment after 2026-08-29 | Operator action required | Provision four independently generated keys, deploy all issuers/validators together, then revoke the old key. |
-| Hosted database, broker, object-storage, Grafana, and API-key credentials | On first deployment after 2026-08-29 | Environment-owner action required | Rotate in the provider/secret manager, deploy consumers, revoke prior values, and append a dated row below. |
+| Gateway identity-envelope key | On first deployment after issue #62 | Operator action required | Provision one fresh key to the gateway and the three legacy domain services. Rotate the gateway and validators as one deployment; envelopes expire after 30 seconds. |
+| Hosted database, broker, object-storage, and Grafana credentials | On first deployment after 2026-08-29 | Environment-owner action required | Rotate in the provider/secret manager, deploy consumers, revoke prior values, and append a dated row below. The retired inter-service API keys must be deleted from the secret manager. |
 
 The repository cannot prove that an external credential was revoked. A release
 must not mark the environment rotation complete until an owner records it here
@@ -37,4 +38,4 @@ Append one row per environment without including secret material.
 
 | Environment | Completed at (UTC) | Operator/change reference | Credentials revoked |
 |---|---|---|---|
-| _Example: staging_ | _YYYY-MM-DDThh:mm:ssZ_ | _deployment/change ID_ | _JWT, DB, RabbitMQ, MinIO, Grafana, API keys_ |
+| _Example: staging_ | _YYYY-MM-DDThh:mm:ssZ_ | _deployment/change ID_ | _JWT, gateway identity, DB, RabbitMQ, MinIO, Grafana_ |

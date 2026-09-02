@@ -22,8 +22,8 @@ x-rider-manager-environment: &rider-manager-environment
   Redis__ConnectionString: "redis:6379"
   MinIO__AccessKey: "${MINIO_USER:?Set MINIO_USER in .env}"
   MinIO__SecretKey: "${MINIO_PASSWORD:?Set MINIO_PASSWORD in .env}"
-  Jwt__SigningKey: "${RIDER_MANAGER_JWT_SIGNING_KEY:?Set RIDER_MANAGER_JWT_SIGNING_KEY in .env}"
-  RiderManagerApiKey: "${RIDER_MANAGER_API_KEY:?Set RIDER_MANAGER_API_KEY in .env}"
+  GatewayIdentity__SigningKey: "${GATEWAY_IDENTITY_SIGNING_KEY:?Set GATEWAY_IDENTITY_SIGNING_KEY in .env}"
+  GatewayIdentity__SigningKeyId: local-v1
 
 x-moto-hub-environment: &moto-hub-environment
   ASPNETCORE_ENVIRONMENT: Production
@@ -33,9 +33,8 @@ x-moto-hub-environment: &moto-hub-environment
   RabbitMQ__UserName: "${MOTO_HUB_RABBITMQ_USER:?Set MOTO_HUB_RABBITMQ_USER in .env}"
   RabbitMQ__Password: "${MOTO_HUB_RABBITMQ_PASSWORD:?Set MOTO_HUB_RABBITMQ_PASSWORD in .env}"
   Redis__ConnectionString: "redis:6379"
-  Jwt__SigningKey: "${MOTO_HUB_JWT_SIGNING_KEY:?Set MOTO_HUB_JWT_SIGNING_KEY in .env}"
-  MotoHubApiKey: "${MOTO_HUB_API_KEY:?Set MOTO_HUB_API_KEY in .env}"
-  RentalOperationsSettings__ApiKey: "${RENTAL_OPERATIONS_API_KEY:?Set RENTAL_OPERATIONS_API_KEY in .env}"
+  GatewayIdentity__SigningKey: "${GATEWAY_IDENTITY_SIGNING_KEY:?Set GATEWAY_IDENTITY_SIGNING_KEY in .env}"
+  GatewayIdentity__SigningKeyId: local-v1
 
 services:
   elasticsearch:
@@ -371,10 +370,8 @@ services:
       RabbitMQ__UserName: "${RENTAL_OPERATIONS_RABBITMQ_USER:?Set RENTAL_OPERATIONS_RABBITMQ_USER in .env}"
       RabbitMQ__Password: "${RENTAL_OPERATIONS_RABBITMQ_PASSWORD:?Set RENTAL_OPERATIONS_RABBITMQ_PASSWORD in .env}"
       Redis__ConnectionString: "redis:6379"
-      Jwt__SigningKey: "${RENTAL_OPERATIONS_JWT_SIGNING_KEY:?Set RENTAL_OPERATIONS_JWT_SIGNING_KEY in .env}"
-      RentalOperationsApiKey: "${RENTAL_OPERATIONS_API_KEY:?Set RENTAL_OPERATIONS_API_KEY in .env}"
-      RiderManagerSettings__ApiKey: "${RIDER_MANAGER_API_KEY:?Set RIDER_MANAGER_API_KEY in .env}"
-      MotoHubSettings__ApiKey: "${MOTO_HUB_API_KEY:?Set MOTO_HUB_API_KEY in .env}"
+      GatewayIdentity__SigningKey: "${GATEWAY_IDENTITY_SIGNING_KEY:?Set GATEWAY_IDENTITY_SIGNING_KEY in .env}"
+      GatewayIdentity__SigningKeyId: local-v1
     healthcheck:
       test: ["CMD", "dotnet", "RentalOperations.dll", "--healthcheck", "http://localhost:8200/health/ready"]
       interval: 10s

@@ -2,7 +2,6 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using RentalOperations.DTOs;
 using RentalOperations.Services;
-using RentalOperations.Filters;
 using RentalOperations.Domain;
 using System.Security.Claims;
 
@@ -10,6 +9,7 @@ namespace RentalOperations.Controllers
 {
     [ApiController]
     [Route("api/[controller]")]
+    [Authorize]
     public class RentalController : ControllerBase
     {
         private readonly IRentalService _rentalService;
@@ -19,8 +19,6 @@ namespace RentalOperations.Controllers
             _rentalService = rentalService;
         }
 
-        [Authorize]
-        [ServiceFilter(typeof(AuthorizationFilter))]
         [HttpPost("create")]
         public async Task<IActionResult> CreateRental([FromBody] RentalCreateDto createDto)
         {
@@ -58,8 +56,6 @@ namespace RentalOperations.Controllers
             }
         }
 
-        [Authorize]
-        [ServiceFilter(typeof(AuthorizationFilter))]
         [HttpGet("user")]
         public async Task<IActionResult> GetRentalsByUser(
             [FromQuery] string? cursor,
@@ -83,8 +79,7 @@ namespace RentalOperations.Controllers
             }
         }
 
-        [Authorize]
-        [ServiceFilter(typeof(AdminAuthorizationFilter))]
+        [Authorize(Roles = "Admin")]
         [HttpGet("user/{userId}")]
         public async Task<IActionResult> GetRentalsByUserAdmin(
             string userId,
@@ -101,8 +96,6 @@ namespace RentalOperations.Controllers
             }
         }
 
-        [Authorize]
-        [ServiceFilter(typeof(AuthorizationFilter))]
         [HttpPost("calculate-final-cost")]
         public async Task<IActionResult> CalculateFinalCost([FromQuery] string rentalId, [FromQuery] DateTime actualEndDate)
         {
@@ -126,7 +119,6 @@ namespace RentalOperations.Controllers
             }
         }
 
-        [ServiceFilter(typeof(AuthorizationFilter))]
         [HttpGet("is-rented/{licencePlate}")]
         public async Task<IActionResult> IsMotorcycleRented(string licencePlate)
         {
@@ -141,7 +133,7 @@ namespace RentalOperations.Controllers
             }
         }
 
-        [ServiceFilter(typeof(AdminAuthorizationFilter))]
+        [Authorize(Roles = "Admin")]
         [HttpPost("motorcycle-retirements/{licencePlate}")]
         public async Task<IActionResult> TryRetireMotorcycle(string licencePlate)
         {
@@ -156,7 +148,7 @@ namespace RentalOperations.Controllers
                 });
         }
 
-        [ServiceFilter(typeof(AdminAuthorizationFilter))]
+        [Authorize(Roles = "Admin")]
         [HttpPost("motorcycle-renames/reservations")]
         public async Task<IActionResult> TryReserveMotorcycleRename(
             [FromBody] MotorcycleRenameReservationDto request)
