@@ -498,26 +498,18 @@ fn upstream_response_to_client(
         }
     }
 
-    let track_outcome = !status.is_server_error();
+    let outcome = ResponseOutcomeGuard::new(admission, policy, !status.is_server_error());
     let body = futures_util::stream::unfold(
-        (
-            Box::pin(upstream_response.bytes_stream()),
-            Some(admission),
-            policy,
-        ),
-        move |(mut upstream_body, mut admission, policy)| async move {
+        (Box::pin(upstream_response.bytes_stream()), outcome),
+        move |(mut upstream_body, mut outcome)| async move {
             match upstream_body.next().await {
-                Some(Ok(chunk)) => Some((Ok(chunk), (upstream_body, admission, policy))),
+                Some(Ok(chunk)) => Some((Ok(chunk), (upstream_body, outcome))),
                 Some(Err(error)) => {
-                    if track_outcome && let Some(completed) = admission.take() {
-                        policy.record_failure(&completed);
-                    }
-                    Some((Err(error), (upstream_body, admission, policy)))
+                    outcome.resolve_failure();
+                    Some((Err(error), (upstream_body, outcome)))
                 }
                 None => {
-                    if track_outcome && let Some(completed) = admission.take() {
-                        policy.record_success(&completed);
-                    }
+                    outcome.resolve_success();
                     None
                 }
             }
@@ -526,6 +518,45 @@ fn upstream_response_to_client(
     response
         .body(Body::from_stream(body))
         .expect("upstream response status and headers are valid")
+}
+
+struct ResponseOutcomeGuard {
+    admission: resilience::Admission,
+    policy: Arc<UpstreamPolicy>,
+    pending: bool,
+}
+
+impl ResponseOutcomeGuard {
+    fn new(admission: resilience::Admission, policy: Arc<UpstreamPolicy>, pending: bool) -> Self {
+        Self {
+            admission,
+            policy,
+            pending,
+        }
+    }
+
+    fn resolve_success(&mut self) {
+        if self.pending {
+            self.policy.record_success(&self.admission);
+            self.pending = false;
+        }
+    }
+
+    fn resolve_failure(&mut self) {
+        if self.pending {
+            self.policy.record_failure(&self.admission);
+            self.pending = false;
+        }
+    }
+}
+
+impl Drop for ResponseOutcomeGuard {
+    fn drop(&mut self) {
+        // Non-5xx headers prove that the upstream answered. If the downstream
+        // abandons the body, resolve the admission as a success instead of
+        // leaking a half-open probe or blaming a client cancellation on it.
+        self.resolve_success();
+    }
 }
 
 fn retry_allowed(method: &Method, headers: &HeaderMap) -> bool {
@@ -1373,6 +1404,67 @@ mod tests {
             .unwrap();
         assert_eq!(second.status(), StatusCode::SERVICE_UNAVAILABLE);
         assert_eq!(auth_gate_circuit_state(&app).await, "open");
+    }
+
+    #[tokio::test]
+    async fn dropping_a_half_open_response_body_resolves_the_probe() {
+        let (upstream, state) = spawn_sequence_upstream(vec![
+            StatusCode::INTERNAL_SERVER_ERROR,
+            StatusCode::NO_CONTENT,
+            StatusCode::NO_CONTENT,
+        ])
+        .await;
+        let mut config = test_config(upstream);
+        config.resilience.auth_gate.breaker_failure_threshold = 1;
+        config.resilience.auth_gate.breaker_open_duration = Duration::from_millis(1);
+        let (app, _) = app_with_rate_limit(
+            config,
+            Ok(RateLimitDecision {
+                allowed: true,
+                remaining: 10,
+                retry_after_seconds: 1,
+            }),
+        );
+
+        let failure = app
+            .clone()
+            .oneshot(
+                HttpRequest::post("/api/auth/login")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(failure.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        drop(failure);
+        assert_eq!(auth_gate_circuit_state(&app).await, "open");
+
+        tokio::time::sleep(Duration::from_millis(2)).await;
+        let probe = app
+            .clone()
+            .oneshot(
+                HttpRequest::post("/api/auth/login")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(probe.status(), StatusCode::NO_CONTENT);
+        assert_eq!(auth_gate_circuit_state(&app).await, "half_open");
+
+        drop(probe);
+
+        assert_eq!(auth_gate_circuit_state(&app).await, "closed");
+        let admitted = app
+            .oneshot(
+                HttpRequest::post("/api/auth/login")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(admitted.status(), StatusCode::NO_CONTENT);
+        assert_eq!(state.requests.load(Ordering::SeqCst), 3);
     }
 
     #[tokio::test]
