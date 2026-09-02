@@ -456,12 +456,11 @@ async fn forward(
         let upstream_response = match upstream_request.timeout(resilience.timeout).send().await {
             Ok(response) => response,
             Err(error) if attempt < max_retries => {
-                policy.record_failure();
                 warn!(upstream = ?upstream_name, attempt, error = %error, "retryable upstream transport failure");
                 continue;
             }
             Err(error) => {
-                policy.record_failure();
+                policy.record_failure(&admission);
                 return if error.is_timeout() {
                     Err(ForwardError::Timeout)
                 } else {
@@ -470,13 +469,10 @@ async fn forward(
             }
         };
         if upstream_response.status().is_server_error() && attempt < max_retries {
-            policy.record_failure();
             continue;
         }
         if upstream_response.status().is_server_error() {
-            policy.record_failure();
-        } else {
-            policy.record_success();
+            policy.record_failure(&admission);
         }
         return Ok(upstream_response_to_client(
             upstream_response,
@@ -502,14 +498,31 @@ fn upstream_response_to_client(
         }
     }
 
-    let count_body_error = !status.is_server_error();
-    let body = upstream_response.bytes_stream().map(move |chunk| {
-        let _keep_bulkhead_permit = &admission;
-        if count_body_error && chunk.is_err() {
-            policy.record_failure();
-        }
-        chunk
-    });
+    let track_outcome = !status.is_server_error();
+    let body = futures_util::stream::unfold(
+        (
+            Box::pin(upstream_response.bytes_stream()),
+            Some(admission),
+            policy,
+        ),
+        move |(mut upstream_body, mut admission, policy)| async move {
+            match upstream_body.next().await {
+                Some(Ok(chunk)) => Some((Ok(chunk), (upstream_body, admission, policy))),
+                Some(Err(error)) => {
+                    if track_outcome && let Some(completed) = admission.take() {
+                        policy.record_failure(&completed);
+                    }
+                    Some((Err(error), (upstream_body, admission, policy)))
+                }
+                None => {
+                    if track_outcome && let Some(completed) = admission.take() {
+                        policy.record_success(&completed);
+                    }
+                    None
+                }
+            }
+        },
+    );
     response
         .body(Body::from_stream(body))
         .expect("upstream response status and headers are valid")
@@ -979,6 +992,27 @@ mod tests {
         serde_json::from_slice(&body).unwrap()
     }
 
+    async fn auth_gate_circuit_state(app: &Router) -> String {
+        let readiness = app
+            .clone()
+            .oneshot(
+                HttpRequest::get("/health/ready")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let readiness = response_json(readiness).await;
+        readiness["upstream_breakers"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|entry| entry["upstream"] == "auth_gate")
+            .and_then(|entry| entry["state"].as_str())
+            .unwrap()
+            .to_owned()
+    }
+
     struct StubRevocationStore {
         result: Result<bool, RevocationError>,
         checks: AtomicUsize,
@@ -1232,6 +1266,113 @@ mod tests {
 
         assert_eq!(not_retried.status(), StatusCode::INTERNAL_SERVER_ERROR);
         assert_eq!(single_state.requests.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn retryable_5xx_counts_once_per_completed_client_request() {
+        let (upstream, state) = spawn_sequence_upstream(vec![
+            StatusCode::INTERNAL_SERVER_ERROR,
+            StatusCode::INTERNAL_SERVER_ERROR,
+            StatusCode::INTERNAL_SERVER_ERROR,
+            StatusCode::INTERNAL_SERVER_ERROR,
+            StatusCode::INTERNAL_SERVER_ERROR,
+            StatusCode::INTERNAL_SERVER_ERROR,
+        ])
+        .await;
+        let mut config = test_config(upstream);
+        config.resilience.auth_gate.breaker_failure_threshold = 2;
+        config.resilience.auth_gate.max_retries = 2;
+        let (app, _) = app_with_rate_limit(
+            config,
+            Ok(RateLimitDecision {
+                allowed: true,
+                remaining: 10,
+                retry_after_seconds: 1,
+            }),
+        );
+
+        let first = app
+            .clone()
+            .oneshot(
+                HttpRequest::post("/api/auth/login")
+                    .header("idempotency-key", "first")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(first.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(auth_gate_circuit_state(&app).await, "closed");
+
+        let second = app
+            .clone()
+            .oneshot(
+                HttpRequest::post("/api/auth/login")
+                    .header("idempotency-key", "second")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(second.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(auth_gate_circuit_state(&app).await, "open");
+        assert_eq!(state.requests.load(Ordering::SeqCst), 6);
+
+        let shed = app
+            .oneshot(
+                HttpRequest::post("/api/auth/login")
+                    .header("idempotency-key", "third")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(shed.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(state.requests.load(Ordering::SeqCst), 6);
+    }
+
+    #[tokio::test]
+    async fn retryable_transport_errors_count_once_per_completed_client_request() {
+        let unused_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let unused_address = unused_listener.local_addr().unwrap();
+        drop(unused_listener);
+        let mut config = test_config(Url::parse(&format!("http://{unused_address}/")).unwrap());
+        config.resilience.auth_gate.breaker_failure_threshold = 2;
+        config.resilience.auth_gate.max_retries = 2;
+        let (app, _) = app_with_rate_limit(
+            config,
+            Ok(RateLimitDecision {
+                allowed: true,
+                remaining: 10,
+                retry_after_seconds: 1,
+            }),
+        );
+
+        let first = app
+            .clone()
+            .oneshot(
+                HttpRequest::post("/api/auth/login")
+                    .header("idempotency-key", "first")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(first.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(auth_gate_circuit_state(&app).await, "closed");
+
+        let second = app
+            .clone()
+            .oneshot(
+                HttpRequest::post("/api/auth/login")
+                    .header("idempotency-key", "second")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(second.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(auth_gate_circuit_state(&app).await, "open");
     }
 
     #[tokio::test]
