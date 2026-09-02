@@ -1,15 +1,8 @@
 # ProjectY local development orchestration.
 #
-# The default profile loads the core topology. Pass `-- --full` to include the
-# remaining data stores and application services declared with Compose's
-# `full` profile.
-
-config.define_bool(
-    'full',
-    usage = 'Start the complete topology, including telemetry, pricing, media, console, Cassandra, MongoDB, and MinIO.',
-)
-cfg = config.parse()
-full = cfg.get('full', False)
+# The audited services remain the active topology while the strangler migration
+# replaces them one task at a time. The gateway is the first modernization
+# service and is the only public entry point added by this epic.
 
 local_env_exists = os.path.exists('.env')
 rabbitmq_definitions_exist = os.path.exists('.rabbitmq-definitions.json')
@@ -51,11 +44,9 @@ if missing_local_files:
     ) % ', '.join(missing_local_files)
     fail(missing_files_message)
 
-profiles = ['full'] if full else []
 docker_compose(
-    'deploy/overlays/selfhost/compose.yaml',
+    'docker-compose.yml',
     env_file = '.env',
-    profiles = profiles,
     project_name = 'projecty',
 )
 
@@ -81,6 +72,7 @@ def configure_live_update(image, context, manifests, install_command, build_comm
         image,
         context,
         dockerfile = context + '/Dockerfile',
+        target = 'development',
         live_update = update_steps,
     )
 
@@ -91,129 +83,38 @@ configure_live_update(
     'cd /workspace && cargo fetch --locked',
     'cd /workspace && cargo build --locked',
 )
-configure_live_update(
-    'projecty/rental-core:dev',
-    'services/rental-core',
-    ['services/rental-core/RentalCore.csproj'],
-    'cd /workspace && dotnet restore RentalCore.csproj',
-    'cd /workspace && dotnet build RentalCore.csproj --no-restore',
-)
-configure_live_update(
-    'projecty/media-guard:dev',
-    'services/media-guard',
-    ['services/media-guard/Cargo.toml', 'services/media-guard/Cargo.lock'],
-    'cd /workspace && cargo fetch --locked',
-    'cd /workspace && cargo build --locked',
-)
-configure_live_update(
-    'projecty/risk-pricing:dev',
-    'services/risk-pricing',
-    ['services/risk-pricing/pyproject.toml', 'services/risk-pricing/uv.lock'],
-    'cd /workspace && python -m pip install --disable-pip-version-check -e .',
-)
-configure_live_update(
-    'projecty/telemetry:dev',
-    'services/telemetry',
-    ['services/telemetry/mix.exs', 'services/telemetry/mix.lock'],
-    'cd /workspace && mix deps.get',
-    'cd /workspace && mix compile',
-)
-configure_live_update(
-    'projecty/console:dev',
-    'services/console',
-    ['services/console/package.json', 'services/console/package-lock.json'],
-    'cd /workspace && npm install --ignore-scripts',
-)
-
-bootstrap_script = ['pwsh', '-NoProfile', '-File', 'scripts/Initialize-LocalResource.ps1']
-bootstrap_script_bat = [
-    'powershell',
-    '-NoProfile',
-    '-ExecutionPolicy',
-    'Bypass',
-    '-File',
-    'scripts\\Initialize-LocalResource.ps1',
-]
-
-local_resource(
-    'cockroach-migrations',
-    bootstrap_script + ['-Resource', 'Cockroach'],
-    cmd_bat = bootstrap_script_bat + ['-Resource', 'Cockroach'],
-    deps = ['scripts/Initialize-LocalResource.ps1', 'deploy/db/sql'],
-    resource_deps = ['cockroachdb'],
-    labels = ['setup'],
-)
-local_resource(
-    'kafka-topics',
-    bootstrap_script + ['-Resource', 'Kafka'],
-    cmd_bat = bootstrap_script_bat + ['-Resource', 'Kafka'],
-    deps = ['scripts/Initialize-LocalResource.ps1', 'deploy/kafka/topics.txt'],
-    resource_deps = ['kafka'],
-    labels = ['setup'],
-)
-
-if full:
-    local_resource(
-        'cassandra-schema',
-        bootstrap_script + ['-Resource', 'Cassandra'],
-        cmd_bat = bootstrap_script_bat + ['-Resource', 'Cassandra'],
-        deps = ['scripts/Initialize-LocalResource.ps1', 'deploy/db/cassandra'],
-        resource_deps = ['cassandra'],
-        labels = ['setup'],
-    )
-    local_resource(
-        'minio-buckets',
-        bootstrap_script + ['-Resource', 'MinIO'],
-        cmd_bat = bootstrap_script_bat + ['-Resource', 'MinIO'],
-        deps = ['scripts/Initialize-LocalResource.ps1', 'deploy/minio/buckets.txt'],
-        resource_deps = ['minio'],
-        labels = ['setup'],
-    )
-
-infra_resources = ['cockroachdb', 'cockroach-init', 'redis', 'rabbitmq', 'kafka']
-observability_resources = ['otel-collector', 'prometheus', 'tempo', 'loki']
-service_resources = ['api-gateway', 'rental-core']
-
-if full:
-    infra_resources += ['cassandra', 'mongodb', 'minio']
-    service_resources += ['media-guard', 'risk-pricing', 'telemetry']
+infra_resources = ['postgres', 'redis', 'rabbitmq', 'mongodb', 'minio']
+observability_resources = ['tempo', 'loki', 'otel-collector', 'prometheus', 'grafana']
+setup_resources = ['auth-gate-migrations', 'rider-manager-migrations', 'moto-hub-migrations']
+service_resources = ['auth-gate', 'rider-manager', 'moto-hub', 'rental-operations']
 
 for resource in infra_resources:
     dc_resource(resource, labels = ['infra'])
 
 for resource in observability_resources:
-    dc_resource(resource, labels = ['observability'])
+    resource_links = []
+    if resource == 'grafana':
+        resource_links = [link('http://localhost:3000', 'Grafana')]
+    dc_resource(resource, labels = ['observability'], links = resource_links)
 
-service_setup_dependencies = {
-    'rental-core': ['cockroach-migrations', 'kafka-topics'],
-    'media-guard': ['minio-buckets'],
-    'risk-pricing': ['kafka-topics'],
-    'telemetry': ['cassandra-schema', 'kafka-topics'],
-}
+for resource in setup_resources:
+    dc_resource(resource, labels = ['setup'])
 
 for resource in service_resources:
     dc_resource(
         resource,
         labels = ['services'],
-        resource_deps = service_setup_dependencies.get(resource, []),
+        resource_deps = observability_resources,
     )
 
-dc_resource('toxiproxy', labels = ['drills'])
-
+dc_resource('pgadmin', labels = ['tools'], links = [link('http://localhost:5050', 'pgAdmin')])
 dc_resource(
-    'grafana',
-    labels = ['observability'],
-    links = [link('http://localhost:3001', 'Grafana')],
+    'api-gateway',
+    labels = ['services'],
+    links = [link('http://localhost:8090/health/ready', 'Gateway')],
+    resource_deps = observability_resources,
 )
 
-if full:
-    dc_resource(
-        'console',
-        labels = ['services'],
-        links = [link('http://localhost:3000', 'Console')],
-    )
-
-print('ProjectY profile: %s' % ('full' if full else 'core'))
 print('Tilt UI:  http://localhost:10350')
-print('Grafana:  http://localhost:3001')
-print('Console:  http://localhost:3000 (full profile)')
+print('Gateway:  http://localhost:8090')
+print('Grafana:  http://localhost:3000')

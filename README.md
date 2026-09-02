@@ -50,13 +50,14 @@ source locations are in the
 |---|---|
 | Audited baseline | Four ASP.NET Core services: `AuthGate`, `MotoHub`, `RiderManager`, and `RentalOperations` |
 | Data and messaging | PostgreSQL, MongoDB, RabbitMQ, and MinIO in the original local stack |
-| Original observability | Elasticsearch, Logstash, and Kibana |
-| Modernization scaffold | A container topology under `deploy/` for the planned gateway, transactional core, fault injection, and LGTM observability stack |
+| Active observability | Application OTLP exporters, OpenTelemetry Collector, Prometheus, Tempo, Loki, and Grafana |
+| Retired observability | The unauthenticated Elasticsearch, Logstash, and Kibana stack |
+| Modernization scaffold | A container topology under `deploy/` for the planned transactional core and fault injection |
 | Decision records | Eight records under [`docs/adr/`](docs/adr/README.md): 0000-0005 are the design trail, 0006-0007 are remediation decisions |
 
 The modernization compose file is a design scaffold: it references services
-that have not landed yet. It is deliberately not presented as a working demo.
-The root compose file runs the audited baseline only.
+that have not landed yet. The root compose file runs the audited services behind
+the Rust gateway together with the LGTM observability stack.
 
 ## Branches
 
@@ -79,12 +80,11 @@ State-changing API retries follow the shared
 
 ### Modernization development loop
 
-The root [`Tiltfile`](Tiltfile) organizes the self-hosted overlay at
-`deploy/overlays/selfhost/compose.yaml` into infrastructure, observability,
-service, and failure drill groups. The overlay composes the environment-neutral
-model in `deploy/base/` with local build, port, mount, and runtime settings. It
-requires Docker Compose 2.20 or newer, Tilt, and PowerShell (`powershell` on
-Windows or `pwsh` on macOS/Linux). Start the core profile with one command:
+The root [`Tiltfile`](Tiltfile) organizes `docker-compose.yml` into
+infrastructure, observability, setup, and service groups. It requires Docker
+Compose 2.20 or newer, Tilt, and PowerShell (`powershell` on Windows or `pwsh`
+on macOS/Linux). Start the audited services behind the Rust gateway, with LGTM
+ready before application startup, using one command:
 
 ```bash
 tilt up
@@ -101,41 +101,19 @@ To recover intentionally, stop the stack, remove volumes initialized with the
 old credentials, and run
 `powershell -ExecutionPolicy Bypass -File scripts/New-LocalSecrets.ps1 -Force`.
 
-The complete profile adds Cassandra, MongoDB, MinIO, media processing, risk
-pricing, telemetry, and the web console:
+The Tilt UI is at <http://localhost:10350> and the gateway listens at
+<http://localhost:8090>. Use `tilt down` to stop the stack. The one-shot EF Core
+migration containers appear as setup resources; infrastructure, the audited
+services and the temporary ELK stack are grouped separately.
 
-```bash
-tilt up -- --full
-```
+Gateway source is synced into its Rust development image and rebuilt in place;
+the Compose container restarts after a successful incremental build. The
+release image built by CI uses the Dockerfile's final distroless, non-root stage
+instead of the toolchain-bearing development stage.
 
-The Tilt UI is at <http://localhost:10350>, Grafana is at
-<http://localhost:3001>, and the full-profile console is at
-<http://localhost:3000>. Use `tilt down` to stop the selected profile.
-
-Tilt exposes the database and messaging bootstrap as setup resources. The core
-profile runs `cockroach-migrations` and `kafka-topics`; the full profile also
-runs `cassandra-schema` and `minio-buckets`. Each resource waits for its backing
-service to become ready and can be triggered again safely from the Tilt UI.
-Cockroach and Cassandra watch the scripts under `deploy/db/`, while Kafka and
-MinIO use the declarative lists in `deploy/kafka/topics.txt` and
-`deploy/minio/buckets.txt`. Schema files run one at a time in lexical filename
-order, so migrations use numbered names such as `002_add_index.sql` and remain
-safe to re-run.
-
-When a modernization service directory lands under `services/`, its source is
-synced into `/workspace` instead of rebuilding the image. Dependency manifests
-trigger the language-specific restore command, compiled services run an
-incremental build, and the Compose container restarts at the end of the update.
-Tilt's `restart_process()` extension does not support Docker Compose resources,
-so this topology uses the supported `restart_container()` step.
-
-There is not yet an honest all-green first-run time to publish. The Compose
-topology references `services/api-gateway`, `services/rental-core`, and the
-full-profile services that have not landed in the repository, so a clean clone
-cannot complete their image builds today. Once those service directories are
-implemented, the first successful cold start must be timed on a clean Docker
-cache and the measured hardware, network conditions, and duration recorded
-here before the modernization loop is presented as runnable.
+There is not yet an honest cold-start time to publish. The first successful
+start must still be timed on a clean Docker cache with the hardware and network
+conditions recorded before a duration is presented as reproducible.
 
 ## Verify published images
 

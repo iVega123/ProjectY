@@ -1,6 +1,4 @@
-﻿using Microsoft.Extensions.Options;
-using MotoHub.Configurations;
-using System.Net.Http.Json;
+﻿using System.Net.Http.Json;
 using System.Text.Json;
 
 namespace MotoHub.CrossCutting
@@ -8,14 +6,9 @@ namespace MotoHub.CrossCutting
     public class RentalOperationService : IRentalOperationService
     {
         private readonly HttpClient _httpClient;
-        private readonly RentalOperationsSettings _settings;
-
-        public RentalOperationService(IHttpClientFactory httpClientFactory, IOptions<RentalOperationsSettings> settings)
+        public RentalOperationService(IHttpClientFactory httpClientFactory)
         {
-            _httpClient = httpClientFactory.CreateClient();
-            _settings = settings.Value;
-            _httpClient.BaseAddress = new Uri(_settings.BaseUrl);
-            _httpClient.DefaultRequestHeaders.Add("X-API-Key", _settings.ApiKey);
+            _httpClient = httpClientFactory.CreateClient("rental-operations");
         }
 
         public async Task<bool> GetRentalsByMotorcycleLicencePlateAsync(string licensePlate)

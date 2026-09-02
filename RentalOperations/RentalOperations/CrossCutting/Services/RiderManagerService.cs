@@ -1,6 +1,4 @@
-﻿using Microsoft.Extensions.Options;
-using RentalOperations.Configurations;
-using RentalOperations.CrossCutting.Model;
+﻿using RentalOperations.CrossCutting.Model;
 using System.Text.Json;
 
 namespace RentalOperations.CrossCutting.Services
@@ -8,14 +6,9 @@ namespace RentalOperations.CrossCutting.Services
     public class RiderManagerService : IRiderManagerService
     {
         private readonly HttpClient _httpClient;
-        private readonly RiderManagerSettings _settings;
-
-        public RiderManagerService(IHttpClientFactory httpClientFactory, IOptions<RiderManagerSettings> settings)
+        public RiderManagerService(IHttpClientFactory httpClientFactory)
         {
-            _httpClient = httpClientFactory.CreateClient();
-            _settings = settings.Value;
-            _httpClient.BaseAddress = new Uri(_settings.BaseUrl);
-            _httpClient.DefaultRequestHeaders.Add("X-API-Key", _settings.ApiKey);
+            _httpClient = httpClientFactory.CreateClient("rider-manager");
         }
 
         public async Task<Rider> GetRiderByIdAsync(string riderId)

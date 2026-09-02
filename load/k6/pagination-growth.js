@@ -2,7 +2,7 @@ import http from "k6/http";
 import { check, fail, sleep } from "k6";
 import { Gauge, Rate, Trend } from "k6/metrics";
 
-const BASE_URL = __ENV.MOTO_HUB_URL || "http://localhost:8100";
+const BASE_URL = __ENV.MOTO_HUB_URL || "http://localhost:8090";
 const ADMIN_TOKEN = __ENV.ADMIN_TOKEN || "";
 const BASELINE_RECORDS = parseInt(__ENV.BASELINE_RECORDS || "100", 10);
 const GROWTH_RECORDS = parseInt(__ENV.GROWTH_RECORDS || "2000", 10);
@@ -36,9 +36,6 @@ function headers(idempotencyKey) {
     Authorization: `Bearer ${ADMIN_TOKEN}`,
     "Content-Type": "application/json",
   };
-  if (__ENV.MOTO_HUB_API_KEY) {
-    result["X-API-Key"] = __ENV.MOTO_HUB_API_KEY;
-  }
   if (idempotencyKey) {
     result["Idempotency-Key"] = idempotencyKey;
   }

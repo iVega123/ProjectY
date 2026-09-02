@@ -24,6 +24,8 @@ jobs:
     outputs:
       matrix: ${{ steps.matrix.outputs.matrix }}
       has_dotnet_changes: ${{ steps.matrix.outputs.has_dotnet_changes }}
+      has_rust_changes: ${{ steps.filter.outputs.api_gateway }}
+      has_observability_changes: ${{ steps.filter.outputs.observability }}
       image_matrix: ${{ steps.matrix.outputs.image_matrix }}
       has_image_changes: ${{ steps.matrix.outputs.has_image_changes }}
     steps:
@@ -34,6 +36,38 @@ jobs:
         run: |
           docker compose --file docker-compose.yml config --quiet --no-interpolate
           docker compose --file deploy/overlays/selfhost/compose.yaml config --quiet --no-interpolate
+
+      - name: Validate spanmetrics dashboard contract
+        shell: bash
+        run: |
+          metric_prefix=$(awk '$1 == "namespace:" { gsub(/\./, "_", $2); print $2; exit }' deploy/observability/otel-collector.yaml)
+          test "$metric_prefix" = "traces_span_metrics"
+          grep --recursive --quiet "${metric_prefix}_calls_total" deploy/observability/grafana
+          grep --recursive --quiet "${metric_prefix}_duration_milliseconds_bucket" deploy/observability/grafana
+          grep --quiet --extended-regexp '^[[:space:]]+unit: ms$' deploy/observability/otel-collector.yaml
+          ! grep --recursive --quiet "traces_spanmetrics_" deploy/observability/grafana
+          grep --fixed-strings --quiet 'service_name=\"rental-operations\"' deploy/observability/grafana/dashboards/slo-aluguel.json
+          grep --fixed-strings --quiet 'span_name=~\"POST /?api/Rental/create\"' deploy/observability/grafana/dashboards/slo-aluguel.json
+          ! grep --recursive --quiet 'rental-core' deploy/observability
+
+      - name: Validate application telemetry exporters
+        shell: bash
+        run: |
+          for project in \
+            AuthGate/AuthGate/AuthGate.csproj \
+            MotoHub/MotoHub/MotoHub.csproj \
+            RentalOperations/RentalOperations/RentalOperations.csproj \
+            RiderManager/RiderManager/RiderManager.csproj; do
+            grep --quiet 'OpenTelemetry.Exporter.OpenTelemetryProtocol' "$project"
+            grep --quiet 'Serilog.Sinks.OpenTelemetry' "$project"
+            grep --quiet 'Shared\\Observability' "$project"
+          done
+          grep --quiet 'AddAspNetCoreInstrumentation' Shared/Observability/ProjectYTelemetryExtensions.cs
+          grep --quiet 'AddHttpClientInstrumentation' Shared/Observability/ProjectYTelemetryExtensions.cs
+          grep --quiet 'WriteTo.OpenTelemetry' Shared/Observability/ProjectYTelemetryExtensions.cs
+          grep --quiet 'opentelemetry-otlp' services/api-gateway/Cargo.toml
+          grep --quiet 'OpenTelemetryTracingBridge' services/api-gateway/src/telemetry.rs
+          grep --quiet 'HeaderInjector' services/api-gateway/src/lib.rs
 
       - name: Detect relevant paths
         id: filter
@@ -53,8 +87,7 @@ jobs:
               - 'NuGet.config'
             moto_hub:
               - 'MotoHub/**'
-              - 'Shared/Health/**'
-              - 'Shared/Hosting/**'
+              - 'Shared/**'
               - '.dockerignore'
               - '.github/workflows/ci.yml'
               - '.grype.yaml'
@@ -65,8 +98,7 @@ jobs:
               - 'NuGet.config'
             rental_operations:
               - 'RentalOperations/**'
-              - 'Shared/Health/**'
-              - 'Shared/Hosting/**'
+              - 'Shared/**'
               - '.dockerignore'
               - '.github/workflows/ci.yml'
               - '.grype.yaml'
@@ -86,6 +118,17 @@ jobs:
               - 'Directory.Build.*'
               - 'Directory.Packages.props'
               - 'NuGet.config'
+            api_gateway:
+              - 'services/api-gateway/**'
+              - '.github/workflows/ci.yml'
+              - '.grype.yaml'
+              - '.trivyignore.yaml'
+            observability:
+              - 'deploy/observability/**'
+              - 'docker-compose.yml'
+              - 'Tiltfile'
+              - 'logstash/**'
+              - '.github/workflows/ci.yml'
 
       - name: Build CI matrices
         id: matrix
@@ -95,6 +138,7 @@ jobs:
           MOTO_HUB_CHANGED: ${{ steps.filter.outputs.moto_hub }}
           RENTAL_OPERATIONS_CHANGED: ${{ steps.filter.outputs.rental_operations }}
           RIDER_MANAGER_CHANGED: ${{ steps.filter.outputs.rider_manager }}
+          API_GATEWAY_CHANGED: ${{ steps.filter.outputs.api_gateway }}
         run: |
           matrix='{"include":[]}'
           image_matrix='{"include":[]}'
@@ -133,11 +177,61 @@ jobs:
           if [[ "$RIDER_MANAGER_CHANGED" == "true" ]]; then
             add_service "RiderManager" "RiderManager/RiderManager.sln" "rider-manager" "." "RiderManager/RiderManager/Dockerfile" "ghcr.io/ivega123/projecty/rider-manager"
           fi
+          if [[ "$API_GATEWAY_CHANGED" == "true" ]]; then
+            image_matrix=$(jq --compact-output \
+              '.include += [{service: "api-gateway", image: "api-gateway", context: "services/api-gateway", dockerfile: "services/api-gateway/Dockerfile", repository: "ghcr.io/ivega123/projecty/api-gateway"}]' \
+              <<< "$image_matrix")
+          fi
 
           echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
           echo "has_dotnet_changes=$(jq --raw-output '.include | length > 0' <<< "$matrix")" >> "$GITHUB_OUTPUT"
           echo "image_matrix=$image_matrix" >> "$GITHUB_OUTPUT"
           echo "has_image_changes=$(jq --raw-output '.include | length > 0' <<< "$image_matrix")" >> "$GITHUB_OUTPUT"
+
+  observability:
+    name: Observability stack
+    needs: changes
+    if: needs.changes.outputs.has_observability_changes == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Generate ephemeral local credentials
+        shell: pwsh
+        run: ./scripts/New-LocalSecrets.ps1
+
+      - name: Start LGTM stack
+        run: |
+          docker compose --env-file .env up --build --detach --wait --wait-timeout 240 \
+            tempo loki otel-collector prometheus grafana
+
+      - name: Verify Grafana provisioning and datasource health
+        shell: bash
+        run: |
+          grafana_user=$(awk -F= '$1 == "GRAFANA_USER" { print $2 }' .env)
+          grafana_password=$(awk -F= '$1 == "GRAFANA_PASSWORD" { print $2 }' .env)
+
+          for uid in prometheus tempo loki; do
+            curl --fail --silent --show-error \
+              --user "$grafana_user:$grafana_password" \
+              "http://localhost:3000/api/datasources/uid/$uid/health" \
+              | jq --exit-status '.status == "OK"' >/dev/null
+          done
+
+          curl --fail --silent --show-error \
+            --user "$grafana_user:$grafana_password" \
+            'http://localhost:3000/api/search?type=dash-db' \
+            | jq --exit-status \
+              '[.[] | select(.folderTitle == "ProjectY")] | length == 2' >/dev/null
+
+      - name: Print observability logs on failure
+        if: failure()
+        run: docker compose --env-file .env logs --no-color tempo loki otel-collector prometheus grafana
+
+      - name: Stop LGTM stack
+        if: always()
+        run: docker compose --env-file .env down --volumes
 
   dotnet:
     name: .NET / ${{ matrix.service }}
@@ -183,6 +277,45 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - run: echo "No .NET service paths changed; service jobs were skipped."
+
+  rust:
+    name: Rust / api-gateway
+    needs: changes
+    if: needs.changes.outputs.has_rust_changes == 'true'
+    runs-on: ubuntu-latest
+    env:
+      TEST_REDIS_URL: redis://127.0.0.1:6379/
+    services:
+      redis:
+        image: redis:8.10-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    defaults:
+      run:
+        working-directory: services/api-gateway
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.98.0 --profile minimal --component clippy,rustfmt --no-self-update
+
+      - name: Select pinned Rust toolchain
+        run: rustup override set 1.98.0
+
+      - name: Verify formatting
+        run: cargo fmt -- --check
+
+      - name: Lint
+        run: cargo clippy --locked --all-targets -- -D warnings
+
+      - name: Test
+        run: cargo test --locked --all-targets
 
   images:
     name: Image security / ${{ matrix.service }}
@@ -419,8 +552,10 @@ jobs:
     name: Required
     needs:
       - changes
+      - observability
       - dotnet
       - no_relevant_changes
+      - rust
       - images
       - publish
       - secrets
@@ -430,8 +565,10 @@ jobs:
       - name: Verify CI result
         env:
           CHANGES_RESULT: ${{ needs.changes.result }}
+          OBSERVABILITY_RESULT: ${{ needs.observability.result }}
           DOTNET_RESULT: ${{ needs.dotnet.result }}
           NO_CHANGES_RESULT: ${{ needs.no_relevant_changes.result }}
+          RUST_RESULT: ${{ needs.rust.result }}
           IMAGES_RESULT: ${{ needs.images.result }}
           PUBLISH_RESULT: ${{ needs.publish.result }}
           SECRETS_RESULT: ${{ needs.secrets.result }}
@@ -441,7 +578,9 @@ jobs:
         shell: bash
         run: |
           [[ "$CHANGES_RESULT" == "success" ]]
+          [[ "$OBSERVABILITY_RESULT" == "success" || "$OBSERVABILITY_RESULT" == "skipped" ]]
           [[ "$DOTNET_RESULT" == "success" || "$NO_CHANGES_RESULT" == "success" ]]
+          [[ "$RUST_RESULT" == "success" || "$RUST_RESULT" == "skipped" ]]
           [[ "$IMAGES_RESULT" == "success" || "$IMAGES_RESULT" == "skipped" ]]
           [[ "$SECRETS_RESULT" == "success" ]]
 

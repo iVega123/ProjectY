@@ -1,15 +1,11 @@
-using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.IdentityModel.Tokens;
 using Minio;
 using RabbitMQ.Client;
 using RiderManager.Configurations;
 using RiderManager.Data;
 using Serilog.Formatting.Compact;
 using Serilog;
-using System.Text;
 using Microsoft.OpenApi.Models;
-using RiderManager.Filters;
 using RiderManager.Services.RiderServices;
 using RiderManager.Repositories;
 using RiderManager.Services.RabbitMQService;
@@ -20,9 +16,10 @@ using RiderManager.Services;
 using Npgsql;
 using ProjectY.Shared.Health;
 using ProjectY.Shared.Hosting;
-using Serilog.Sinks.Elasticsearch;
 using ProjectY.Shared.Messaging;
 using ProjectY.Shared.Idempotency;
+using ProjectY.Shared.Observability;
+using ProjectY.Shared.Security;
 
 if (await HealthProbeCommand.TryRunAsync(args))
 {
@@ -55,20 +52,17 @@ builder.Services.AddSingleton(new QueueMessageAuthenticator(
 builder.Services.AddProjectYIdempotency(builder.Configuration, "rider-manager");
 
 
-var applicationName = builder.Configuration["ApplicationName"];
+var serviceName = builder.Configuration["OTEL_SERVICE_NAME"]
+    ?? builder.Configuration["ApplicationName"]
+    ?? "rider-manager";
 
-var elasticUrl = builder.Configuration["ElasticSearchURL"];
+builder.Services.AddProjectYTelemetry(builder.Configuration, serviceName);
 
 Log.Logger = new LoggerConfiguration()
     .Enrich.FromLogContext()
-    .Enrich.WithProperty("ApplicationName", applicationName)
+    .Enrich.WithProperty("ApplicationName", serviceName)
     .WriteTo.Console()
-    .WriteTo.Elasticsearch(new ElasticsearchSinkOptions(new Uri(elasticUrl))
-    {
-        AutoRegisterTemplate = true,
-        AutoRegisterTemplateVersion = AutoRegisterTemplateVersion.ESv7,
-        IndexFormat = $"{applicationName.ToLower()}-logs-{DateTime.UtcNow:yyyy.MM}"
-    })
+    .WriteToProjectYTelemetry(builder.Configuration, serviceName)
     .CreateLogger();
 
 builder.Host.UseSerilog();
@@ -76,31 +70,13 @@ builder.Host.UseSerilog();
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
     options.UseNpgsql(builder.Configuration.GetConnectionString("Postgresql")));
 
-builder.Services.AddAuthentication(options =>
-{
-    options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
-    options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
-}).AddJwtBearer(options =>
-{
-    var jwtKey = builder.Configuration["Jwt:SigningKey"] ?? throw new InvalidOperationException("Jwt:SigningKey is not configured.");
-    var jwtIssuer = builder.Configuration["Jwt:Issuer"] ?? throw new InvalidOperationException("Jwt:Issuer is not configured.");
-    var jwtAudience = builder.Configuration["Jwt:Audience"] ?? throw new InvalidOperationException("Jwt:Audience is not configured.");
-    options.TokenValidationParameters = new TokenValidationParameters
-    {
-        ValidateIssuerSigningKey = true,
-        IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey)),
-        ValidateIssuer = true,
-        ValidIssuer = jwtIssuer,
-        ValidateAudience = true,
-        ValidAudience = jwtAudience
-    };
-});
+builder.Services.AddGatewayIdentityAuthentication(
+    builder.Configuration,
+    "projecty.rider-manager");
 
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddAutoMapper(_ => { }, typeof(Program));
-builder.Services.AddScoped<AdminAuthorizationFilter>();
-builder.Services.AddScoped<AuthorizationFilter>();
 builder.Services.AddScoped<IRiderService, RiderService>();
 builder.Services.AddScoped<IRiderRepository, RiderRepository>();
 builder.Services.AddSingleton<IRabbitMqService, RabbitMqService>();
@@ -122,28 +98,6 @@ builder.Services.AddSwaggerGen(c =>
     c.OperationFilter<IdempotencyKeyOperationFilter>();
     c.SwaggerDoc("v1", new OpenApiInfo { Title = "RiderManager", Version = "v1" });
 
-    // Configuração do esquema de segurança JWT no Swagger
-    var securityScheme = new OpenApiSecurityScheme
-    {
-        Name = "JWT Authentication",
-        Description = "Enter JWT Bearer token **_only_**",
-        In = ParameterLocation.Header,
-        Type = SecuritySchemeType.Http,
-        Scheme = "bearer",
-        BearerFormat = "JWT",
-        Reference = new OpenApiReference
-        {
-            Id = JwtBearerDefaults.AuthenticationScheme,
-            Type = ReferenceType.SecurityScheme
-        }
-    };
-    c.AddSecurityDefinition(JwtBearerDefaults.AuthenticationScheme, securityScheme);
-
-    var securityRequirement = new OpenApiSecurityRequirement
-    {
-        { securityScheme, new[] { "Bearer" } }
-    };
-    c.AddSecurityRequirement(securityRequirement);
 });
 
 var app = builder.Build();

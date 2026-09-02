@@ -6,7 +6,9 @@ Issue #98 makes every public collection endpoint cursor-paged with a server-side
 - RiderManager walks the rider primary key and joins the stored CNH URL in the same query.
 - RentalOperations lists a user's rentals through `ix_rentals_user_cursor`; motorcycle availability and overlap predicates run inside MongoDB and are index-backed.
 
-Run the growth check against the root Compose stack with a local k6 binary after obtaining an admin JWT for MotoHub:
+Run the growth check through the root Compose gateway with a local k6 binary
+after obtaining an admin access token for the MotoHub audience from the identity
+issuer delivered by issue #136:
 
 ```powershell
 $env:ADMIN_TOKEN = '<admin-jwt>'

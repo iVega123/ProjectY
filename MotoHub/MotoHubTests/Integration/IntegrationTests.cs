@@ -1,18 +1,15 @@
 ﻿using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.IdentityModel.Tokens;
 using Microsoft.EntityFrameworkCore;
 using MotoHub.Data;
 using MotoHub.DTOs;
 using MotoHub.Models;
 using MotoHub.Services;
 using Newtonsoft.Json;
-using System.IdentityModel.Tokens.Jwt;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
-using System.Security.Claims;
 using System.Text;
 
 namespace MotoHubTests.Integration
@@ -20,7 +17,7 @@ namespace MotoHubTests.Integration
     public class IntegrationTests : IClassFixture<CustomWebApplicationFactory<Program>>
     {
         private static int _plateSequence;
-        private readonly WebApplicationFactory<Program> _factory;
+        private readonly CustomWebApplicationFactory<Program> _factory;
 
         public IntegrationTests(CustomWebApplicationFactory<Program> factory)
         {
@@ -61,7 +58,7 @@ namespace MotoHubTests.Integration
         {
             // Arrange
             var client = _factory.CreateClient();
-            var token = GenerateJwtToken();
+            var token = GenerateGatewayIdentityMarker();
 
             client.DefaultRequestHeaders.Add("Authorization", $"Bearer {token}");
             // Act
@@ -79,7 +76,7 @@ namespace MotoHubTests.Integration
             var client = _factory.CreateClient();
             var motorcycle = new MotorcycleDTO { LicensePlate = NextPlate(), Model = "Honda", Year = 2020 };
 
-            var token = GenerateJwtToken();
+            var token = GenerateGatewayIdentityMarker();
 
             // Add the token to the HTTP headers
             client.DefaultRequestHeaders.Add("Authorization", $"Bearer {token}");
@@ -99,7 +96,7 @@ namespace MotoHubTests.Integration
             using var client = _factory.CreateClient();
             client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
                 "Bearer",
-                GenerateJwtToken());
+                GenerateGatewayIdentityMarker());
             var licensePlate = NextPlate();
             var response = await client.PostAsJsonAsync("/api/motorcycles", new MotorcycleDTO
             {
@@ -126,7 +123,7 @@ namespace MotoHubTests.Integration
             // Arrange
             var client = _factory.CreateClient();
             var licensePlate = NextPlate();
-            var token = GenerateJwtToken();
+            var token = GenerateGatewayIdentityMarker();
             client.DefaultRequestHeaders.Add("Authorization", $"Bearer {token}");
 
             var createResponse = await client.PostAsJsonAsync(
@@ -148,7 +145,7 @@ namespace MotoHubTests.Integration
             // Arrange
             var client = _factory.CreateClient();
             var licensePlate = "NonExisting";
-            var token = GenerateJwtToken();
+            var token = GenerateGatewayIdentityMarker();
             client.DefaultRequestHeaders.Add("Authorization", $"Bearer {token}");
 
             // Act
@@ -168,7 +165,7 @@ namespace MotoHubTests.Integration
             var motorcycle = new MotorcycleDTO { LicensePlate = originalLicensePlate, Model = "Honda", Year = 2020 };
             var updatedMotorcycle = new MotorcycleDTO { LicensePlate = newLicensePlate, Model = "UpdatedModel", Year = 2021 };
 
-            var token = GenerateJwtToken();
+            var token = GenerateGatewayIdentityMarker();
             client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
 
             // Act
@@ -191,7 +188,7 @@ namespace MotoHubTests.Integration
             var licensePlate = "NonExisting";
             var updatedMotorcycle = new MotorcycleDTO { LicensePlate = licensePlate, Model = "UpdatedModel", Year = 2021 };
 
-            var token = GenerateJwtToken();
+            var token = GenerateGatewayIdentityMarker();
             client.DefaultRequestHeaders.Add("Authorization", $"Bearer {token}");
 
             // Act
@@ -209,7 +206,7 @@ namespace MotoHubTests.Integration
             var client = _factory.CreateClient();
             var licensePlate = NextPlate();
 
-            var token = GenerateJwtToken();
+            var token = GenerateGatewayIdentityMarker();
             client.DefaultRequestHeaders.Add("Authorization", $"Bearer {token}");
 
             var createResponse = await client.PostAsJsonAsync(
@@ -232,7 +229,7 @@ namespace MotoHubTests.Integration
             var client = _factory.CreateClient();
             var licensePlate = "NonExisting";
 
-            var token = GenerateJwtToken();
+            var token = GenerateGatewayIdentityMarker();
             client.DefaultRequestHeaders.Add("Authorization", $"Bearer {token}");
 
             // Act
@@ -294,7 +291,7 @@ namespace MotoHubTests.Integration
             var client = _factory.CreateClient();
             var motorcycle = new MotorcycleDTO { LicensePlate = NextPlate(), Model = "Honda", Year = 2020 };
 
-            var token = GenerateJwtToken();
+            var token = GenerateGatewayIdentityMarker();
             client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
 
             var content = new StringContent(JsonConvert.SerializeObject(motorcycle), Encoding.UTF8, "application/json");
@@ -314,7 +311,7 @@ namespace MotoHubTests.Integration
         {
             // Arrange
             var client = _factory.CreateClient();
-            var invalidToken = GenerateInvalidJwtToken();
+            var invalidToken = GenerateInvalidIdentityMarker();
 
             client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", invalidToken);
 
@@ -334,7 +331,7 @@ namespace MotoHubTests.Integration
             using var client = _factory.CreateClient();
             client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
                 "Bearer",
-                GenerateJwtToken());
+                GenerateGatewayIdentityMarker());
 
             var response = await client.PostAsJsonAsync("/api/motorcycles", new MotorcycleDTO
             {
@@ -355,7 +352,7 @@ namespace MotoHubTests.Integration
             using var client = _factory.CreateClient();
             client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
                 "Bearer",
-                GenerateJwtToken());
+                GenerateGatewayIdentityMarker());
 
             var response = await client.PostAsJsonAsync("/api/motorcycles", new MotorcycleDTO
             {
@@ -374,7 +371,7 @@ namespace MotoHubTests.Integration
             using var client = _factory.CreateClient();
             client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
                 "Bearer",
-                GenerateJwtToken());
+                GenerateGatewayIdentityMarker());
 
             var response = await client.PostAsJsonAsync("/api/motorcycles", new MotorcycleDTO
             {
@@ -388,74 +385,39 @@ namespace MotoHubTests.Integration
         }
 
         [Fact]
-        public async Task GetAll_WithInvalidApiKey_ReturnsUnauthorized()
+        public async Task GetAll_WithLegacyApiKey_ReturnsUnauthorized()
         {
-            // Arrange
             var client = _factory.CreateClient();
-            var invalidApiKey = GenerateInvalidApiKey();
+            client.DefaultRequestHeaders.Add("X-API-KEY", "retired-api-key");
 
-            client.DefaultRequestHeaders.Add("X-API-KEY", invalidApiKey);
-
-            // Act
             var response = await client.GetAsync("/api/motorcycles");
 
-            // Assert
             Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
         }
 
-        private string GenerateInvalidApiKey()
+        [Fact]
+        public async Task GetAll_WithForgedGatewayIdentity_ReturnsUnauthorized()
         {
-            return "30cee9e2-9a38-4aad-8fe6-0398bd7f2a25";
+            var client = _factory.CreateClient();
+            client.DefaultRequestHeaders.Add("x-identity-key-id", "test-v1");
+            client.DefaultRequestHeaders.Add("x-identity-subject", "forged-admin");
+            client.DefaultRequestHeaders.Add("x-identity-roles", "Admin");
+            client.DefaultRequestHeaders.Add(
+                "x-identity-issued-at",
+                DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString());
+            client.DefaultRequestHeaders.Add("x-identity-signature", "v1=forged");
+
+            var response = await client.GetAsync("/api/motorcycles");
+
+            Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
         }
 
         private static string NextPlate() =>
             $"TST{Interlocked.Increment(ref _plateSequence) % 10000:D4}";
 
-        private string GenerateInvalidJwtToken()
-        {
-            var claims = new List<Claim>
-            {
-                new Claim(ClaimTypes.Name, "InvalidUser"),
-                new Claim(ClaimTypes.Email, "invalid@example.com"),
-                new Claim(ClaimTypes.Role, "Guest")
-            };
-
-            var invalidKey = "ThisIsAnInvalidKeyForTestingas@asda";
-            var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(invalidKey));
-            var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
-
-            var token = new JwtSecurityToken(
-                claims: claims,
-                expires: DateTime.Now.AddMinutes(-1),
-                signingCredentials: creds);
-
-            var tokenHandler = new JwtSecurityTokenHandler();
-            return tokenHandler.WriteToken(token);
-        }
+        private string GenerateInvalidIdentityMarker() => "invalid";
 
 
-        private string GenerateJwtToken()
-        {
-            var claims = new List<Claim>
-            {
-                new Claim(ClaimTypes.Name, "TestUser"),
-                new Claim(ClaimTypes.Email, "test@example.com"),
-                new Claim(ClaimTypes.Role, "Admin")
-            };
-
-            var jwtKey = CustomWebApplicationFactory<Program>.JwtKey;
-            var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey));
-            var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
-
-            var token = new JwtSecurityToken(
-                issuer: CustomWebApplicationFactory<Program>.JwtIssuer,
-                audience: CustomWebApplicationFactory<Program>.JwtAudience,
-                claims: claims,
-                expires: DateTime.Now.AddHours(1),
-                signingCredentials: creds);
-
-            var tokenHandler = new JwtSecurityTokenHandler();
-            return tokenHandler.WriteToken(token);
-        }
+        private string GenerateGatewayIdentityMarker() => "valid-admin";
     }
 }

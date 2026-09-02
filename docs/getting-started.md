@@ -1,9 +1,10 @@
 # Running the audited baseline locally
 
 This guide starts the original four-service system that was reviewed in the
-[architecture and security audit](AUDITORIA-ARQUITETURA-SEGURANCA.md). It does
-not start the modernization topology under `deploy/`; that file is currently a
-design scaffold and references services that have not been implemented yet.
+[architecture and security audit](AUDITORIA-ARQUITETURA-SEGURANCA.md), with the
+Rust gateway in front and the LGTM observability stack running as the first
+strangler-migration components. The remaining topology under `deploy/` is still
+a design scaffold for services that have not been implemented yet.
 
 ## Safety warning
 
@@ -28,9 +29,11 @@ starting.
 
 | Infrastructure service | Required host ports |
 |---|---|
-| Elasticsearch | `9200`, `9300` |
-| Logstash | `5000` |
-| Kibana | `5601` |
+| OpenTelemetry Collector | `4317`, `4318`, `8889` |
+| Prometheus | `9090` |
+| Tempo | `3200` |
+| Loki | `3100` |
+| Grafana | `3000` |
 | PostgreSQL | `5432` |
 | Redis | `6379` |
 | pgAdmin | `5050` |
@@ -39,6 +42,7 @@ starting.
 
 | Application service | Required host ports |
 |---|---|
+| API Gateway | `8090` |
 | Auth Gate | `8080`, `8181` |
 | Rider Manager | `8000`, `8001` |
 | MotoHub | `8100`, `8101` |
@@ -53,8 +57,8 @@ host-side mapping in `docker-compose.yml` before starting the stack.
 ## Start the stack
 
 Clone the repository, then create fresh local credentials. The generated `.env`
-is ignored by Git and includes independent JWT signing keys and RabbitMQ
-credentials for every service:
+is ignored by Git and includes the legacy AuthGate JWT issuer keys, the gateway
+identity-envelope key, and RabbitMQ credentials for every service:
 
 ```bash
 git clone https://github.com/iVega123/ProjectY.git
@@ -91,6 +95,12 @@ Then start the stack:
 docker compose up --build
 ```
 
+Tilt uses the same Compose model and adds live update for the Rust gateway:
+
+```bash
+tilt up
+```
+
 PostgreSQL must become healthy before the one-shot AuthGate, MotoHub, and
 RiderManager migration containers run. Each application starts only after its
 migration container exits successfully. See
@@ -104,10 +114,23 @@ depends on the network connection and Docker cache.
 
 | Service | Local URL |
 |---|---|
+| API Gateway | <http://localhost:8090> |
 | Auth Gate | <http://localhost:8080> |
 | Rider Manager | <http://localhost:8000> |
 | MotoHub | <http://localhost:8100> |
 | Rental Operations | <http://localhost:8200> |
+
+Grafana is available at <http://localhost:3000>. Sign in with the generated
+`GRAFANA_USER` and `GRAFANA_PASSWORD` values from `.env`; both ProjectY
+dashboards and the Prometheus, Tempo, and Loki datasources are provisioned at
+startup.
+
+The four ASP.NET Core services instrument inbound requests and outbound
+`HttpClient` calls with the OpenTelemetry SDK. The Rust gateway creates a
+server span for each proxied request and propagates its W3C trace context to the
+upstream. Both runtimes keep their structured console output and also export
+logs and traces over OTLP to the Collector. The rental SLO dashboard selects
+the active `rental-operations` service and its `POST /api/Rental/create` span.
 
 The audited baseline Compose stack runs every application in `Production`, so
 Swagger and the developer exception page are disabled. Local IDE launch
@@ -117,9 +140,48 @@ alone never exposes Swagger from a `Production` process. Set
 `SWAGGER_ENABLED=false` in `.env` to disable Swagger in the self-hosted
 development overlay without editing its Compose files.
 
+Application traffic enters through the gateway. Existing service ports remain
+published temporarily for operational migration, but the domain APIs reject
+direct calls without a fresh, gateway-signed identity envelope. The gateway routes
+`/api/auth/**`, `/api/riders/**`, `/api/motorcycles/**`, and `/api/rental/**` to
+their current owners.
+
 Only the HTTP endpoints above are documented as usable. The compose file also
 publishes ports that older documentation described as HTTPS, but it configures
 no certificates or HTTPS listener; the audit records this as finding A4.
+
+The gateway already enforces the target EdDSA/JWKS trust boundary and strips
+credentials before forwarding a short-lived signed identity envelope. Domain
+services do not parse JWTs; they verify that envelope and apply only role and
+resource-ownership rules. Calls between domain services propagate the verified
+identity through the same signed envelope, replacing the former API keys.
+
+The legacy .NET AuthGate still emits HMAC tokens, so authenticated traffic will
+use the gateway once the Go identity service in issue #136 provides the issuer
+and JWKS. Until then, the gateway rejects those legacy tokens instead of silently
+weakening the new boundary; login and rider registration remain public through
+port `8090`.
+
+Once the identity issuer is available, rental creation also requires Redis for
+the immediate-revocation check defined by ADR 0017. The denylist key is
+`projecty:revoked:jti:<jti>` and expires no later than the access token. Redis
+failure blocks only that high-value operation; ordinary token verification
+continues from the bounded JWKS cache.
+
+The gateway rate limiter is already active for public and protected routes. It
+uses an atomic Redis token bucket shared by every gateway replica, with a
+stricter bucket for `/api/auth/**`. Unlike the high-value denylist, it fails
+open: stopping Redis allows ordinary traffic, omits the remaining-token header,
+and increments `gateway_ratelimit_degraded_total` on the gateway `/metrics`
+endpoint and the platform Grafana dashboard.
+
+The gateway also isolates each legacy upstream independently. Requests have a
+low per-attempt timeout, acquire a bulkhead permit without queueing, and open a
+circuit after repeated transport errors, timeouts, or `5xx` responses. Safe
+methods and requests carrying `Idempotency-Key` retry with exponential full
+jitter. Saturated or open dependencies are shed with `503` and `Retry-After`;
+an open breaker is visible in `/health/ready`, `/metrics`, and Grafana without
+making the whole gateway unready.
 
 ## Bootstrap the first administrator
 
@@ -191,24 +253,23 @@ routes served by the same process.
 
 ## Verify startup gates
 
-The modernization Compose graph waits for real health instead of elapsed time.
+The root Compose and Tilt graphs wait for real health instead of elapsed time.
 Tempo and Loki become healthy first, followed by the OpenTelemetry Collector,
 Prometheus, and Grafana. Application services wait for a healthy collector and
-for each infrastructure dependency they use through Toxiproxy.
+for each infrastructure dependency they use.
 
-The observability portion can be exercised before the modernization service
-builds land:
+The observability portion can be exercised independently:
 
 ```bash
-docker compose --env-file .env -f deploy/overlays/selfhost/compose.yaml up --build -d \
-  tempo loki otel-collector prometheus grafana toxiproxy
-docker compose --env-file .env -f deploy/overlays/selfhost/compose.yaml ps
+docker compose --env-file .env up --build -d \
+  tempo loki otel-collector prometheus grafana
+docker compose --env-file .env ps
 
 # Dependents must retain their container IDs and return to all-green.
-docker compose --env-file .env -f deploy/overlays/selfhost/compose.yaml ps -q \
+docker compose --env-file .env ps -q \
   otel-collector prometheus grafana
-docker compose --env-file .env -f deploy/overlays/selfhost/compose.yaml restart loki
-docker compose --env-file .env -f deploy/overlays/selfhost/compose.yaml ps -q \
+docker compose --env-file .env restart loki
+docker compose --env-file .env ps -q \
   otel-collector prometheus grafana
 ```
 
@@ -228,9 +289,9 @@ Named volumes are retained so local database contents survive the restart.
 
 ## Known limitations
 
-- The root `docker-compose.yml` is the audited legacy baseline, not a production
-  deployment definition. It requires secrets from the local environment and
-  contains no committed secret defaults.
+- The root `docker-compose.yml` combines the audited services with the gateway
+  and LGTM stack; it is not a production deployment definition. It requires
+  secrets from the local environment and contains no committed secret defaults.
 - Supporting databases, queues, object storage, and observability tools publish
   host ports with development settings.
 - The modernization topology in `deploy/overlays/selfhost/compose.yaml` is not

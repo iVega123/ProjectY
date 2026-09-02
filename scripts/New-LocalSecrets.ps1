@@ -116,9 +116,7 @@ $values = [ordered]@{
     MOTO_HUB_JWT_SIGNING_KEY          = (New-RandomValue)
     RIDER_MANAGER_JWT_SIGNING_KEY     = (New-RandomValue)
     RENTAL_OPERATIONS_JWT_SIGNING_KEY = (New-RandomValue)
-    MOTO_HUB_API_KEY                  = (New-RandomValue)
-    RIDER_MANAGER_API_KEY             = (New-RandomValue)
-    RENTAL_OPERATIONS_API_KEY         = (New-RandomValue)
+    GATEWAY_IDENTITY_SIGNING_KEY      = (New-RandomValue)
 }
 
 $lines = @(

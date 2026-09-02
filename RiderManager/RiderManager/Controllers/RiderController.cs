@@ -1,7 +1,6 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using RiderManager.DTOs;
-using RiderManager.Filters;
 using RiderManager.Managers;
 using System.Security.Claims;
 
@@ -9,6 +8,7 @@ namespace RiderManager.Controllers
 {
     [Route("api/[controller]")]
     [ApiController]
+    [Authorize]
     public class RidersController : ControllerBase
     {
         private readonly IRiderManager _riderManager;
@@ -18,8 +18,7 @@ namespace RiderManager.Controllers
             _riderManager = riderManager;
         }
 
-        [Authorize]
-        [ServiceFilter(typeof(AdminAuthorizationFilter))]
+        [Authorize(Roles = "Admin")]
         [HttpGet]
         public async Task<IActionResult> GetAllRiders(
             [FromQuery] string? cursor,
@@ -36,7 +35,6 @@ namespace RiderManager.Controllers
         }
 
 
-        [ServiceFilter(typeof(AdminAuthorizationFilter))]
         [HttpGet("{userId}")]
         public async Task<IActionResult> GetRiderByUserId(string userId)
         {
@@ -48,8 +46,7 @@ namespace RiderManager.Controllers
             return Ok(rider);
         }
 
-        [Authorize]
-        [ServiceFilter(typeof(AdminAuthorizationFilter))]
+        [Authorize(Roles = "Admin")]
         [HttpDelete("{userId}")]
         public async Task<IActionResult> DeleteRider(string userId)
         {
@@ -57,19 +54,11 @@ namespace RiderManager.Controllers
             return NoContent();
         }
 
-        [Authorize]
-        [ServiceFilter(typeof(AuthorizationFilter))]
+        [Authorize(Roles = "Rider")]
         [HttpPut("/update-image")]
         public async Task<IActionResult> UpdateRiderCNH(IFormFile cnhFile)
         {
             var userId = User.Claims.FirstOrDefault(c => c.Type == ClaimTypes.NameIdentifier)?.Value;
-
-            var role = User.Claims.FirstOrDefault(c => c.Type == ClaimTypes.Role)?.Value;
-
-            if (role.Contains("Admin"))
-            {
-                return Unauthorized("Only Riders can Update their Photos...");
-            }
 
             if (userId == null)
             {

@@ -1,11 +1,8 @@
 using AuthGate.Data;
 using AuthGate.Model;
-using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.IdentityModel.Tokens;
 using Serilog;
-using System.Text;
 using AuthGate.Configurations;
 using AuthGate.Services.RabbitMQ;
 using AuthGate.Services.File;
@@ -13,9 +10,9 @@ using AuthGate.Services;
 using Npgsql;
 using ProjectY.Shared.Health;
 using ProjectY.Shared.Hosting;
-using Serilog.Sinks.Elasticsearch;
 using ProjectY.Shared.Messaging;
 using ProjectY.Shared.Idempotency;
+using ProjectY.Shared.Observability;
 using AuthGate.Validators;
 
 if (await HealthProbeCommand.TryRunAsync(args))
@@ -25,27 +22,18 @@ if (await HealthProbeCommand.TryRunAsync(args))
 
 var builder = WebApplication.CreateBuilder(args);
 
-var isTesting = builder.Environment.IsEnvironment("Testing");
+var serviceName = builder.Configuration["OTEL_SERVICE_NAME"]
+    ?? builder.Configuration["ApplicationName"]
+    ?? "auth-gate";
 
-var applicationName = builder.Configuration["ApplicationName"];
-var elasticUrl = builder.Configuration["ElasticSearchURL"];
+builder.Services.AddProjectYTelemetry(builder.Configuration, serviceName);
 
-var loggerConfig = new LoggerConfiguration()
+Log.Logger = new LoggerConfiguration()
     .Enrich.FromLogContext()
-    .Enrich.WithProperty("ApplicationName", applicationName)
-    .WriteTo.Console();
-
-if (!isTesting)
-{
-    loggerConfig.WriteTo.Elasticsearch(new ElasticsearchSinkOptions(new Uri(elasticUrl))
-    {
-        AutoRegisterTemplate = true,
-        AutoRegisterTemplateVersion = AutoRegisterTemplateVersion.ESv7,
-        IndexFormat = $"{applicationName.ToLower()}-logs-{DateTime.UtcNow:yyyy.MM}"
-    });
-}
-
-Log.Logger = loggerConfig.CreateLogger();
+    .Enrich.WithProperty("ApplicationName", serviceName)
+    .WriteTo.Console()
+    .WriteToProjectYTelemetry(builder.Configuration, serviceName)
+    .CreateLogger();
 builder.Host.UseSerilog();
 
 var rabbitMQConfig = builder.Configuration.GetSection("RabbitMQ").Get<RabbitMQOptions>()
@@ -92,26 +80,6 @@ builder.Services.AddIdentity<ApplicationUser, IdentityRole>(options =>
 .AddUserValidator<RiderUserDataAnnotationValidator>()
 .AddEntityFrameworkStores<ApplicationDbContext>()
 .AddDefaultTokenProviders();
-
-builder.Services.AddAuthentication(options =>
-{
-    options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
-    options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
-}).AddJwtBearer(options =>
-{
-    var jwtKey = builder.Configuration["Jwt:SigningKeys:AuthGate"] ?? throw new InvalidOperationException("Jwt:SigningKeys:AuthGate is not configured.");
-    var jwtIssuer = builder.Configuration["Jwt:Issuer"] ?? throw new InvalidOperationException("Jwt:Issuer is not configured.");
-    var jwtAudience = builder.Configuration["Jwt:Audiences:AuthGate"] ?? throw new InvalidOperationException("Jwt:Audiences:AuthGate is not configured.");
-    options.TokenValidationParameters = new TokenValidationParameters
-    {
-        ValidateIssuerSigningKey = true,
-        IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey)),
-        ValidateIssuer = true,
-        ValidIssuer = jwtIssuer,
-        ValidateAudience = true,
-        ValidAudience = jwtAudience
-    };
-});
 
 var app = builder.Build();
 

@@ -33,8 +33,12 @@ connectors:
   # Deriva RED (taxa, erro, duração) dos próprios traces: os painéis do Grafana
   # ganham métricas de serviço sem que ninguém instrumente contador na mão.
   spanmetrics:
+    # O exporter Prometheus normaliza os pontos como underscores, produzindo
+    # traces_span_metrics_calls_total e
+    # traces_span_metrics_duration_milliseconds_bucket.
     namespace: traces.span.metrics
     histogram:
+      unit: ms
       explicit:
         buckets: [2ms, 5ms, 10ms, 25ms, 50ms, 100ms, 250ms, 500ms, 1s, 2.5s, 5s]
     dimensions:
