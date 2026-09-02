@@ -1,11 +1,5 @@
-using Microsoft.AspNetCore.Mvc.Testing;
-using Microsoft.IdentityModel.Tokens;
 using RentalOperations.Model;
-using System.IdentityModel.Tokens.Jwt;
 using System.Net;
-using System.Net.Http.Headers;
-using System.Security.Claims;
-using System.Text;
 
 namespace RentalOperationsTests.Integration;
 
@@ -36,6 +30,44 @@ public class AdminAuthorizationPipelineTests : IClassFixture<CustomWebApplicatio
         var response = await client.GetAsync("/api/Rental/user/another-user");
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task ProtectedEndpoint_WithoutGatewayIdentity_ReturnsUnauthorized()
+    {
+        using var client = _factory.CreateUnauthenticatedClient();
+
+        var response = await client.GetAsync("/api/Rental/user");
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task ProtectedEndpoint_WithLegacyApiKey_ReturnsUnauthorized()
+    {
+        using var client = _factory.CreateUnauthenticatedClient();
+        client.DefaultRequestHeaders.Add("X-API-Key", "retired-api-key");
+
+        var response = await client.GetAsync("/api/Rental/user");
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task ProtectedEndpoint_WithForgedGatewayIdentity_ReturnsUnauthorized()
+    {
+        using var client = _factory.CreateUnauthenticatedClient();
+        client.DefaultRequestHeaders.Add("x-identity-key-id", "test-v1");
+        client.DefaultRequestHeaders.Add("x-identity-subject", "forged-admin");
+        client.DefaultRequestHeaders.Add("x-identity-roles", "Admin");
+        client.DefaultRequestHeaders.Add(
+            "x-identity-issued-at",
+            DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString());
+        client.DefaultRequestHeaders.Add("x-identity-signature", "v1=forged");
+
+        var response = await client.GetAsync("/api/Rental/user");
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
 
     [Fact]
@@ -121,32 +153,6 @@ public class AdminAuthorizationPipelineTests : IClassFixture<CustomWebApplicatio
 
     private HttpClient CreateClient(string role, string userId = "requesting-user")
     {
-        var client = _factory.CreateClient(new WebApplicationFactoryClientOptions
-        {
-            AllowAutoRedirect = false,
-            BaseAddress = new Uri("https://localhost")
-        });
-        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", CreateToken(role, userId));
-        return client;
-    }
-
-    private static string CreateToken(string role, string userId)
-    {
-        var credentials = new SigningCredentials(
-            new SymmetricSecurityKey(Encoding.UTF8.GetBytes(CustomWebApplicationFactory.JwtKey)),
-            SecurityAlgorithms.HmacSha256);
-
-        var token = new JwtSecurityToken(
-            issuer: "projecty.auth-gate",
-            audience: "projecty.rental-operations",
-            claims:
-            [
-                new Claim(ClaimTypes.NameIdentifier, userId),
-                new Claim(ClaimTypes.Role, role)
-            ],
-            expires: DateTime.UtcNow.AddMinutes(5),
-            signingCredentials: credentials);
-
-        return new JwtSecurityTokenHandler().WriteToken(token);
+        return _factory.CreateAuthenticatedClient(role, userId);
     }
 }

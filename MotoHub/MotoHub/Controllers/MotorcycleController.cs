@@ -1,7 +1,6 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using MotoHub.DTOs;
-using MotoHub.Filters;
 using MotoHub.Services;
 using ProjectY.Shared.Validation;
 
@@ -9,6 +8,7 @@ namespace MotoHub.Controllers
 {
     [ApiController]
     [Route("api/[controller]")]
+    [Authorize]
     public class MotorcyclesController : ControllerBase
     {
         private readonly IMotorcycleService _motorcycleService;
@@ -21,8 +21,7 @@ namespace MotoHub.Controllers
             _logger = logger;
         }
 
-        [Authorize]
-        [ServiceFilter(typeof(AdminAuthorizationFilter))]
+        [Authorize(Roles = "Admin")]
         [HttpGet]
         public async Task<IActionResult> GetAll([FromQuery] string? cursor, [FromQuery] int? pageSize)
         {
@@ -37,7 +36,6 @@ namespace MotoHub.Controllers
             }
         }
 
-        [ServiceFilter(typeof(AdminAuthorizationFilter))]
         [HttpGet("{licensePlate}")]
         public async Task<IActionResult> GetByLicensePlateAsync(string licensePlate)
         {
@@ -51,8 +49,7 @@ namespace MotoHub.Controllers
             return Ok(motorcycle);
         }
 
-        [Authorize]
-        [ServiceFilter(typeof(AdminAuthorizationFilter))]
+        [Authorize(Roles = "Admin")]
         [HttpPost]
         public IActionResult Create([FromBody] MotorcycleDTO motorcycle)
         {
@@ -69,8 +66,7 @@ namespace MotoHub.Controllers
             return Ok("Created!");
         }
 
-        [Authorize]
-        [ServiceFilter(typeof(AdminAuthorizationFilter))]
+        [Authorize(Roles = "Admin")]
         [HttpPut("{licensePlate}")]
         public async Task<IActionResult> Update(string licensePlate, string newLicencePlate)
         {
@@ -95,8 +91,7 @@ namespace MotoHub.Controllers
             }
         }
 
-        [Authorize]
-        [ServiceFilter(typeof(AdminAuthorizationFilter))]
+        [Authorize(Roles = "Admin")]
         [HttpDelete("{licensePlate}")]
         public async Task<IActionResult> Delete(string licensePlate)
         {
@@ -117,7 +112,6 @@ namespace MotoHub.Controllers
 
         }
 
-        [ServiceFilter(typeof(AdminAuthorizationFilter))]
         [HttpPost("historical-references")]
         public async Task<IActionResult> EnsureHistoricalReferences(
             [FromBody] HistoricalMotorcycleReferencesRequest request)

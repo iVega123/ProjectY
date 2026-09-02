@@ -1,20 +1,17 @@
-using Microsoft.AspNetCore.Authentication.JwtBearer;
-using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using MongoDB.Driver;
 using ProjectY.Shared.Health;
 using ProjectY.Shared.Hosting;
 using ProjectY.Shared.Idempotency;
+using ProjectY.Shared.Security;
 using RentalOperations.Configurations;
 using RentalOperations.CrossCutting.Services;
 using RentalOperations.Data;
-using RentalOperations.Filters;
 using RentalOperations.Repository;
 using RentalOperations.Services;
 using RentalOperations.Services.RabbitMQService;
 using Serilog;
 using Serilog.Sinks.Elasticsearch;
-using System.Text;
 
 if (await HealthProbeCommand.TryRunAsync(args))
 {
@@ -39,8 +36,6 @@ Log.Logger = new LoggerConfiguration()
     })
     .CreateLogger();
 
-builder.Services.Configure<RiderManagerSettings>(builder.Configuration.GetSection("RiderManagerSettings"));
-builder.Services.Configure<MotoHubSettings>(builder.Configuration.GetSection("MotoHubSettings"));
 builder.Services.AddProjectYIdempotency(builder.Configuration, "rental-operations");
 
 var rabbitMQConfig = builder.Configuration.GetSection("RabbitMQ").Get<RabbitMQOptions>();
@@ -62,60 +57,39 @@ builder.Services.AddSingleton(
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton<MongoInboxProcessor>();
 builder.Services.AddHostedService<MongoInboxInitializer>();
-builder.Services.AddAuthentication(options =>
-{
-    options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
-    options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
-}).AddJwtBearer(options =>
-{
-    var jwtKey = builder.Configuration["Jwt:SigningKey"] ?? throw new InvalidOperationException("Jwt:SigningKey is not configured.");
-    var jwtIssuer = builder.Configuration["Jwt:Issuer"] ?? throw new InvalidOperationException("Jwt:Issuer is not configured.");
-    var jwtAudience = builder.Configuration["Jwt:Audience"] ?? throw new InvalidOperationException("Jwt:Audience is not configured.");
-    options.TokenValidationParameters = new TokenValidationParameters
-    {
-        ValidateIssuerSigningKey = true,
-        IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey)),
-        ValidateIssuer = true,
-        ValidIssuer = jwtIssuer,
-        ValidateAudience = true,
-        ValidAudience = jwtAudience
-    };
-});
+builder.Services.AddGatewayIdentityAuthentication(
+    builder.Configuration,
+    "projecty.rental-operations");
 builder.Services.AddControllers();
 builder.Services.AddAutoMapper(_ => { }, typeof(Program));
-builder.Services.AddScoped<AuthorizationFilter>();
-builder.Services.AddScoped<AdminAuthorizationFilter>();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(c =>
 {
     c.OperationFilter<IdempotencyKeyOperationFilter>();
     c.SwaggerDoc("v1", new OpenApiInfo { Title = "RentalOperations", Version = "v1" });
 
-    // Configuração do esquema de segurança JWT no Swagger
-    var securityScheme = new OpenApiSecurityScheme
-    {
-        Name = "JWT Authentication",
-        Description = "Enter JWT Bearer token **_only_**",
-        In = ParameterLocation.Header,
-        Type = SecuritySchemeType.Http,
-        Scheme = "bearer",
-        BearerFormat = "JWT",
-        Reference = new OpenApiReference
-        {
-            Id = JwtBearerDefaults.AuthenticationScheme,
-            Type = ReferenceType.SecurityScheme
-        }
-    };
-    c.AddSecurityDefinition(JwtBearerDefaults.AuthenticationScheme, securityScheme);
-
-    var securityRequirement = new OpenApiSecurityRequirement
-    {
-        { securityScheme, new[] { "Bearer" } }
-    };
-    c.AddSecurityRequirement(securityRequirement);
 });
 
-builder.Services.AddHttpClient();
+builder.Services
+    .AddHttpClient("rider-manager", client =>
+    {
+        client.BaseAddress = new Uri(
+            builder.Configuration["RiderManagerSettings:BaseUrl"]
+                ?? throw new InvalidOperationException(
+                    "RiderManagerSettings:BaseUrl is not configured."));
+    })
+    .AddGatewayIdentityPropagation("projecty.rider-manager");
+builder.Services
+    .AddHttpClient("moto-hub", client =>
+    {
+        client.BaseAddress = new Uri(
+            builder.Configuration["MotoHubSettings:BaseUrl"]
+                ?? throw new InvalidOperationException(
+                    "MotoHubSettings:BaseUrl is not configured."));
+    })
+    .AddGatewayIdentityPropagation(
+        "projecty.moto-hub",
+        "service:rental-operations");
 
 builder.Services.AddScoped<IRiderManagerService, RiderManagerService>();
 

@@ -55,8 +55,8 @@ host-side mapping in `docker-compose.yml` before starting the stack.
 ## Start the stack
 
 Clone the repository, then create fresh local credentials. The generated `.env`
-is ignored by Git and includes independent JWT signing keys and RabbitMQ
-credentials for every service:
+is ignored by Git and includes the legacy AuthGate JWT issuer keys, the gateway
+identity-envelope key, and RabbitMQ credentials for every service:
 
 ```bash
 git clone https://github.com/iVega123/ProjectY.git
@@ -126,10 +126,9 @@ alone never exposes Swagger from a `Production` process. Set
 `SWAGGER_ENABLED=false` in `.env` to disable Swagger in the self-hosted
 development overlay without editing its Compose files.
 
-Application traffic can now enter through the gateway. Existing service ports
-remain published temporarily so the migration can proceed without modifying
-the domain services in task #57; a later epic task removes direct trust and
-centralizes identity verification at the edge. The gateway routes
+Application traffic enters through the gateway. Existing service ports remain
+published temporarily for operational migration, but the domain APIs reject
+direct calls without a fresh, gateway-signed identity envelope. The gateway routes
 `/api/auth/**`, `/api/riders/**`, `/api/motorcycles/**`, and `/api/rental/**` to
 their current owners.
 
@@ -137,12 +136,17 @@ Only the HTTP endpoints above are documented as usable. The compose file also
 publishes ports that older documentation described as HTTPS, but it configures
 no certificates or HTTPS listener; the audit records this as finding A4.
 
-The gateway already enforces the target EdDSA/JWKS trust boundary. The legacy
-.NET AuthGate still emits HMAC tokens, so authenticated traffic continues to use
-the directly published legacy ports until the Go identity service in issue #136
-provides the issuer and JWKS. The gateway rejects those legacy tokens instead of
-silently weakening the new boundary; login and rider registration remain public
-through port `8090`.
+The gateway already enforces the target EdDSA/JWKS trust boundary and strips
+credentials before forwarding a short-lived signed identity envelope. Domain
+services do not parse JWTs; they verify that envelope and apply only role and
+resource-ownership rules. Calls between domain services propagate the verified
+identity through the same signed envelope, replacing the former API keys.
+
+The legacy .NET AuthGate still emits HMAC tokens, so authenticated traffic will
+use the gateway once the Go identity service in issue #136 provides the issuer
+and JWKS. Until then, the gateway rejects those legacy tokens instead of silently
+weakening the new boundary; login and rider registration remain public through
+port `8090`.
 
 Once the identity issuer is available, rental creation also requires Redis for
 the immediate-revocation check defined by ADR 0017. The denylist key is

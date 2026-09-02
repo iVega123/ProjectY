@@ -1,11 +1,9 @@
-using Microsoft.AspNetCore.Authentication.JwtBearer;
-using Microsoft.AspNetCore.Hosting;
+﻿using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
-using Microsoft.IdentityModel.Tokens;
 using MongoDB.Bson;
 using MongoDB.Driver;
 using RentalOperations.CrossCutting.Model;
@@ -15,12 +13,8 @@ using RentalOperations.DTOs;
 using RentalOperations.Model;
 using RentalOperations.Repository;
 using ProjectY.Shared.Pagination;
-using System.IdentityModel.Tokens.Jwt;
 using System.Net;
-using System.Net.Http.Headers;
 using System.Net.Http.Json;
-using System.Security.Claims;
-using System.Text;
 using Testcontainers.MongoDb;
 
 namespace RentalOperationsTests.Integration.MongoDb;
@@ -352,14 +346,9 @@ public sealed class ActiveRentalApiTests : IAsyncLifetime
     private HttpClient CreateAuthenticatedClient()
     {
         var factory = _factory ?? throw new InvalidOperationException("The test database has not started.");
-        var client = factory.CreateClient(new WebApplicationFactoryClientOptions
-        {
-            AllowAutoRedirect = false,
-            BaseAddress = new Uri("https://localhost")
-        });
-        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
-            "Bearer",
-            CreateToken("Rider", "rider-1"));
+        var client = factory.CreateDefaultClient(
+            new TestGatewayIdentityHandler("Rider", "rider-1"));
+        client.BaseAddress = new Uri("https://localhost");
         return client;
     }
 
@@ -402,29 +391,10 @@ public sealed class ActiveRentalApiTests : IAsyncLifetime
             ["initCost"] = 210m
         };
 
-    private static string CreateToken(string role, string userId)
-    {
-        var credentials = new SigningCredentials(
-            new SymmetricSecurityKey(Encoding.UTF8.GetBytes(MongoRentalApiFactory.JwtKey)),
-            SecurityAlgorithms.HmacSha256);
-        var token = new JwtSecurityToken(
-            issuer: "projecty.auth-gate",
-            audience: "projecty.rental-operations",
-            claims:
-            [
-                new Claim(ClaimTypes.NameIdentifier, userId),
-                new Claim(ClaimTypes.Role, role)
-            ],
-            expires: DateTime.UtcNow.AddMinutes(5),
-            signingCredentials: credentials);
-
-        return new JwtSecurityTokenHandler().WriteToken(token);
-    }
 }
 
 internal sealed class MongoRentalApiFactory : WebApplicationFactory<Program>
 {
-    public const string JwtKey = "test-only-key-with-at-least-32-bytes";
     private readonly string _connectionString;
     private readonly string _databaseName;
     public StubMotorcycleService MotorcycleService { get; } = new();
@@ -438,13 +408,16 @@ internal sealed class MongoRentalApiFactory : WebApplicationFactory<Program>
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.UseEnvironment("Testing");
+        builder.UseSetting(
+            "GatewayIdentity:SigningKey",
+            CustomWebApplicationFactory.GatewayIdentityKey);
+        builder.UseSetting("GatewayIdentity:SigningKeyId", "test-v1");
         builder.ConfigureAppConfiguration((_, configuration) =>
         {
             configuration.AddInMemoryCollection(new Dictionary<string, string?>
             {
-                ["Jwt:SigningKey"] = JwtKey,
-                ["Jwt:Issuer"] = "projecty.auth-gate",
-                ["Jwt:Audience"] = "projecty.rental-operations",
+                ["GatewayIdentity:SigningKey"] = CustomWebApplicationFactory.GatewayIdentityKey,
+                ["GatewayIdentity:SigningKeyId"] = "test-v1",
                 ["MongoDbSettings:ConnectionString"] = _connectionString,
                 ["MongoDbSettings:DatabaseName"] = _databaseName
             });
@@ -466,21 +439,6 @@ internal sealed class MongoRentalApiFactory : WebApplicationFactory<Program>
             services.AddSingleton<IRiderManagerService, StubRiderManagerService>();
             services.AddSingleton<IMotorcycleService>(MotorcycleService);
             services.AddHostedService<MongoRentalIndexInitializer>();
-
-            services.PostConfigure<JwtBearerOptions>(
-                JwtBearerDefaults.AuthenticationScheme,
-                options =>
-                {
-                    options.TokenValidationParameters = new TokenValidationParameters
-                    {
-                        ValidateIssuerSigningKey = true,
-                        IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(JwtKey)),
-                        ValidateIssuer = true,
-                        ValidIssuer = "projecty.auth-gate",
-                        ValidateAudience = true,
-                        ValidAudience = "projecty.rental-operations"
-                    };
-                });
         });
     }
 }

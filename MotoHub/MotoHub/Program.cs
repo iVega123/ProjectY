@@ -2,13 +2,9 @@ using Serilog.Formatting.Compact;
 using Serilog;
 using Microsoft.EntityFrameworkCore;
 using MotoHub.Data;
-using System.Text;
-using Microsoft.AspNetCore.Authentication.JwtBearer;
-using Microsoft.IdentityModel.Tokens;
 using MotoHub.Services;
 using MotoHub.Repositories;
 using Microsoft.OpenApi.Models;
-using MotoHub.Filters;
 using Serilog.Sinks.Elasticsearch;
 using MotoHub.Configurations;
 using MotoHub.Services.RabbitMQ;
@@ -18,6 +14,7 @@ using ProjectY.Shared.Health;
 using ProjectY.Shared.Hosting;
 using ProjectY.Shared.Messaging;
 using ProjectY.Shared.Idempotency;
+using ProjectY.Shared.Security;
 
 if (await HealthProbeCommand.TryRunAsync(args))
 {
@@ -25,8 +22,6 @@ if (await HealthProbeCommand.TryRunAsync(args))
 }
 
 var builder = WebApplication.CreateBuilder(args);
-
-builder.Services.Configure<RentalOperationsSettings>(builder.Configuration.GetSection("RentalOperationsSettings"));
 
 var isTesting = builder.Environment.IsEnvironment("Testing");
 
@@ -65,33 +60,24 @@ builder.Services
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
     options.UseNpgsql(builder.Configuration.GetConnectionString("Postgresql")));
 
-builder.Services.AddAuthentication(options =>
-{
-    options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
-    options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
-}).AddJwtBearer(options =>
-{
-    var jwtKey = builder.Configuration["Jwt:SigningKey"] ?? throw new InvalidOperationException("Jwt:SigningKey is not configured.");
-    var jwtIssuer = builder.Configuration["Jwt:Issuer"] ?? throw new InvalidOperationException("Jwt:Issuer is not configured.");
-    var jwtAudience = builder.Configuration["Jwt:Audience"] ?? throw new InvalidOperationException("Jwt:Audience is not configured.");
-    options.TokenValidationParameters = new TokenValidationParameters
-    {
-        ValidateIssuerSigningKey = true,
-        IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey)),
-        ValidateIssuer = true,
-        ValidIssuer = jwtIssuer,
-        ValidateAudience = true,
-        ValidAudience = jwtAudience
-    };
-});
+builder.Services.AddGatewayIdentityAuthentication(
+    builder.Configuration,
+    "projecty.moto-hub");
 
 builder.Services.AddControllers();
 builder.Services.AddAutoMapper(_ => { }, typeof(Program));
-builder.Services.AddHttpClient();
+builder.Services
+    .AddHttpClient("rental-operations", client =>
+    {
+        client.BaseAddress = new Uri(
+            builder.Configuration["RentalOperationsSettings:BaseUrl"]
+                ?? throw new InvalidOperationException(
+                    "RentalOperationsSettings:BaseUrl is not configured."));
+    })
+    .AddGatewayIdentityPropagation("projecty.rental-operations");
 builder.Services.AddScoped<IApplicationDbContext>(services =>
     services.GetRequiredService<ApplicationDbContext>());
 builder.Services.AddScoped<IMotorcycleRepository, MotorcycleRepository>();
-builder.Services.AddScoped<AdminAuthorizationFilter>();
 builder.Services.AddScoped<IMotorcycleService, MotorcycleService>();
 builder.Services.AddScoped<IMessagingPublisherService, MessagingPublisherService>();
 builder.Services.AddSingleton(new OutboxRelayOptions
@@ -111,27 +97,6 @@ builder.Services.AddSwaggerGen(c =>
 {
     c.OperationFilter<IdempotencyKeyOperationFilter>();
     c.SwaggerDoc("v1", new OpenApiInfo { Title = "MotoHub", Version = "v1" });
-    var securityScheme = new OpenApiSecurityScheme
-    {
-        Name = "JWT Authentication",
-        Description = "Enter JWT Bearer token **_only_**",
-        In = ParameterLocation.Header,
-        Type = SecuritySchemeType.Http,
-        Scheme = "bearer",
-        BearerFormat = "JWT",
-        Reference = new OpenApiReference
-        {
-            Id = JwtBearerDefaults.AuthenticationScheme,
-            Type = ReferenceType.SecurityScheme
-        }
-    };
-    c.AddSecurityDefinition(JwtBearerDefaults.AuthenticationScheme, securityScheme);
-
-    var securityRequirement = new OpenApiSecurityRequirement
-    {
-        { securityScheme, new[] { "Bearer" } }
-    };
-    c.AddSecurityRequirement(securityRequirement);
 });
 
 var app = builder.Build();
