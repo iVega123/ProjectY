@@ -396,6 +396,36 @@
         "defaults": { "unit": "s", "decimals": 1, "min": 0, "color": { "mode": "palette-classic" } },
         "overrides": []
       }
+    },
+    {
+      "type": "row",
+      "title": "DegradaÃ§Ã£o declarada",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 43 },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 13,
+      "type": "timeseries",
+      "title": "Rate limit em fail-open",
+      "description": "Incrementa quando Redis nÃ£o responde e o gateway permite a requisiÃ§Ã£o conforme a postura declarada.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 44 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(gateway_ratelimit_degraded_total[1m]))",
+          "legendFormat": "requisiÃ§Ãµes liberadas/s"
+        }
+      ],
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "single", "sort": "desc" }
+      },
+      "fieldConfig": {
+        "defaults": { "unit": "reqps", "decimals": 2, "min": 0, "color": { "mode": "palette-classic" } },
+        "overrides": []
+      }
     }
   ]
 }

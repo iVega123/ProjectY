@@ -1,24 +1,29 @@
 pub mod auth;
 pub mod config;
+pub mod metrics;
 pub mod policy;
+pub mod rate_limit;
 pub mod revocation;
 
-use std::{fmt, future::Future, sync::Arc};
+use std::{fmt, future::Future, net::SocketAddr, sync::Arc};
 
 use auth::{AuthError, Authenticator, IdentitySigner, has_reserved_identity_header, is_admin};
 use axum::{
     Json, Router,
     body::Body,
-    extract::{Request, State},
-    http::{HeaderMap, HeaderName, StatusCode, header::WWW_AUTHENTICATE},
+    extract::{ConnectInfo, Request, State},
+    http::{HeaderMap, HeaderName, HeaderValue, StatusCode, header::WWW_AUTHENTICATE},
     response::{IntoResponse, Response},
     routing::get,
 };
-use config::{Config, UpstreamName};
+use config::{Config, TokenBucketConfig, UpstreamName};
+use metrics::GatewayMetrics;
 use policy::{Access, access_for, is_canonical_path, requires_revocation_check};
+use rate_limit::{RateLimitDecision, RateLimitError, RateLimiter, RedisRateLimiter};
 use reqwest::redirect::Policy;
 use revocation::{RedisRevocationStore, RevocationError, RevocationStore};
 use serde::Serialize;
+use sha2::{Digest, Sha256};
 use tokio::net::TcpListener;
 use tracing::{info, warn};
 use url::Url;
@@ -29,6 +34,8 @@ struct AppState {
     authenticator: Authenticator,
     identity_signer: IdentitySigner,
     revocation: Arc<dyn RevocationStore>,
+    rate_limiter: Arc<dyn RateLimiter>,
+    metrics: Arc<GatewayMetrics>,
 }
 
 #[derive(Serialize)]
@@ -68,21 +75,46 @@ pub fn build_app(config: Config) -> Result<Router, BuildError> {
         RedisRevocationStore::new(config.auth.redis_url.expose(), config.auth.redis_timeout)
             .map_err(|_| BuildError::Redis)?,
     );
-    build_app_with_revocation(config, revocation).map_err(BuildError::Http)
+    let rate_limiter = Arc::new(
+        RedisRateLimiter::new(
+            config.rate_limit.redis_url.expose(),
+            config.rate_limit.operation_timeout,
+        )
+        .map_err(|_| BuildError::Redis)?,
+    );
+    build_app_with_dependencies(config, revocation, rate_limiter).map_err(BuildError::Http)
 }
 
+#[cfg(test)]
 fn build_app_with_revocation(
     config: Config,
     revocation: Arc<dyn RevocationStore>,
+) -> Result<Router, reqwest::Error> {
+    let rate_limiter = Arc::new(
+        RedisRateLimiter::new(
+            config.rate_limit.redis_url.expose(),
+            config.rate_limit.operation_timeout,
+        )
+        .expect("test rate-limit Redis URL is valid"),
+    );
+    build_app_with_dependencies(config, revocation, rate_limiter)
+}
+
+fn build_app_with_dependencies(
+    config: Config,
+    revocation: Arc<dyn RevocationStore>,
+    rate_limiter: Arc<dyn RateLimiter>,
 ) -> Result<Router, reqwest::Error> {
     let client = reqwest::Client::builder()
         .redirect(Policy::none())
         .build()?;
     let authenticator = Authenticator::new(config.auth.clone(), client.clone());
     let identity_signer = IdentitySigner::new(&config.auth);
+    let gateway_metrics = Arc::new(GatewayMetrics::default());
     Ok(Router::new()
         .route("/health/live", get(health))
         .route("/health/ready", get(health))
+        .route("/metrics", get(metrics))
         .fallback(proxy)
         .with_state(Arc::new(AppState {
             config,
@@ -90,6 +122,8 @@ fn build_app_with_revocation(
             authenticator,
             identity_signer,
             revocation,
+            rate_limiter,
+            metrics: gateway_metrics,
         })))
 }
 
@@ -98,9 +132,12 @@ pub async fn serve(
     app: Router,
     shutdown: impl Future<Output = ()> + Send + 'static,
 ) -> std::io::Result<()> {
-    axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown)
-        .await
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .with_graceful_shutdown(shutdown)
+    .await
 }
 
 pub async fn healthcheck(url: Url, timeout: std::time::Duration) -> Result<(), String> {
@@ -126,6 +163,17 @@ pub async fn healthcheck(url: Url, timeout: std::time::Duration) -> Result<(), S
 
 async fn health() -> Json<HealthStatus> {
     Json(HealthStatus { status: "healthy" })
+}
+
+async fn metrics(State(state): State<Arc<AppState>>) -> Response {
+    (
+        [(
+            http::header::CONTENT_TYPE,
+            "text/plain; version=0.0.4; charset=utf-8",
+        )],
+        state.metrics.render(),
+    )
+        .into_response()
 }
 
 async fn proxy(State(state): State<Arc<AppState>>, request: Request) -> Response {
@@ -160,8 +208,8 @@ async fn proxy(State(state): State<Arc<AppState>>, request: Request) -> Response
 
     let audience = state.config.auth.audiences.for_upstream(upstream_name);
     let access = access_for(request.method(), &path, upstream_name);
-    let identity_headers = match access {
-        Access::Public => None,
+    let (identity_headers, identity_subject) = match access {
+        Access::Public => (None, None),
         Access::Authenticated | Access::Admin => {
             let identity = match state
                 .authenticator
@@ -191,19 +239,40 @@ async fn proxy(State(state): State<Arc<AppState>>, request: Request) -> Response
                     }
                 }
             }
-            match state.identity_signer.headers(
+            let identity_headers = match state.identity_signer.headers(
                 &identity,
                 request.method(),
                 request.uri(),
                 audience,
             ) {
-                Ok(headers) => Some(headers),
+                Ok(headers) => headers,
                 Err(error) => return authentication_problem(error, request.uri()),
-            }
+            };
+            (Some(identity_headers), Some(identity.subject))
         }
     };
 
-    match forward(
+    let (bucket_name, bucket) = rate_limit_bucket(&state.config, upstream_name);
+    let principal = rate_limit_principal(&request, identity_subject);
+    let rate_limit_key = rate_limit_key(bucket_name, &principal);
+    let remaining = match state.rate_limiter.check(&rate_limit_key, bucket).await {
+        Ok(RateLimitDecision {
+            allowed: true,
+            remaining,
+            ..
+        }) => Some(remaining),
+        Ok(decision) => return rate_limit_problem(request.uri(), decision),
+        Err(RateLimitError::Unavailable) => {
+            state.metrics.record_rate_limit_degraded();
+            warn!(
+                bucket = bucket_name,
+                "rate limiter unavailable; request allowed"
+            );
+            None
+        }
+    };
+
+    let mut response = match forward(
         &state.client,
         upstream_name,
         base_url,
@@ -222,6 +291,41 @@ async fn proxy(State(state): State<Arc<AppState>>, request: Request) -> Response
                 "The upstream service could not complete the request.",
                 path,
             )
+        }
+    };
+    if let Some(remaining) = remaining {
+        response.headers_mut().insert(
+            "x-ratelimit-remaining",
+            HeaderValue::from_str(&remaining.to_string())
+                .expect("remaining token count is a valid header"),
+        );
+    }
+    response
+}
+
+fn rate_limit_key(bucket: &str, principal: &str) -> String {
+    let digest = Sha256::digest(principal.as_bytes());
+    format!("projecty:ratelimit:{bucket}:{digest:x}")
+}
+
+fn rate_limit_bucket(config: &Config, upstream: UpstreamName) -> (&'static str, TokenBucketConfig) {
+    if upstream == UpstreamName::AuthGate {
+        ("auth", config.rate_limit.auth)
+    } else {
+        ("general", config.rate_limit.general)
+    }
+}
+
+fn rate_limit_principal(request: &Request, identity_subject: Option<String>) -> String {
+    match identity_subject {
+        Some(subject) => format!("identity:{subject}"),
+        None => {
+            let origin = request
+                .extensions()
+                .get::<ConnectInfo<SocketAddr>>()
+                .map(|address| address.0.ip().to_string())
+                .unwrap_or_else(|| "unknown".to_owned());
+            format!("origin:{origin}")
         }
     }
 }
@@ -343,6 +447,27 @@ fn revocation_unavailable_problem(instance: &axum::http::Uri) -> Response {
     response
 }
 
+fn rate_limit_problem(instance: &axum::http::Uri, decision: RateLimitDecision) -> Response {
+    let mut response = problem(
+        StatusCode::TOO_MANY_REQUESTS,
+        "urn:projecty:problem:rate-limit-exceeded",
+        "Too many requests",
+        "The request rate for this caller exceeded the configured token bucket.",
+        instance.to_string(),
+    );
+    response.headers_mut().insert(
+        http::header::RETRY_AFTER,
+        HeaderValue::from_str(&decision.retry_after_seconds.to_string())
+            .expect("retry delay is a valid header"),
+    );
+    response.headers_mut().insert(
+        "x-ratelimit-remaining",
+        HeaderValue::from_str(&decision.remaining.to_string())
+            .expect("remaining token count is a valid header"),
+    );
+    response
+}
+
 fn problem(
     status: StatusCode,
     problem_type: &'static str,
@@ -390,7 +515,10 @@ mod tests {
         routing::get,
     };
     use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
-    use config::{Audiences, AuthConfig, Secret, SensitiveString, Upstreams};
+    use config::{
+        Audiences, AuthConfig, RateLimitConfig, Secret, SensitiveString, TokenBucketConfig,
+        Upstreams,
+    };
     use hmac::{Hmac, Mac};
     use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
     use serde::Serialize;
@@ -430,6 +558,18 @@ mod tests {
                 identity_signing_key_id: "local-v1".to_owned(),
                 redis_url: SensitiveString::new("redis://127.0.0.1:1/".to_owned()),
                 redis_timeout: Duration::from_millis(50),
+            },
+            rate_limit: RateLimitConfig {
+                redis_url: SensitiveString::new("redis://127.0.0.1:1/".to_owned()),
+                operation_timeout: Duration::from_millis(10),
+                general: TokenBucketConfig {
+                    capacity: 120,
+                    refill_per_minute: 120,
+                },
+                auth: TokenBucketConfig {
+                    capacity: 10,
+                    refill_per_minute: 5,
+                },
             },
         }
     }
@@ -625,6 +765,176 @@ mod tests {
         });
         let app = build_app_with_revocation(config, store.clone()).unwrap();
         (app, store)
+    }
+
+    struct StubRateLimiter {
+        result: Result<RateLimitDecision, RateLimitError>,
+        checks: AtomicUsize,
+    }
+
+    impl RateLimiter for StubRateLimiter {
+        fn check<'a>(
+            &'a self,
+            _key: &'a str,
+            _bucket: TokenBucketConfig,
+        ) -> std::pin::Pin<
+            Box<dyn Future<Output = Result<RateLimitDecision, RateLimitError>> + Send + 'a>,
+        > {
+            Box::pin(async move {
+                self.checks.fetch_add(1, Ordering::SeqCst);
+                self.result
+            })
+        }
+    }
+
+    fn app_with_rate_limit(
+        config: Config,
+        result: Result<RateLimitDecision, RateLimitError>,
+    ) -> (Router, Arc<StubRateLimiter>) {
+        let rate_limiter = Arc::new(StubRateLimiter {
+            result,
+            checks: AtomicUsize::new(0),
+        });
+        let revocation = Arc::new(StubRevocationStore {
+            result: Ok(false),
+            checks: AtomicUsize::new(0),
+        });
+        let app = build_app_with_dependencies(config, revocation, rate_limiter.clone()).unwrap();
+        (app, rate_limiter)
+    }
+
+    #[test]
+    fn keys_authenticated_requests_by_identity_and_anonymous_requests_by_origin() {
+        let mut first = HttpRequest::get("/api/rental/user")
+            .body(Body::empty())
+            .unwrap();
+        first
+            .extensions_mut()
+            .insert(ConnectInfo(SocketAddr::from(([192, 0, 2, 10], 1000))));
+        let mut second = HttpRequest::get("/api/rental/user")
+            .body(Body::empty())
+            .unwrap();
+        second
+            .extensions_mut()
+            .insert(ConnectInfo(SocketAddr::from(([192, 0, 2, 11], 1000))));
+
+        assert_eq!(
+            rate_limit_principal(&first, Some("rider-1".to_owned())),
+            rate_limit_principal(&second, Some("rider-1".to_owned()))
+        );
+        assert_ne!(
+            rate_limit_principal(&first, None),
+            rate_limit_principal(&second, None)
+        );
+    }
+
+    #[test]
+    fn auth_routes_use_the_stricter_bucket() {
+        let config = test_config(Url::parse("http://127.0.0.1:1/").unwrap());
+
+        assert_eq!(
+            rate_limit_bucket(&config, UpstreamName::AuthGate),
+            ("auth", config.rate_limit.auth)
+        );
+        assert_eq!(
+            rate_limit_bucket(&config, UpstreamName::RentalOperations),
+            ("general", config.rate_limit.general)
+        );
+        assert!(config.rate_limit.auth.capacity < config.rate_limit.general.capacity);
+        assert!(
+            config.rate_limit.auth.refill_per_minute < config.rate_limit.general.refill_per_minute
+        );
+    }
+
+    #[tokio::test]
+    async fn returns_429_with_retry_and_remaining_headers() {
+        let (upstream, state) = spawn_security_upstream(None).await;
+        let (app, rate_limiter) = app_with_rate_limit(
+            test_config(upstream),
+            Ok(RateLimitDecision {
+                allowed: false,
+                remaining: 0,
+                retry_after_seconds: 12,
+            }),
+        );
+
+        let response = app
+            .oneshot(
+                HttpRequest::post("/api/auth/login")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+        assert_eq!(response.headers()[http::header::RETRY_AFTER], "12");
+        assert_eq!(response.headers()["x-ratelimit-remaining"], "0");
+        assert_eq!(
+            response.headers()[http::header::CONTENT_TYPE],
+            "application/problem+json"
+        );
+        assert_eq!(rate_limiter.checks.load(Ordering::SeqCst), 1);
+        assert_eq!(state.upstream_requests.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn forwards_remaining_tokens_after_an_allowed_request() {
+        let (upstream, state) = spawn_security_upstream(None).await;
+        let (app, rate_limiter) = app_with_rate_limit(
+            test_config(upstream),
+            Ok(RateLimitDecision {
+                allowed: true,
+                remaining: 7,
+                retry_after_seconds: 1,
+            }),
+        );
+
+        let response = app
+            .oneshot(
+                HttpRequest::post("/api/auth/login")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.headers()["x-ratelimit-remaining"], "7");
+        assert_eq!(rate_limiter.checks.load(Ordering::SeqCst), 1);
+        assert_eq!(state.upstream_requests.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn fails_open_and_exposes_the_degradation_counter() {
+        let (upstream, state) = spawn_security_upstream(None).await;
+        let (app, rate_limiter) =
+            app_with_rate_limit(test_config(upstream), Err(RateLimitError::Unavailable));
+
+        let response = app
+            .clone()
+            .oneshot(
+                HttpRequest::post("/api/auth/login")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let metrics_response = app
+            .oneshot(HttpRequest::get("/metrics").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        let metrics_body = to_bytes(metrics_response.into_body(), 4096).await.unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert!(response.headers().get("x-ratelimit-remaining").is_none());
+        assert_eq!(rate_limiter.checks.load(Ordering::SeqCst), 1);
+        assert_eq!(state.upstream_requests.load(Ordering::SeqCst), 1);
+        assert!(
+            std::str::from_utf8(&metrics_body)
+                .unwrap()
+                .contains("gateway_ratelimit_degraded_total 1")
+        );
     }
 
     #[tokio::test]
