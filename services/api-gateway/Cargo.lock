@@ -18,6 +18,7 @@ dependencies = [
  "aws-lc-rs",
  "axum",
  "base64",
+ "fastrand",
  "futures-util",
  "hmac",
  "http",

@@ -410,7 +410,7 @@
       "title": "Rate limit em fail-open",
       "description": "Incrementa quando Redis nÃ£o responde e o gateway permite a requisiÃ§Ã£o conforme a postura declarada.",
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 44 },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 44 },
       "targets": [
         {
           "refId": "A",
@@ -424,6 +424,29 @@
       },
       "fieldConfig": {
         "defaults": { "unit": "reqps", "decimals": 2, "min": 0, "color": { "mode": "palette-classic" } },
+        "overrides": []
+      }
+    },
+    {
+      "id": 14,
+      "type": "timeseries",
+      "title": "Circuit breakers fora de closed",
+      "description": "Estado por upstream; 1 indica circuito aberto ou sonda half-open em andamento.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 44 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "gateway_upstream_circuit_breaker_state{state=~\"open|half_open\"}",
+          "legendFormat": "{{upstream}} / {{state}}"
+        }
+      ],
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "fieldConfig": {
+        "defaults": { "unit": "short", "decimals": 0, "min": 0, "max": 1, "color": { "mode": "palette-classic" } },
         "overrides": []
       }
     }

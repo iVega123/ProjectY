@@ -3,6 +3,7 @@ pub mod config;
 pub mod metrics;
 pub mod policy;
 pub mod rate_limit;
+pub mod resilience;
 pub mod revocation;
 
 use std::{fmt, future::Future, net::SocketAddr, sync::Arc};
@@ -10,17 +11,21 @@ use std::{fmt, future::Future, net::SocketAddr, sync::Arc};
 use auth::{AuthError, Authenticator, IdentitySigner, has_reserved_identity_header, is_admin};
 use axum::{
     Json, Router,
-    body::Body,
+    body::{Body, to_bytes},
     extract::{ConnectInfo, Request, State},
-    http::{HeaderMap, HeaderName, HeaderValue, StatusCode, header::WWW_AUTHENTICATE},
+    http::{HeaderMap, HeaderName, HeaderValue, Method, StatusCode, header::WWW_AUTHENTICATE},
     response::{IntoResponse, Response},
     routing::get,
 };
 use config::{Config, TokenBucketConfig, UpstreamName};
+use futures_util::StreamExt;
 use metrics::GatewayMetrics;
 use policy::{Access, access_for, is_canonical_path, requires_revocation_check};
 use rate_limit::{RateLimitDecision, RateLimitError, RateLimiter, RedisRateLimiter};
 use reqwest::redirect::Policy;
+use resilience::{
+    CircuitSnapshot, Rejection, ResilienceRegistry, UpstreamPolicy, full_jitter_delay,
+};
 use revocation::{RedisRevocationStore, RevocationError, RevocationStore};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
@@ -36,11 +41,18 @@ struct AppState {
     revocation: Arc<dyn RevocationStore>,
     rate_limiter: Arc<dyn RateLimiter>,
     metrics: Arc<GatewayMetrics>,
+    resilience: Arc<ResilienceRegistry>,
 }
 
 #[derive(Serialize)]
 struct HealthStatus {
     status: &'static str,
+}
+
+#[derive(Serialize)]
+struct ReadinessStatus {
+    status: &'static str,
+    upstream_breakers: Vec<CircuitSnapshot>,
 }
 
 #[derive(Serialize)]
@@ -111,9 +123,10 @@ fn build_app_with_dependencies(
     let authenticator = Authenticator::new(config.auth.clone(), client.clone());
     let identity_signer = IdentitySigner::new(&config.auth);
     let gateway_metrics = Arc::new(GatewayMetrics::default());
+    let resilience = Arc::new(ResilienceRegistry::new(&config.resilience));
     Ok(Router::new()
-        .route("/health/live", get(health))
-        .route("/health/ready", get(health))
+        .route("/health/live", get(liveness))
+        .route("/health/ready", get(readiness))
         .route("/metrics", get(metrics))
         .fallback(proxy)
         .with_state(Arc::new(AppState {
@@ -124,6 +137,7 @@ fn build_app_with_dependencies(
             revocation,
             rate_limiter,
             metrics: gateway_metrics,
+            resilience,
         })))
 }
 
@@ -161,17 +175,26 @@ pub async fn healthcheck(url: Url, timeout: std::time::Duration) -> Result<(), S
     }
 }
 
-async fn health() -> Json<HealthStatus> {
+async fn liveness() -> Json<HealthStatus> {
     Json(HealthStatus { status: "healthy" })
 }
 
+async fn readiness(State(state): State<Arc<AppState>>) -> Json<ReadinessStatus> {
+    Json(ReadinessStatus {
+        status: "ready",
+        upstream_breakers: state.resilience.snapshots(),
+    })
+}
+
 async fn metrics(State(state): State<Arc<AppState>>) -> Response {
+    let mut body = state.metrics.render();
+    body.push_str(&state.resilience.render_metrics());
     (
         [(
             http::header::CONTENT_TYPE,
             "text/plain; version=0.0.4; charset=utf-8",
         )],
-        state.metrics.render(),
+        body,
     )
         .into_response()
 }
@@ -274,6 +297,7 @@ async fn proxy(State(state): State<Arc<AppState>>, request: Request) -> Response
 
     let mut response = match forward(
         &state.client,
+        state.resilience.policy(upstream_name),
         upstream_name,
         base_url,
         request,
@@ -284,13 +308,7 @@ async fn proxy(State(state): State<Arc<AppState>>, request: Request) -> Response
         Ok(response) => response,
         Err(error) => {
             warn!(upstream = ?upstream_name, error = %error, "upstream request failed");
-            problem(
-                StatusCode::BAD_GATEWAY,
-                "urn:projecty:problem:upstream-unavailable",
-                "Upstream unavailable",
-                "The upstream service could not complete the request.",
-                path,
-            )
+            resilience_problem(error, path)
         }
     };
     if let Some(remaining) = remaining {
@@ -332,11 +350,15 @@ fn rate_limit_principal(request: &Request, identity_subject: Option<String>) -> 
 
 async fn forward(
     client: &reqwest::Client,
+    policy: Arc<UpstreamPolicy>,
     upstream_name: UpstreamName,
     base_url: &Url,
     request: Request,
     identity_headers: Option<HeaderMap>,
-) -> Result<Response, reqwest::Error> {
+) -> Result<Response, ForwardError> {
+    const MAX_RETRY_BODY_BYTES: usize = 32 * 1024 * 1024;
+
+    let resilience = policy.config();
     let (parts, body) = request.into_parts();
     let mut target = base_url
         .join(parts.uri.path().trim_start_matches('/'))
@@ -344,24 +366,100 @@ async fn forward(
     target.set_query(parts.uri.query());
 
     let connection_headers = connection_header_names(&parts.headers);
-    let mut upstream_request = client
-        .request(parts.method, target)
-        .body(reqwest::Body::wrap_stream(body.into_data_stream()));
-    for (name, value) in &parts.headers {
-        if !is_hop_by_hop(name, &connection_headers) && !is_sensitive_client_header(name) {
-            upstream_request = upstream_request.header(name, value);
+    let retry_allowed = retry_allowed(&parts.method, &parts.headers);
+    let (buffered_body, mut streaming_body) = if retry_allowed {
+        (
+            Some(
+                to_bytes(body, MAX_RETRY_BODY_BYTES)
+                    .await
+                    .map_err(|_| ForwardError::RetryBodyTooLarge)?,
+            ),
+            None,
+        )
+    } else {
+        (None, Some(body))
+    };
+    let max_retries = if retry_allowed {
+        resilience.max_retries
+    } else {
+        0
+    };
+    let admission = policy.try_admit().map_err(ForwardError::Rejected)?;
+
+    for attempt in 0..=max_retries {
+        if attempt > 0 {
+            let delay = full_jitter_delay(resilience, attempt);
+            info!(
+                upstream = ?upstream_name,
+                attempt,
+                delay_ms = delay.as_millis(),
+                "retrying upstream request"
+            );
+            tokio::time::sleep(delay).await;
         }
-    }
-    if let Some(identity_headers) = identity_headers {
-        for (name, value) in identity_headers {
-            if let Some(name) = name {
+
+        let mut upstream_request = client.request(parts.method.clone(), target.clone());
+        for (name, value) in &parts.headers {
+            if !is_hop_by_hop(name, &connection_headers) && !is_sensitive_client_header(name) {
                 upstream_request = upstream_request.header(name, value);
             }
         }
-    }
+        if let Some(identity_headers) = &identity_headers {
+            for (name, value) in identity_headers {
+                upstream_request = upstream_request.header(name, value);
+            }
+        }
+        upstream_request = if let Some(body) = &buffered_body {
+            upstream_request.body(body.clone())
+        } else {
+            upstream_request.body(reqwest::Body::wrap_stream(
+                streaming_body
+                    .take()
+                    .expect("a non-retryable request has one streaming body")
+                    .into_data_stream(),
+            ))
+        };
 
-    info!(upstream = ?upstream_name, path = %parts.uri, "proxying request");
-    let upstream_response = upstream_request.send().await?;
+        info!(upstream = ?upstream_name, path = %parts.uri, attempt, "proxying request");
+        let upstream_response = match upstream_request.timeout(resilience.timeout).send().await {
+            Ok(response) => response,
+            Err(error) if attempt < max_retries => {
+                policy.record_failure();
+                warn!(upstream = ?upstream_name, attempt, error = %error, "retryable upstream transport failure");
+                continue;
+            }
+            Err(error) => {
+                policy.record_failure();
+                return if error.is_timeout() {
+                    Err(ForwardError::Timeout)
+                } else {
+                    Err(ForwardError::Transport(error))
+                };
+            }
+        };
+        if upstream_response.status().is_server_error() && attempt < max_retries {
+            policy.record_failure();
+            continue;
+        }
+        if upstream_response.status().is_server_error() {
+            policy.record_failure();
+        } else {
+            policy.record_success();
+        }
+        return Ok(upstream_response_to_client(
+            upstream_response,
+            admission,
+            policy,
+        ));
+    }
+    unreachable!("the upstream loop always executes at least once")
+}
+
+fn upstream_response_to_client(
+    upstream_response: reqwest::Response,
+    admission: resilience::Admission,
+    policy: Arc<UpstreamPolicy>,
+) -> Response {
     let status = upstream_response.status();
     let response_headers = upstream_response.headers().clone();
     let connection_headers = connection_header_names(&response_headers);
@@ -372,9 +470,74 @@ async fn forward(
         }
     }
 
-    Ok(response
-        .body(Body::from_stream(upstream_response.bytes_stream()))
-        .expect("upstream response status and headers are valid"))
+    let count_body_error = !status.is_server_error();
+    let body = upstream_response.bytes_stream().map(move |chunk| {
+        let _keep_bulkhead_permit = &admission;
+        if count_body_error && chunk.is_err() {
+            policy.record_failure();
+        }
+        chunk
+    });
+    response
+        .body(Body::from_stream(body))
+        .expect("upstream response status and headers are valid")
+}
+
+fn retry_allowed(method: &Method, headers: &HeaderMap) -> bool {
+    matches!(
+        *method,
+        Method::GET | Method::HEAD | Method::OPTIONS | Method::TRACE | Method::PUT | Method::DELETE
+    ) || headers.contains_key("idempotency-key")
+}
+
+#[derive(Debug)]
+enum ForwardError {
+    Rejected(Rejection),
+    Timeout,
+    Transport(reqwest::Error),
+    RetryBodyTooLarge,
+}
+
+impl fmt::Display for ForwardError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Rejected(Rejection::CircuitOpen(_)) => formatter.write_str("circuit is open"),
+            Self::Rejected(Rejection::BulkheadFull) => formatter.write_str("bulkhead is full"),
+            Self::Timeout => formatter.write_str("upstream timed out"),
+            Self::Transport(error) => write!(formatter, "upstream transport failed: {error}"),
+            Self::RetryBodyTooLarge => formatter.write_str("retryable request body is too large"),
+        }
+    }
+}
+
+fn resilience_problem(error: ForwardError, instance: String) -> Response {
+    if matches!(error, ForwardError::RetryBodyTooLarge) {
+        return problem(
+            StatusCode::PAYLOAD_TOO_LARGE,
+            "urn:projecty:problem:retry-body-too-large",
+            "Request body too large",
+            "A retryable request body cannot exceed 32 MiB.",
+            instance,
+        );
+    }
+    let retry_after = match error {
+        ForwardError::Rejected(Rejection::CircuitOpen(remaining)) => {
+            (remaining.as_secs() + u64::from(remaining.subsec_nanos() > 0)).max(1)
+        }
+        _ => 1,
+    };
+    let mut response = problem(
+        StatusCode::SERVICE_UNAVAILABLE,
+        "urn:projecty:problem:upstream-unavailable",
+        "Upstream unavailable",
+        "The gateway shed this request instead of queueing behind an unhealthy upstream.",
+        instance,
+    );
+    response.headers_mut().insert(
+        http::header::RETRY_AFTER,
+        HeaderValue::from_str(&retry_after.to_string()).expect("retry delay is a valid header"),
+    );
+    response
 }
 
 fn connection_header_names(headers: &HeaderMap) -> Vec<HeaderName> {
@@ -501,7 +664,7 @@ mod tests {
             Arc,
             atomic::{AtomicUsize, Ordering},
         },
-        time::Duration,
+        time::{Duration, Instant},
     };
 
     use aws_lc_rs::{
@@ -516,8 +679,8 @@ mod tests {
     };
     use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
     use config::{
-        Audiences, AuthConfig, RateLimitConfig, Secret, SensitiveString, TokenBucketConfig,
-        Upstreams,
+        Audiences, AuthConfig, RateLimitConfig, ResilienceConfig, Secret, SensitiveString,
+        TokenBucketConfig, UpstreamResilienceConfig, Upstreams,
     };
     use hmac::{Hmac, Mac};
     use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
@@ -571,6 +734,24 @@ mod tests {
                     refill_per_minute: 5,
                 },
             },
+            resilience: ResilienceConfig {
+                auth_gate: test_resilience_config(),
+                rider_manager: test_resilience_config(),
+                moto_hub: test_resilience_config(),
+                rental_operations: test_resilience_config(),
+            },
+        }
+    }
+
+    fn test_resilience_config() -> UpstreamResilienceConfig {
+        UpstreamResilienceConfig {
+            timeout: Duration::from_millis(250),
+            max_concurrency: 16,
+            breaker_failure_threshold: 2,
+            breaker_open_duration: Duration::from_millis(100),
+            max_retries: 2,
+            retry_base_delay: Duration::from_millis(1),
+            retry_max_delay: Duration::from_millis(5),
         }
     }
 
@@ -600,6 +781,35 @@ mod tests {
                 .unwrap();
         });
         Url::parse(&format!("http://{address}/")).unwrap()
+    }
+
+    struct SequenceUpstreamState {
+        statuses: Vec<StatusCode>,
+        requests: AtomicUsize,
+    }
+
+    async fn spawn_sequence_upstream(
+        statuses: Vec<StatusCode>,
+    ) -> (Url, Arc<SequenceUpstreamState>) {
+        async fn respond(AxumState(state): AxumState<Arc<SequenceUpstreamState>>) -> Response {
+            let index = state.requests.fetch_add(1, Ordering::SeqCst);
+            state
+                .statuses
+                .get(index)
+                .copied()
+                .unwrap_or_else(|| *state.statuses.last().unwrap())
+                .into_response()
+        }
+
+        let state = Arc::new(SequenceUpstreamState {
+            statuses,
+            requests: AtomicUsize::new(0),
+        });
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let app = Router::new().fallback(respond).with_state(state.clone());
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        (Url::parse(&format!("http://{address}/")).unwrap(), state)
     }
 
     struct TestIssuer {
@@ -934,6 +1144,180 @@ mod tests {
             std::str::from_utf8(&metrics_body)
                 .unwrap()
                 .contains("gateway_ratelimit_degraded_total 1")
+        );
+    }
+
+    #[tokio::test]
+    async fn retries_only_idempotent_requests_or_requests_with_an_idempotency_key() {
+        let (retry_upstream, retry_state) = spawn_sequence_upstream(vec![
+            StatusCode::INTERNAL_SERVER_ERROR,
+            StatusCode::NO_CONTENT,
+        ])
+        .await;
+        let (retry_app, _) = app_with_rate_limit(
+            test_config(retry_upstream),
+            Ok(RateLimitDecision {
+                allowed: true,
+                remaining: 10,
+                retry_after_seconds: 1,
+            }),
+        );
+
+        let retried = retry_app
+            .oneshot(
+                HttpRequest::post("/api/auth/login")
+                    .header("idempotency-key", "login-attempt-1")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(retried.status(), StatusCode::NO_CONTENT);
+        assert_eq!(retry_state.requests.load(Ordering::SeqCst), 2);
+
+        let (single_upstream, single_state) = spawn_sequence_upstream(vec![
+            StatusCode::INTERNAL_SERVER_ERROR,
+            StatusCode::NO_CONTENT,
+        ])
+        .await;
+        let (single_app, _) = app_with_rate_limit(
+            test_config(single_upstream),
+            Ok(RateLimitDecision {
+                allowed: true,
+                remaining: 10,
+                retry_after_seconds: 1,
+            }),
+        );
+        let not_retried = single_app
+            .oneshot(
+                HttpRequest::post("/api/auth/login")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(not_retried.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(single_state.requests.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn opens_the_breaker_and_sheds_quickly_without_failing_readiness() {
+        let unused_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let unused_address = unused_listener.local_addr().unwrap();
+        drop(unused_listener);
+        let mut config = test_config(Url::parse(&format!("http://{unused_address}/")).unwrap());
+        config.resilience.auth_gate.timeout = Duration::from_millis(50);
+        config.resilience.auth_gate.max_retries = 0;
+        config.resilience.auth_gate.breaker_failure_threshold = 1;
+        let (app, _) = app_with_rate_limit(
+            config,
+            Ok(RateLimitDecision {
+                allowed: true,
+                remaining: 10,
+                retry_after_seconds: 1,
+            }),
+        );
+
+        let first = app
+            .clone()
+            .oneshot(
+                HttpRequest::post("/api/auth/login")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(first.status(), StatusCode::SERVICE_UNAVAILABLE);
+
+        let started = Instant::now();
+        let shed = app
+            .clone()
+            .oneshot(
+                HttpRequest::post("/api/auth/login")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert!(started.elapsed() < Duration::from_millis(50));
+        assert_eq!(shed.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(shed.headers()[http::header::RETRY_AFTER], "1");
+
+        let readiness = app
+            .clone()
+            .oneshot(
+                HttpRequest::get("/health/ready")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(readiness.status(), StatusCode::OK);
+        let readiness = response_json(readiness).await;
+        assert_eq!(readiness["status"], "ready");
+        assert!(
+            readiness["upstream_breakers"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|entry| entry["upstream"] == "auth_gate" && entry["state"] == "open")
+        );
+
+        let metrics = app
+            .oneshot(HttpRequest::get("/metrics").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        let metrics = to_bytes(metrics.into_body(), 8192).await.unwrap();
+        assert!(std::str::from_utf8(&metrics).unwrap().contains(
+            "gateway_upstream_circuit_breaker_state{upstream=\"auth_gate\",state=\"open\"} 1"
+        ));
+    }
+
+    #[tokio::test]
+    async fn client_errors_do_not_count_as_breaker_failures() {
+        let (upstream, state) = spawn_sequence_upstream(vec![StatusCode::BAD_REQUEST]).await;
+        let mut config = test_config(upstream);
+        config.resilience.auth_gate.breaker_failure_threshold = 1;
+        let (app, _) = app_with_rate_limit(
+            config,
+            Ok(RateLimitDecision {
+                allowed: true,
+                remaining: 10,
+                retry_after_seconds: 1,
+            }),
+        );
+
+        for _ in 0..2 {
+            let response = app
+                .clone()
+                .oneshot(
+                    HttpRequest::post("/api/auth/login")
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        }
+
+        assert_eq!(state.requests.load(Ordering::SeqCst), 2);
+        let readiness = app
+            .oneshot(
+                HttpRequest::get("/health/ready")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let readiness = response_json(readiness).await;
+        assert!(
+            readiness["upstream_breakers"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|entry| entry["upstream"] == "auth_gate" && entry["state"] == "closed")
         );
     }
 
