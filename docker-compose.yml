@@ -196,6 +196,14 @@ services:
       GATEWAY_UPSTREAM_RIDER_MANAGER: http://rider-manager:8000
       GATEWAY_UPSTREAM_MOTO_HUB: http://moto-hub:8100
       GATEWAY_UPSTREAM_RENTAL_OPERATIONS: http://rental-operations:8200
+      GATEWAY_JWKS_URL: http://auth-gate:8080/.well-known/jwks.json
+      GATEWAY_JWT_ISSUER: projecty.identity
+      GATEWAY_JWT_AUDIENCE_AUTH_GATE: projecty.auth-gate
+      GATEWAY_JWT_AUDIENCE_RIDER_MANAGER: projecty.rider-manager
+      GATEWAY_JWT_AUDIENCE_MOTO_HUB: projecty.moto-hub
+      GATEWAY_JWT_AUDIENCE_RENTAL_OPERATIONS: projecty.rental-operations
+      GATEWAY_IDENTITY_SIGNING_KEY: ${GATEWAY_IDENTITY_SIGNING_KEY:?GATEWAY_IDENTITY_SIGNING_KEY is required}
+      GATEWAY_IDENTITY_SIGNING_KEY_ID: local-v1
       RUST_LOG: info,api_gateway=debug
     ports:
       - "8090:8090"
