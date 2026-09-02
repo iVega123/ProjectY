@@ -84,7 +84,7 @@ configure_live_update(
     'cd /workspace && cargo build --locked',
 )
 infra_resources = ['postgres', 'redis', 'rabbitmq', 'mongodb', 'minio']
-observability_resources = ['elasticsearch', 'logstash', 'kibana']
+observability_resources = ['tempo', 'loki', 'otel-collector', 'prometheus', 'grafana']
 setup_resources = ['auth-gate-migrations', 'rider-manager-migrations', 'moto-hub-migrations']
 service_resources = ['auth-gate', 'rider-manager', 'moto-hub', 'rental-operations']
 
@@ -92,16 +92,29 @@ for resource in infra_resources:
     dc_resource(resource, labels = ['infra'])
 
 for resource in observability_resources:
-    dc_resource(resource, labels = ['observability'])
+    resource_links = []
+    if resource == 'grafana':
+        resource_links = [link('http://localhost:3000', 'Grafana')]
+    dc_resource(resource, labels = ['observability'], links = resource_links)
 
 for resource in setup_resources:
     dc_resource(resource, labels = ['setup'])
 
 for resource in service_resources:
-    dc_resource(resource, labels = ['services'])
+    dc_resource(
+        resource,
+        labels = ['services'],
+        resource_deps = observability_resources,
+    )
 
 dc_resource('pgadmin', labels = ['tools'], links = [link('http://localhost:5050', 'pgAdmin')])
-dc_resource('api-gateway', labels = ['services'], links = [link('http://localhost:8090/health/ready', 'Gateway')])
+dc_resource(
+    'api-gateway',
+    labels = ['services'],
+    links = [link('http://localhost:8090/health/ready', 'Gateway')],
+    resource_deps = observability_resources,
+)
 
 print('Tilt UI:  http://localhost:10350')
 print('Gateway:  http://localhost:8090')
+print('Grafana:  http://localhost:3000')

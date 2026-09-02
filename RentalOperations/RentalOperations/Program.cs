@@ -11,7 +11,6 @@ using RentalOperations.Repository;
 using RentalOperations.Services;
 using RentalOperations.Services.RabbitMQService;
 using Serilog;
-using Serilog.Sinks.Elasticsearch;
 
 if (await HealthProbeCommand.TryRunAsync(args))
 {
@@ -22,19 +21,12 @@ var builder = WebApplication.CreateBuilder(args);
 
 var applicationName = builder.Configuration["ApplicationName"];
 
-var elasticUrl = builder.Configuration["ElasticSearchURL"];
-
 Log.Logger = new LoggerConfiguration()
     .Enrich.FromLogContext()
     .Enrich.WithProperty("ApplicationName", applicationName)
     .WriteTo.Console()
-    .WriteTo.Elasticsearch(new ElasticsearchSinkOptions(new Uri(elasticUrl))
-    {
-        AutoRegisterTemplate = true,
-        AutoRegisterTemplateVersion = AutoRegisterTemplateVersion.ESv7,
-        IndexFormat = $"{applicationName.ToLower()}-logs-{DateTime.UtcNow:yyyy.MM}"
-    })
     .CreateLogger();
+builder.Host.UseSerilog();
 
 builder.Services.AddProjectYIdempotency(builder.Configuration, "rental-operations");
 

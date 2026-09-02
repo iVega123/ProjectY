@@ -1,3 +1,9 @@
+x-otel-environment: &otel-environment
+  OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+  OTEL_EXPORTER_OTLP_PROTOCOL: grpc
+  OTEL_TRACES_SAMPLER: parentbased_traceidratio
+  OTEL_TRACES_SAMPLER_ARG: "1.0"
+
 x-auth-gate-environment: &auth-gate-environment
   ASPNETCORE_ENVIRONMENT: Production
   Swagger__Enabled: "${SWAGGER_ENABLED:-false}"
@@ -37,46 +43,126 @@ x-moto-hub-environment: &moto-hub-environment
   GatewayIdentity__SigningKeyId: local-v1
 
 services:
-  elasticsearch:
-    image: docker.elastic.co/elasticsearch/elasticsearch:9.5.2
-    container_name: elasticsearch
-    environment:
-      - discovery.type=single-node
-      - ES_JAVA_OPTS=-Xms512m -Xmx512m
-      # Explicit, not accidental: Elasticsearch 8+ enables security by default.
-      # Audit finding A1 documents this stack running without it. Kept visible
-      # rather than implicit until issue #63 retires ELK for the LGTM stack.
-      - xpack.security.enabled=false
+  otel-collector:
+    image: projecty/otel-collector:dev
+    build:
+      context: ./deploy/observability
+      dockerfile: otel-collector.Dockerfile
+    container_name: otel-collector
+    command: ["--config=/etc/otel/config.yaml"]
     ports:
-      - "9200:9200"
-      - "9300:9300"
-    networks:
-      - elk
-
-  logstash:
-    image: docker.elastic.co/logstash/logstash:9.5.2
-    container_name: logstash
+      - "4317:4317"
+      - "4318:4318"
+      - "8889:8889"
     volumes:
-      - ./logstash/config/logstash.yml:/usr/share/logstash/config/logstash.yml
-      - ./logstash/pipeline:/usr/share/logstash/pipeline
-    ports:
-      - "5000:5000"
-    depends_on:
-      - elasticsearch
+      - ./deploy/observability/otel-collector.yaml:/etc/otel/config.yaml:ro
     networks:
-      - elk
+      - projecty
+    depends_on:
+      tempo:
+        condition: service_healthy
+      loki:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/busybox", "wget", "--spider", "-q", "http://localhost:13133/"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
 
-  kibana:
-    image: docker.elastic.co/kibana/kibana:9.5.2
-    container_name: kibana
+  prometheus:
+    image: prom/prometheus:v3.14.0
+    container_name: prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=6h
+      - --web.enable-lifecycle
+      - --web.enable-remote-write-receiver
+      - --enable-feature=exemplar-storage
     ports:
-      - "5601:5601"
-    depends_on:
-      - elasticsearch
-    environment:
-      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+      - "9090:9090"
+    volumes:
+      - prometheus-data:/prometheus
+      - ./deploy/observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./deploy/observability/rules:/etc/prometheus/rules:ro
     networks:
-      - elk
+      - projecty
+    depends_on:
+      otel-collector:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/bin/wget", "--spider", "-q", "http://localhost:9090/-/ready"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+
+  tempo:
+    image: grafana/tempo:3.0.3
+    container_name: tempo
+    command: ["-config.file=/etc/tempo/tempo.yaml"]
+    ports:
+      - "3200:3200"
+    volumes:
+      - tempo-data:/var/tempo
+      - ./deploy/observability/tempo.yaml:/etc/tempo/tempo.yaml:ro
+    networks:
+      - projecty
+    healthcheck:
+      test: ["CMD", "/usr/bin/wget", "--spider", "-q", "http://localhost:3200/ready"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+
+  loki:
+    image: grafana/loki:3.7.7
+    container_name: loki
+    command: ["-config.file=/etc/loki/loki.yaml"]
+    ports:
+      - "3100:3100"
+    volumes:
+      - loki-data:/loki
+      - ./deploy/observability/loki.yaml:/etc/loki/loki.yaml:ro
+    networks:
+      - projecty
+    healthcheck:
+      test: ["CMD", "/busybox/wget", "--spider", "-q", "http://localhost:3100/ready"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+
+  grafana:
+    image: grafana/grafana:13.2.0
+    container_name: grafana
+    environment:
+      GF_SECURITY_ADMIN_USER: "${GRAFANA_USER:?Set GRAFANA_USER in .env}"
+      GF_SECURITY_ADMIN_PASSWORD: "${GRAFANA_PASSWORD:?Set GRAFANA_PASSWORD in .env}"
+      GF_USERS_DEFAULT_THEME: system
+      GF_INSTALL_PLUGINS: ""
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./deploy/observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./deploy/observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    networks:
+      - projecty
+    depends_on:
+      prometheus:
+        condition: service_healthy
+      tempo:
+        condition: service_healthy
+      loki:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/usr/bin/wget", "--spider", "-q", "http://localhost:3000/api/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
 
   postgres:
     image: postgres:18
@@ -90,7 +176,7 @@ services:
     ports:
       - "5432:5432"
     networks:
-      - elk
+      - projecty
     volumes:
       - postgres-data:/var/lib/postgresql/data
       - ./deploy/postgres/init-databases.sh:/docker-entrypoint-initdb.d/10-create-service-databases.sh:ro
@@ -108,7 +194,7 @@ services:
     ports:
       - "6379:6379"
     networks:
-      - elk
+      - projecty
     volumes:
       - redis-data:/data
     healthcheck:
@@ -128,7 +214,7 @@ services:
     depends_on:
       - postgres
     networks:
-      - elk
+      - projecty
 
   mongodb:
     image: mongo:8.3
@@ -141,7 +227,7 @@ services:
     volumes:
       - mongo-data:/data/db
     networks:
-      - elk
+      - projecty
     healthcheck:
       test: ["CMD-SHELL", "mongosh --quiet --username \"$${MONGO_INITDB_ROOT_USERNAME}\" --password \"$${MONGO_INITDB_ROOT_PASSWORD}\" --authenticationDatabase admin --eval \"db.adminCommand('ping').ok\""]
       interval: 5s
@@ -153,7 +239,7 @@ services:
     image: rabbitmq:4-management
     container_name: rabbitmq
     networks:
-      - elk
+      - projecty
     volumes:
       - rabbitmq-data:/var/lib/rabbitmq
       - ./deploy/rabbitmq/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf:ro
@@ -177,7 +263,7 @@ services:
     volumes:
       - minio-data:/data
     networks:
-      - elk
+      - projecty
     command: server /data --console-address ":9001"
 
   api-gateway:
@@ -189,6 +275,8 @@ services:
     container_name: api-gateway
     stop_grace_period: 30s
     environment:
+      <<: *otel-environment
+      OTEL_SERVICE_NAME: api-gateway
       GATEWAY_BIND: 0.0.0.0:8090
       GATEWAY_HEALTH_URL: http://127.0.0.1:8090/health/ready
       GATEWAY_UPSTREAM_AUTH_GATE: http://auth-gate:8080
@@ -217,7 +305,7 @@ services:
     ports:
       - "8090:8090"
     networks:
-      - elk
+      - projecty
     healthcheck:
       test: ["CMD", "/workspace/target/debug/api-gateway", "--healthcheck"]
       interval: 10s
@@ -225,6 +313,8 @@ services:
       retries: 6
       start_period: 10s
     depends_on:
+      otel-collector:
+        condition: service_healthy
       auth-gate:
         condition: service_healthy
       rider-manager:
@@ -241,7 +331,7 @@ services:
       dockerfile: AuthGate/AuthGate/Dockerfile
     command: ["--migrate=true"]
     networks:
-      - elk
+      - projecty
     environment: *auth-gate-environment
     depends_on:
       postgres:
@@ -257,8 +347,10 @@ services:
       - "8080:8080"
       - "8181:8181"
     networks:
-      - elk
-    environment: *auth-gate-environment
+      - projecty
+    environment:
+      <<: [*auth-gate-environment, *otel-environment]
+      OTEL_SERVICE_NAME: auth-gate
     healthcheck:
       test: ["CMD", "dotnet", "AuthGate.dll", "--healthcheck", "http://localhost:8080/health/ready"]
       interval: 10s
@@ -266,6 +358,8 @@ services:
       retries: 6
       start_period: 10s
     depends_on:
+      otel-collector:
+        condition: service_healthy
       auth-gate-migrations:
         condition: service_completed_successfully
       rabbitmq:
@@ -280,7 +374,7 @@ services:
       dockerfile: RiderManager/RiderManager/Dockerfile
     command: ["--migrate=true"]
     networks:
-      - elk
+      - projecty
     environment: *rider-manager-environment
     depends_on:
       postgres:
@@ -296,8 +390,10 @@ services:
       - "8000:8000"
       - "8001:8001"
     networks:
-      - elk
-    environment: *rider-manager-environment
+      - projecty
+    environment:
+      <<: [*rider-manager-environment, *otel-environment]
+      OTEL_SERVICE_NAME: rider-manager
     healthcheck:
       test: ["CMD", "dotnet", "RiderManager.dll", "--healthcheck", "http://localhost:8000/health/ready"]
       interval: 10s
@@ -305,6 +401,8 @@ services:
       retries: 6
       start_period: 10s
     depends_on:
+      otel-collector:
+        condition: service_healthy
       rider-manager-migrations:
         condition: service_completed_successfully
       rabbitmq:
@@ -319,7 +417,7 @@ services:
       dockerfile: MotoHub/MotoHub/Dockerfile
     command: ["--migrate=true"]
     networks:
-      - elk
+      - projecty
     environment: *moto-hub-environment
     depends_on:
       postgres:
@@ -335,8 +433,10 @@ services:
       - "8100:8100"
       - "8101:8101"
     networks:
-      - elk
-    environment: *moto-hub-environment
+      - projecty
+    environment:
+      <<: [*moto-hub-environment, *otel-environment]
+      OTEL_SERVICE_NAME: moto-hub
     healthcheck:
       test: ["CMD", "dotnet", "MotoHub.dll", "--healthcheck", "http://localhost:8100/health/ready"]
       interval: 10s
@@ -344,6 +444,8 @@ services:
       retries: 6
       start_period: 10s
     depends_on:
+      otel-collector:
+        condition: service_healthy
       moto-hub-migrations:
         condition: service_completed_successfully
       rabbitmq:
@@ -360,8 +462,10 @@ services:
       - "8200:8200"
       - "8201:8201"
     networks:
-      - elk
+      - projecty
     environment:
+      <<: *otel-environment
+      OTEL_SERVICE_NAME: rental-operations
       ASPNETCORE_ENVIRONMENT: Production
       Swagger__Enabled: "${SWAGGER_ENABLED:-false}"
       ASPNETCORE_URLS: http://+:8200
@@ -379,6 +483,8 @@ services:
       retries: 6
       start_period: 10s
     depends_on:
+      otel-collector:
+        condition: service_healthy
       mongodb:
         condition: service_healthy
       moto-hub:
@@ -389,7 +495,7 @@ services:
         condition: service_healthy
 
 networks:
-  elk:
+  projecty:
     driver: bridge
 
 volumes:
@@ -398,3 +504,7 @@ volumes:
   mongo-data:
   rabbitmq-data:
   minio-data:
+  grafana-data:
+  prometheus-data:
+  tempo-data:
+  loki-data:

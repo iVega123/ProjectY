@@ -2,9 +2,9 @@
 
 This guide starts the original four-service system that was reviewed in the
 [architecture and security audit](AUDITORIA-ARQUITETURA-SEGURANCA.md), with the
-Rust gateway in front as the first strangler-migration component. The remaining
-topology under `deploy/` is still a design scaffold for services that have not
-been implemented yet.
+Rust gateway in front and the LGTM observability stack running as the first
+strangler-migration components. The remaining topology under `deploy/` is still
+a design scaffold for services that have not been implemented yet.
 
 ## Safety warning
 
@@ -29,9 +29,11 @@ starting.
 
 | Infrastructure service | Required host ports |
 |---|---|
-| Elasticsearch | `9200`, `9300` |
-| Logstash | `5000` |
-| Kibana | `5601` |
+| OpenTelemetry Collector | `4317`, `4318`, `8889` |
+| Prometheus | `9090` |
+| Tempo | `3200` |
+| Loki | `3100` |
+| Grafana | `3000` |
 | PostgreSQL | `5432` |
 | Redis | `6379` |
 | pgAdmin | `5050` |
@@ -117,6 +119,11 @@ depends on the network connection and Docker cache.
 | Rider Manager | <http://localhost:8000> |
 | MotoHub | <http://localhost:8100> |
 | Rental Operations | <http://localhost:8200> |
+
+Grafana is available at <http://localhost:3000>. Sign in with the generated
+`GRAFANA_USER` and `GRAFANA_PASSWORD` values from `.env`; both ProjectY
+dashboards and the Prometheus, Tempo, and Loki datasources are provisioned at
+startup.
 
 The audited baseline Compose stack runs every application in `Production`, so
 Swagger and the developer exception page are disabled. Local IDE launch
@@ -239,24 +246,23 @@ routes served by the same process.
 
 ## Verify startup gates
 
-The modernization Compose graph waits for real health instead of elapsed time.
+The root Compose and Tilt graphs wait for real health instead of elapsed time.
 Tempo and Loki become healthy first, followed by the OpenTelemetry Collector,
 Prometheus, and Grafana. Application services wait for a healthy collector and
-for each infrastructure dependency they use through Toxiproxy.
+for each infrastructure dependency they use.
 
-The observability portion can be exercised before the modernization service
-builds land:
+The observability portion can be exercised independently:
 
 ```bash
-docker compose --env-file .env -f deploy/overlays/selfhost/compose.yaml up --build -d \
-  tempo loki otel-collector prometheus grafana toxiproxy
-docker compose --env-file .env -f deploy/overlays/selfhost/compose.yaml ps
+docker compose --env-file .env up --build -d \
+  tempo loki otel-collector prometheus grafana
+docker compose --env-file .env ps
 
 # Dependents must retain their container IDs and return to all-green.
-docker compose --env-file .env -f deploy/overlays/selfhost/compose.yaml ps -q \
+docker compose --env-file .env ps -q \
   otel-collector prometheus grafana
-docker compose --env-file .env -f deploy/overlays/selfhost/compose.yaml restart loki
-docker compose --env-file .env -f deploy/overlays/selfhost/compose.yaml ps -q \
+docker compose --env-file .env restart loki
+docker compose --env-file .env ps -q \
   otel-collector prometheus grafana
 ```
 
@@ -276,9 +282,9 @@ Named volumes are retained so local database contents survive the restart.
 
 ## Known limitations
 
-- The root `docker-compose.yml` is the audited legacy baseline, not a production
-  deployment definition. It requires secrets from the local environment and
-  contains no committed secret defaults.
+- The root `docker-compose.yml` combines the audited services with the gateway
+  and LGTM stack; it is not a production deployment definition. It requires
+  secrets from the local environment and contains no committed secret defaults.
 - Supporting databases, queues, object storage, and observability tools publish
   host ports with development settings.
 - The modernization topology in `deploy/overlays/selfhost/compose.yaml` is not

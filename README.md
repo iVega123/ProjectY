@@ -50,13 +50,14 @@ source locations are in the
 |---|---|
 | Audited baseline | Four ASP.NET Core services: `AuthGate`, `MotoHub`, `RiderManager`, and `RentalOperations` |
 | Data and messaging | PostgreSQL, MongoDB, RabbitMQ, and MinIO in the original local stack |
-| Original observability | Elasticsearch, Logstash, and Kibana |
-| Modernization scaffold | A container topology under `deploy/` for the planned gateway, transactional core, fault injection, and LGTM observability stack |
+| Active observability | OpenTelemetry Collector, Prometheus, Tempo, Loki, and Grafana |
+| Retired observability | The unauthenticated Elasticsearch, Logstash, and Kibana stack |
+| Modernization scaffold | A container topology under `deploy/` for the planned transactional core and fault injection |
 | Decision records | Eight records under [`docs/adr/`](docs/adr/README.md): 0000-0005 are the design trail, 0006-0007 are remediation decisions |
 
 The modernization compose file is a design scaffold: it references services
-that have not landed yet. It is deliberately not presented as a working demo.
-The root compose file runs the audited baseline only.
+that have not landed yet. The root compose file runs the audited services behind
+the Rust gateway together with the LGTM observability stack.
 
 ## Branches
 
@@ -79,13 +80,11 @@ State-changing API retries follow the shared
 
 ### Modernization development loop
 
-The root [`Tiltfile`](Tiltfile) organizes the self-hosted overlay at
-`deploy/overlays/selfhost/compose.yaml` into infrastructure, observability,
-service, and failure drill groups. The overlay composes the environment-neutral
-model in `deploy/base/` with local build, port, mount, and runtime settings. It
-requires Docker Compose 2.20 or newer, Tilt, and PowerShell (`powershell` on
-Windows or `pwsh` on macOS/Linux). Start the audited services behind the first
-modernization component, the Rust gateway, with one command:
+The root [`Tiltfile`](Tiltfile) organizes `docker-compose.yml` into
+infrastructure, observability, setup, and service groups. It requires Docker
+Compose 2.20 or newer, Tilt, and PowerShell (`powershell` on Windows or `pwsh`
+on macOS/Linux). Start the audited services behind the Rust gateway, with LGTM
+ready before application startup, using one command:
 
 ```bash
 tilt up

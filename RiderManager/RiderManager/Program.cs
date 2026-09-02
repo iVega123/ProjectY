@@ -16,7 +16,6 @@ using RiderManager.Services;
 using Npgsql;
 using ProjectY.Shared.Health;
 using ProjectY.Shared.Hosting;
-using Serilog.Sinks.Elasticsearch;
 using ProjectY.Shared.Messaging;
 using ProjectY.Shared.Idempotency;
 using ProjectY.Shared.Security;
@@ -54,18 +53,10 @@ builder.Services.AddProjectYIdempotency(builder.Configuration, "rider-manager");
 
 var applicationName = builder.Configuration["ApplicationName"];
 
-var elasticUrl = builder.Configuration["ElasticSearchURL"];
-
 Log.Logger = new LoggerConfiguration()
     .Enrich.FromLogContext()
     .Enrich.WithProperty("ApplicationName", applicationName)
     .WriteTo.Console()
-    .WriteTo.Elasticsearch(new ElasticsearchSinkOptions(new Uri(elasticUrl))
-    {
-        AutoRegisterTemplate = true,
-        AutoRegisterTemplateVersion = AutoRegisterTemplateVersion.ESv7,
-        IndexFormat = $"{applicationName.ToLower()}-logs-{DateTime.UtcNow:yyyy.MM}"
-    })
     .CreateLogger();
 
 builder.Host.UseSerilog();

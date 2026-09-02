@@ -5,7 +5,6 @@ using MotoHub.Data;
 using MotoHub.Services;
 using MotoHub.Repositories;
 using Microsoft.OpenApi.Models;
-using Serilog.Sinks.Elasticsearch;
 using MotoHub.Configurations;
 using MotoHub.Services.RabbitMQ;
 using MotoHub.CrossCutting;
@@ -23,27 +22,13 @@ if (await HealthProbeCommand.TryRunAsync(args))
 
 var builder = WebApplication.CreateBuilder(args);
 
-var isTesting = builder.Environment.IsEnvironment("Testing");
-
 var applicationName = builder.Configuration["ApplicationName"];
-var elasticUrl = builder.Configuration["ElasticSearchURL"];
 
-var loggerConfig = new LoggerConfiguration()
+Log.Logger = new LoggerConfiguration()
     .Enrich.FromLogContext()
     .Enrich.WithProperty("ApplicationName", applicationName)
-    .WriteTo.Console();
-
-if (!isTesting)
-{
-    loggerConfig.WriteTo.Elasticsearch(new ElasticsearchSinkOptions(new Uri(elasticUrl))
-    {
-        AutoRegisterTemplate = true,
-        AutoRegisterTemplateVersion = AutoRegisterTemplateVersion.ESv7,
-        IndexFormat = $"{applicationName.ToLower()}-logs-{DateTime.UtcNow:yyyy.MM}"
-    });
-}
-
-Log.Logger = loggerConfig.CreateLogger();
+    .WriteTo.Console()
+    .CreateLogger();
 builder.Host.UseSerilog();
 
 var rabbitMQConfig = builder.Configuration.GetSection("RabbitMQ").Get<RabbitMQOptions>()
