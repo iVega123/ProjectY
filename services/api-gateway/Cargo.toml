@@ -8,6 +8,7 @@ rust-version = "1.98"
 axum = "0.8.9"
 base64 = "0.22.1"
 futures-util = "0.3.31"
+fastrand = "2.5.0"
 hmac = "0.12.1"
 http = "1.4.0"
 jsonwebtoken = { version = "11.0.0", default-features = false, features = ["aws_lc_rs"] }

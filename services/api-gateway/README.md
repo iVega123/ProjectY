@@ -14,8 +14,10 @@ shared Redis rate limiter are now enforced at this edge boundary.
 | `/api/motorcycles/**` | MotoHub |
 | `/api/rental/**` | RentalOperations |
 
-The gateway owns `/health/live` and `/health/ready`. Unknown paths return `404`
-instead of being guessed or forwarded to a default service.
+The gateway owns `/health/live` and `/health/ready`. Readiness remains `200`
+when one upstream breaker is open because routes owned by the other services
+remain available; its JSON payload reports every breaker state. Unknown paths
+return `404` instead of being guessed or forwarded to a default service.
 
 ## Configuration
 
@@ -50,6 +52,13 @@ All runtime configuration comes from environment variables.
 | `GATEWAY_RATE_LIMIT_GENERAL_REFILL_PER_MINUTE` | No (`120`) | Sustained refill for non-auth routes |
 | `GATEWAY_RATE_LIMIT_AUTH_CAPACITY` | No (`10`) | Stricter burst capacity for `/api/auth/**` |
 | `GATEWAY_RATE_LIMIT_AUTH_REFILL_PER_MINUTE` | No (`5`) | Stricter sustained refill for `/api/auth/**` |
+| `GATEWAY_UPSTREAM_<UPSTREAM>_TIMEOUT_MS` | No (`1500`-`2500`) | Per-attempt timeout; upstream is `AUTH_GATE`, `RIDER_MANAGER`, `MOTO_HUB`, or `RENTAL_OPERATIONS` |
+| `GATEWAY_UPSTREAM_<UPSTREAM>_MAX_CONCURRENCY` | No (`64`) | Bulkhead permits; excess requests are refused without queueing |
+| `GATEWAY_UPSTREAM_<UPSTREAM>_BREAKER_FAILURE_THRESHOLD` | No (`5`) | Consecutive final failures before opening the circuit |
+| `GATEWAY_UPSTREAM_<UPSTREAM>_BREAKER_OPEN_MS` | No (`30000`) | Delay before admitting one half-open probe |
+| `GATEWAY_UPSTREAM_<UPSTREAM>_MAX_RETRIES` | No (`2`) | Retries after the initial attempt for retry-safe requests |
+| `GATEWAY_UPSTREAM_<UPSTREAM>_RETRY_BASE_MS` | No (`25`) | Initial full-jitter retry ceiling |
+| `GATEWAY_UPSTREAM_<UPSTREAM>_RETRY_MAX_MS` | No (`250`) | Maximum full-jitter retry ceiling |
 
 `POST /api/auth/login` and `POST /api/auth/register/rider` are public. Every
 other proxied route requires an EdDSA access token with `kid`, `sub`, `jti`,
@@ -74,6 +83,20 @@ also expose the remaining count. If Redis is unavailable, rate limiting fails
 open and increments `gateway_ratelimit_degraded_total`. This is intentionally
 the opposite posture from the high-value revocation check, which fails closed.
 Prometheus scrapes the counter from `/metrics`.
+
+Every upstream has an independent timeout, semaphore bulkhead, and circuit
+breaker. A full bulkhead or open breaker returns RFC 9457 `503` with
+`Retry-After` immediately; it never waits for a permit. Transport errors,
+timeouts, and final `5xx` responses count as breaker failures, while `4xx`
+responses close/reset the breaker because the upstream answered normally. An
+open breaker admits exactly one half-open probe after its cooldown.
+
+Retries use exponential full jitter and are permitted only for idempotent HTTP
+methods or requests carrying `Idempotency-Key`. Retryable bodies are buffered
+up to 32 MiB so an attempt can be replayed safely. `/health/ready` exposes the
+current `closed`, `open`, or `half_open` state without making unrelated routes
+unready, and `/metrics` publishes
+`gateway_upstream_circuit_breaker_state{upstream,state}`.
 
 The gateway rejects every client-supplied `x-identity-*` header and never sends
 the caller's `Authorization` or `Cookie` headers upstream. After verification it

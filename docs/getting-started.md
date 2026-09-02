@@ -157,6 +157,14 @@ open: stopping Redis allows ordinary traffic, omits the remaining-token header,
 and increments `gateway_ratelimit_degraded_total` on the gateway `/metrics`
 endpoint and the platform Grafana dashboard.
 
+The gateway also isolates each legacy upstream independently. Requests have a
+low per-attempt timeout, acquire a bulkhead permit without queueing, and open a
+circuit after repeated transport errors, timeouts, or `5xx` responses. Safe
+methods and requests carrying `Idempotency-Key` retry with exponential full
+jitter. Saturated or open dependencies are shed with `503` and `Retry-After`;
+an open breaker is visible in `/health/ready`, `/metrics`, and Grafana without
+making the whole gateway unready.
+
 ## Bootstrap the first administrator
 
 Administrator creation is deliberately unavailable over HTTP. Open a second

@@ -13,6 +13,26 @@ pub struct Config {
     pub upstreams: Upstreams,
     pub auth: AuthConfig,
     pub rate_limit: RateLimitConfig,
+    pub resilience: ResilienceConfig,
+}
+
+#[derive(Clone, Debug)]
+pub struct ResilienceConfig {
+    pub auth_gate: UpstreamResilienceConfig,
+    pub rider_manager: UpstreamResilienceConfig,
+    pub moto_hub: UpstreamResilienceConfig,
+    pub rental_operations: UpstreamResilienceConfig,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct UpstreamResilienceConfig {
+    pub timeout: Duration,
+    pub max_concurrency: usize,
+    pub breaker_failure_threshold: u32,
+    pub breaker_open_duration: Duration,
+    pub max_retries: u32,
+    pub retry_base_delay: Duration,
+    pub retry_max_delay: Duration,
 }
 
 #[derive(Clone, Debug)]
@@ -166,6 +186,12 @@ impl Config {
                 general: token_bucket_from_env("GENERAL", 120, 120)?,
                 auth: token_bucket_from_env("AUTH", 10, 5)?,
             },
+            resilience: ResilienceConfig {
+                auth_gate: upstream_resilience_from_env("AUTH_GATE", 1500)?,
+                rider_manager: upstream_resilience_from_env("RIDER_MANAGER", 2000)?,
+                moto_hub: upstream_resilience_from_env("MOTO_HUB", 2000)?,
+                rental_operations: upstream_resilience_from_env("RENTAL_OPERATIONS", 2500)?,
+            },
         })
     }
 
@@ -205,6 +231,35 @@ impl Audiences {
             UpstreamName::RiderManager => &self.rider_manager,
             UpstreamName::MotoHub => &self.moto_hub,
             UpstreamName::RentalOperations => &self.rental_operations,
+        }
+    }
+}
+
+impl ResilienceConfig {
+    pub fn for_upstream(&self, upstream: UpstreamName) -> UpstreamResilienceConfig {
+        match upstream {
+            UpstreamName::AuthGate => self.auth_gate,
+            UpstreamName::RiderManager => self.rider_manager,
+            UpstreamName::MotoHub => self.moto_hub,
+            UpstreamName::RentalOperations => self.rental_operations,
+        }
+    }
+}
+
+impl UpstreamName {
+    pub const ALL: [Self; 4] = [
+        Self::AuthGate,
+        Self::RiderManager,
+        Self::MotoHub,
+        Self::RentalOperations,
+    ];
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::AuthGate => "auth_gate",
+            Self::RiderManager => "rider_manager",
+            Self::MotoHub => "moto_hub",
+            Self::RentalOperations => "rental_operations",
         }
     }
 }
@@ -289,6 +344,71 @@ fn token_bucket_from_env(
         capacity,
         refill_per_minute,
     })
+}
+
+fn upstream_resilience_from_env(
+    name: &str,
+    default_timeout_ms: u64,
+) -> Result<UpstreamResilienceConfig, String> {
+    let prefix = format!("GATEWAY_UPSTREAM_{name}");
+    let timeout = Duration::from_millis(positive_u64_from_env(
+        &format!("{prefix}_TIMEOUT_MS"),
+        default_timeout_ms,
+    )?);
+    let max_concurrency = positive_u64_from_env(&format!("{prefix}_MAX_CONCURRENCY"), 64)?;
+    let breaker_failure_threshold =
+        positive_u64_from_env(&format!("{prefix}_BREAKER_FAILURE_THRESHOLD"), 5)?;
+    let breaker_open_duration = Duration::from_millis(positive_u64_from_env(
+        &format!("{prefix}_BREAKER_OPEN_MS"),
+        30_000,
+    )?);
+    let max_retries = non_negative_u64_from_env(&format!("{prefix}_MAX_RETRIES"), 2)?;
+    let retry_base_delay = Duration::from_millis(positive_u64_from_env(
+        &format!("{prefix}_RETRY_BASE_MS"),
+        25,
+    )?);
+    let retry_max_delay = Duration::from_millis(positive_u64_from_env(
+        &format!("{prefix}_RETRY_MAX_MS"),
+        250,
+    )?);
+    if retry_base_delay > retry_max_delay {
+        return Err(format!(
+            "{prefix}_RETRY_BASE_MS must not exceed {prefix}_RETRY_MAX_MS"
+        ));
+    }
+    if max_concurrency > 100_000 {
+        return Err(format!("{prefix}_MAX_CONCURRENCY must not exceed 100000"));
+    }
+    if breaker_failure_threshold > 1_000_000 {
+        return Err(format!(
+            "{prefix}_BREAKER_FAILURE_THRESHOLD must not exceed 1000000"
+        ));
+    }
+    if max_retries > 10 {
+        return Err(format!("{prefix}_MAX_RETRIES must not exceed 10"));
+    }
+    Ok(UpstreamResilienceConfig {
+        timeout,
+        max_concurrency: usize::try_from(max_concurrency)
+            .map_err(|_| format!("{prefix}_MAX_CONCURRENCY is too large"))?,
+        breaker_failure_threshold: u32::try_from(breaker_failure_threshold)
+            .map_err(|_| format!("{prefix}_BREAKER_FAILURE_THRESHOLD is too large"))?,
+        breaker_open_duration,
+        max_retries: u32::try_from(max_retries)
+            .map_err(|_| format!("{prefix}_MAX_RETRIES is too large"))?,
+        retry_base_delay,
+        retry_max_delay,
+    })
+}
+
+fn non_negative_u64_from_env(name: &str, default: u64) -> Result<u64, String> {
+    env::var(name)
+        .map(|value| {
+            value
+                .parse::<u64>()
+                .map_err(|error| format!("{name} must be a non-negative integer: {error}"))
+        })
+        .unwrap_or(Ok(default))
 }
 
 fn normalize_base_url(mut url: Url) -> Url {
