@@ -3,6 +3,7 @@ using MongoDB.Driver;
 using ProjectY.Shared.Health;
 using ProjectY.Shared.Hosting;
 using ProjectY.Shared.Idempotency;
+using ProjectY.Shared.Observability;
 using ProjectY.Shared.Security;
 using RentalOperations.Configurations;
 using RentalOperations.CrossCutting.Services;
@@ -11,7 +12,6 @@ using RentalOperations.Repository;
 using RentalOperations.Services;
 using RentalOperations.Services.RabbitMQService;
 using Serilog;
-using Serilog.Sinks.Elasticsearch;
 
 if (await HealthProbeCommand.TryRunAsync(args))
 {
@@ -20,21 +20,19 @@ if (await HealthProbeCommand.TryRunAsync(args))
 
 var builder = WebApplication.CreateBuilder(args);
 
-var applicationName = builder.Configuration["ApplicationName"];
+var serviceName = builder.Configuration["OTEL_SERVICE_NAME"]
+    ?? builder.Configuration["ApplicationName"]
+    ?? "rental-operations";
 
-var elasticUrl = builder.Configuration["ElasticSearchURL"];
+builder.Services.AddProjectYTelemetry(builder.Configuration, serviceName);
 
 Log.Logger = new LoggerConfiguration()
     .Enrich.FromLogContext()
-    .Enrich.WithProperty("ApplicationName", applicationName)
+    .Enrich.WithProperty("ApplicationName", serviceName)
     .WriteTo.Console()
-    .WriteTo.Elasticsearch(new ElasticsearchSinkOptions(new Uri(elasticUrl))
-    {
-        AutoRegisterTemplate = true,
-        AutoRegisterTemplateVersion = AutoRegisterTemplateVersion.ESv7,
-        IndexFormat = $"{applicationName.ToLower()}-logs-{DateTime.UtcNow:yyyy.MM}"
-    })
+    .WriteToProjectYTelemetry(builder.Configuration, serviceName)
     .CreateLogger();
+builder.Host.UseSerilog();
 
 builder.Services.AddProjectYIdempotency(builder.Configuration, "rental-operations");
 

@@ -16,9 +16,9 @@ using RiderManager.Services;
 using Npgsql;
 using ProjectY.Shared.Health;
 using ProjectY.Shared.Hosting;
-using Serilog.Sinks.Elasticsearch;
 using ProjectY.Shared.Messaging;
 using ProjectY.Shared.Idempotency;
+using ProjectY.Shared.Observability;
 using ProjectY.Shared.Security;
 
 if (await HealthProbeCommand.TryRunAsync(args))
@@ -52,20 +52,17 @@ builder.Services.AddSingleton(new QueueMessageAuthenticator(
 builder.Services.AddProjectYIdempotency(builder.Configuration, "rider-manager");
 
 
-var applicationName = builder.Configuration["ApplicationName"];
+var serviceName = builder.Configuration["OTEL_SERVICE_NAME"]
+    ?? builder.Configuration["ApplicationName"]
+    ?? "rider-manager";
 
-var elasticUrl = builder.Configuration["ElasticSearchURL"];
+builder.Services.AddProjectYTelemetry(builder.Configuration, serviceName);
 
 Log.Logger = new LoggerConfiguration()
     .Enrich.FromLogContext()
-    .Enrich.WithProperty("ApplicationName", applicationName)
+    .Enrich.WithProperty("ApplicationName", serviceName)
     .WriteTo.Console()
-    .WriteTo.Elasticsearch(new ElasticsearchSinkOptions(new Uri(elasticUrl))
-    {
-        AutoRegisterTemplate = true,
-        AutoRegisterTemplateVersion = AutoRegisterTemplateVersion.ESv7,
-        IndexFormat = $"{applicationName.ToLower()}-logs-{DateTime.UtcNow:yyyy.MM}"
-    })
+    .WriteToProjectYTelemetry(builder.Configuration, serviceName)
     .CreateLogger();
 
 builder.Host.UseSerilog();
