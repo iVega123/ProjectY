@@ -73,6 +73,10 @@ See [Running the audited baseline locally](docs/getting-started.md). This code
 contains known security flaws and development credentials; use it only in an
 isolated local environment.
 
+Use the [telemetry correlation runbook](docs/observability-correlation.md) to
+verify metric-to-trace, trace-to-log, log-to-trace, and service-graph links in
+the running LGTM stack.
+
 Database-backed tests use the shared
 [PostgreSQL Testcontainers pattern](docs/testing/testcontainers-postgres.md).
 State-changing API retries follow the shared

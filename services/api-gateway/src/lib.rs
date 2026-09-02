@@ -32,7 +32,7 @@ use revocation::{RedisRevocationStore, RevocationError, RevocationStore};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use tokio::net::TcpListener;
-use tracing::{Instrument, Span, field, info, info_span, warn};
+use tracing::{Instrument, field, info, info_span, warn};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 use url::Url;
 
@@ -402,10 +402,6 @@ async fn forward(
             upstream_headers.append(name.clone(), value.clone());
         }
     }
-    let trace_context = Span::current().context();
-    global::get_text_map_propagator(|propagator| {
-        propagator.inject_context(&trace_context, &mut HeaderInjector(&mut upstream_headers));
-    });
     let retry_allowed = retry_allowed(&parts.method, &parts.headers);
     let (buffered_body, mut streaming_body) = if retry_allowed {
         (
@@ -438,9 +434,28 @@ async fn forward(
             tokio::time::sleep(delay).await;
         }
 
+        let client_span = info_span!(
+            "gateway.upstream",
+            otel.kind = "client",
+            http.request.method = %parts.method,
+            server.address = %target.host_str().unwrap_or_default(),
+            server.port = target.port_or_known_default().unwrap_or_default(),
+            url.path = %target.path(),
+            upstream = ?upstream_name,
+            retry.attempt = attempt,
+            http.response.status_code = field::Empty,
+            otel.status_code = field::Empty,
+            error.type = field::Empty
+        );
+        let trace_context = client_span.context();
+        let mut attempt_headers = upstream_headers.clone();
+        global::get_text_map_propagator(|propagator| {
+            propagator.inject_context(&trace_context, &mut HeaderInjector(&mut attempt_headers));
+        });
+
         let mut upstream_request = client
             .request(parts.method.clone(), target.clone())
-            .headers(upstream_headers.clone());
+            .headers(attempt_headers);
         upstream_request = if let Some(body) = &buffered_body {
             upstream_request.body(body.clone())
         } else {
@@ -453,13 +468,29 @@ async fn forward(
         };
 
         info!(upstream = ?upstream_name, path = %parts.uri, attempt, "proxying request");
-        let upstream_response = match upstream_request.timeout(resilience.timeout).send().await {
-            Ok(response) => response,
+        let upstream_response = match upstream_request
+            .timeout(resilience.timeout)
+            .send()
+            .instrument(client_span.clone())
+            .await
+        {
+            Ok(response) => {
+                client_span.record("http.response.status_code", response.status().as_u16());
+                if response.status().is_server_error() {
+                    client_span.record("otel.status_code", "ERROR");
+                    client_span.record("error.type", response.status().as_str());
+                }
+                response
+            }
             Err(error) if attempt < max_retries => {
+                client_span.record("otel.status_code", "ERROR");
+                client_span.record("error.type", error.to_string());
                 warn!(upstream = ?upstream_name, attempt, error = %error, "retryable upstream transport failure");
                 continue;
             }
             Err(error) => {
+                client_span.record("otel.status_code", "ERROR");
+                client_span.record("error.type", error.to_string());
                 policy.record_failure(&admission);
                 return if error.is_timeout() {
                     Err(ForwardError::Timeout)

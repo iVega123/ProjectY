@@ -37,6 +37,7 @@ namespace RentalOperations.Services.RabbitMQService
         private void InitializeQueues()
         {
             _channel.QueueDeclare(queue: _licenceUpdateQueueName, durable: true, exclusive: false, autoDelete: false);
+            _channel.QueueDeclare(queue: _licenceUpdatePoisonQueueName, durable: true, exclusive: false, autoDelete: false);
             _channel.BasicQos(prefetchSize: 0, prefetchCount: 1, global: false);
         }
 
@@ -94,7 +95,7 @@ namespace RentalOperations.Services.RabbitMQService
 
         public async Task ConsumePoisonQueue(string poisonQueueName)
         {
-            var consumer = new EventingBasicConsumer(_channel);
+            var consumer = new AsyncEventingBasicConsumer(_channel);
             consumer.Received += async (model, ea) =>
             {
                 var retriesHeader = ea.BasicProperties.Headers?.ContainsKey("x-retries") ?? false
