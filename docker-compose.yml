@@ -110,7 +110,7 @@ services:
     networks:
       - projecty
     healthcheck:
-      test: ["CMD", "/usr/bin/wget", "--spider", "-q", "http://localhost:3200/ready"]
+      test: ["CMD", "/tempo", "--health", "--health.url=http://localhost:3200/ready"]
       interval: 10s
       timeout: 3s
       retries: 12
@@ -128,7 +128,7 @@ services:
     networks:
       - projecty
     healthcheck:
-      test: ["CMD", "/busybox/wget", "--spider", "-q", "http://localhost:3100/ready"]
+      test: ["CMD", "/usr/bin/loki", "-health"]
       interval: 10s
       timeout: 3s
       retries: 12
