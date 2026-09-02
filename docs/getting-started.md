@@ -128,9 +128,17 @@ startup.
 The four ASP.NET Core services instrument inbound requests and outbound
 `HttpClient` calls with the OpenTelemetry SDK. The Rust gateway creates a
 server span for each proxied request and propagates its W3C trace context to the
-upstream. Both runtimes keep their structured console output and also export
-logs and traces over OTLP to the Collector. The rental SLO dashboard selects
-the active `rental-operations` service and its `POST /api/Rental/create` span.
+upstream. PostgreSQL commands emitted through EF Core and native MongoDB driver
+operations are child spans of the request that triggered them. RabbitMQ trace
+context is captured in each transactional outbox row, continued by a producer
+span when the relay publishes, and restored by consumers; bounded retries keep
+the same W3C `traceparent` and `tracestate` headers. The same carrier contract
+applies to Kafka services as they are introduced; no application Kafka producer
+or consumer exists in the current tree.
+
+Both runtimes keep structured JSON console output and also export logs and
+traces over OTLP to the Collector. The rental SLO dashboard selects the active
+`rental-operations` service and its `POST /api/Rental/create` span.
 
 The audited baseline Compose stack runs every application in `Production`, so
 Swagger and the developer exception page are disabled. Local IDE launch

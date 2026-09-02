@@ -7,6 +7,7 @@ using RentalOperations.Services.RabbitMQService;
 using RentalOperations.Configurations;
 using RentalOperations.Services;
 using RentalOperations.Entities;
+using ProjectY.Shared.Observability;
 
 namespace RentalOperations.Services.RabbitMQService
 {
@@ -52,6 +53,11 @@ namespace RentalOperations.Services.RabbitMQService
             {
                 var body = ea.Body.ToArray();
                 var message = Encoding.UTF8.GetString(body);
+                using var activity = MessagingTraceContext.StartConsumerActivity(
+                    "rabbitmq",
+                    queueName,
+                    ea.BasicProperties.Headers,
+                    ea.BasicProperties.MessageId);
                 try
                 {
                     await processMessageFunc(message, GetMessageId(ea.BasicProperties, body));
@@ -59,8 +65,9 @@ namespace RentalOperations.Services.RabbitMQService
                 }
                 catch (Exception ex)
                 {
+                    MessagingTraceContext.RecordException(activity, ex);
                     _channel.BasicNack(ea.DeliveryTag, false, true);
-                    _logger.LogError($"Error processing message: {ex.Message}", ex);
+                    _logger.LogError(ex, "Error processing message from {QueueName}.", queueName);
                 }
             };
 
@@ -96,6 +103,11 @@ namespace RentalOperations.Services.RabbitMQService
 
                 var body = ea.Body.ToArray();
                 var message = Encoding.UTF8.GetString(body);
+                using var activity = MessagingTraceContext.StartConsumerActivity(
+                    "rabbitmq",
+                    poisonQueueName,
+                    ea.BasicProperties.Headers,
+                    ea.BasicProperties.MessageId);
 
                 try
                 {
@@ -104,10 +116,14 @@ namespace RentalOperations.Services.RabbitMQService
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError($"Error processing poison message: {ex.Message}", ex);
+                    MessagingTraceContext.RecordException(activity, ex);
+                    _logger.LogError(
+                        ex,
+                        "Error processing poison message from {QueueName}.",
+                        poisonQueueName);
                     if (retriesHeader < 3)
                     {
-                        ScheduleRetry(message, retriesHeader + 1);
+                        ScheduleRetry(message, retriesHeader + 1, ea.BasicProperties);
                     }
                     else
                     {
@@ -120,11 +136,21 @@ namespace RentalOperations.Services.RabbitMQService
             _channel.BasicConsume(queue: poisonQueueName, autoAck: false, consumer: consumer);
         }
 
-        private void ScheduleRetry(string message, int retryCount)
+        private void ScheduleRetry(
+            string message,
+            int retryCount,
+            IBasicProperties originalProperties)
         {
             var delay = (int)Math.Pow(2, retryCount) * 1000; // Exponential backoff, e.g., 2s, 4s, 8s
             var properties = _channel.CreateBasicProperties();
-            properties.Headers = new Dictionary<string, object> { { "x-retries", retryCount } };
+            properties.Headers = originalProperties.Headers is null
+                ? new Dictionary<string, object>()
+                : new Dictionary<string, object>(originalProperties.Headers);
+            properties.Headers["x-retries"] = retryCount;
+            properties.MessageId = originalProperties.MessageId;
+            properties.Type = originalProperties.Type;
+            properties.Persistent = true;
+            MessagingTraceContext.InjectCurrent(properties.Headers);
             properties.Expiration = delay.ToString();
 
             _channel.QueueDeclare($"retry-poison-{retryCount}", durable: true, exclusive: false, autoDelete: false);
