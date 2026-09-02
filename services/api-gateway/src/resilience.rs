@@ -34,6 +34,13 @@ pub enum Rejection {
 #[derive(Debug)]
 pub struct Admission {
     _permit: OwnedSemaphorePermit,
+    breaker: BreakerAdmission,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct BreakerAdmission {
+    generation: u64,
+    state: CircuitState,
 }
 
 pub struct UpstreamPolicy {
@@ -61,25 +68,29 @@ impl UpstreamPolicy {
             .clone()
             .try_acquire_owned()
             .map_err(|_| Rejection::BulkheadFull)?;
-        self.breaker
+        let breaker = self
+            .breaker
             .lock()
             .expect("circuit breaker lock is not poisoned")
             .before_request(Instant::now())?;
-        Ok(Admission { _permit: permit })
+        Ok(Admission {
+            _permit: permit,
+            breaker,
+        })
     }
 
-    pub fn record_success(&self) {
+    pub fn record_success(&self, admission: &Admission) {
         self.breaker
             .lock()
             .expect("circuit breaker lock is not poisoned")
-            .record_success();
+            .record_success(admission.breaker);
     }
 
-    pub fn record_failure(&self) {
+    pub fn record_failure(&self, admission: &Admission) {
         self.breaker
             .lock()
             .expect("circuit breaker lock is not poisoned")
-            .record_failure(Instant::now());
+            .record_failure(admission.breaker, Instant::now());
     }
 
     pub fn state(&self) -> CircuitState {
@@ -163,6 +174,7 @@ impl CircuitState {
 
 struct CircuitBreaker {
     state: CircuitState,
+    generation: u64,
     consecutive_failures: u32,
     opened_at: Option<Instant>,
     half_open_probe_in_flight: bool,
@@ -174,6 +186,7 @@ impl CircuitBreaker {
     fn new(config: UpstreamResilienceConfig) -> Self {
         Self {
             state: CircuitState::Closed,
+            generation: 0,
             consecutive_failures: 0,
             opened_at: None,
             half_open_probe_in_flight: false,
@@ -182,9 +195,9 @@ impl CircuitBreaker {
         }
     }
 
-    fn before_request(&mut self, now: Instant) -> Result<(), Rejection> {
+    fn before_request(&mut self, now: Instant) -> Result<BreakerAdmission, Rejection> {
         match self.state {
-            CircuitState::Closed => Ok(()),
+            CircuitState::Closed => Ok(self.admission()),
             CircuitState::Open => {
                 let elapsed = now.saturating_duration_since(
                     self.opened_at
@@ -193,27 +206,45 @@ impl CircuitBreaker {
                 if elapsed >= self.open_duration {
                     self.state = CircuitState::HalfOpen;
                     self.half_open_probe_in_flight = true;
-                    Ok(())
+                    Ok(self.admission())
                 } else {
                     Err(Rejection::CircuitOpen(self.open_duration - elapsed))
                 }
             }
             CircuitState::HalfOpen if !self.half_open_probe_in_flight => {
                 self.half_open_probe_in_flight = true;
-                Ok(())
+                Ok(self.admission())
             }
             CircuitState::HalfOpen => Err(Rejection::CircuitOpen(self.open_duration)),
         }
     }
 
-    fn record_success(&mut self) {
+    fn admission(&self) -> BreakerAdmission {
+        BreakerAdmission {
+            generation: self.generation,
+            state: self.state,
+        }
+    }
+
+    fn record_success(&mut self, admission: BreakerAdmission) {
+        if !self.accepts(admission) {
+            return;
+        }
+
+        if self.state == CircuitState::HalfOpen {
+            self.advance_generation();
+        }
         self.state = CircuitState::Closed;
         self.consecutive_failures = 0;
         self.opened_at = None;
         self.half_open_probe_in_flight = false;
     }
 
-    fn record_failure(&mut self, now: Instant) {
+    fn record_failure(&mut self, admission: BreakerAdmission, now: Instant) {
+        if !self.accepts(admission) {
+            return;
+        }
+
         if self.state == CircuitState::HalfOpen {
             self.open(now);
             return;
@@ -227,9 +258,18 @@ impl CircuitBreaker {
     }
 
     fn open(&mut self, now: Instant) {
+        self.advance_generation();
         self.state = CircuitState::Open;
         self.opened_at = Some(now);
         self.half_open_probe_in_flight = false;
+    }
+
+    fn accepts(&self, admission: BreakerAdmission) -> bool {
+        admission.generation == self.generation && admission.state == self.state
+    }
+
+    fn advance_generation(&mut self) {
+        self.generation = self.generation.wrapping_add(1);
     }
 }
 
@@ -264,20 +304,20 @@ mod tests {
         let now = Instant::now();
         let mut breaker = CircuitBreaker::new(config());
 
-        breaker.record_failure(now);
+        let first = breaker.before_request(now).unwrap();
+        breaker.record_failure(first, now);
         assert_eq!(breaker.state, CircuitState::Closed);
-        breaker.record_failure(now);
+        let second = breaker.before_request(now).unwrap();
+        breaker.record_failure(second, now);
         assert_eq!(breaker.state, CircuitState::Open);
         assert!(
             breaker
                 .before_request(now + Duration::from_millis(99))
                 .is_err()
         );
-        assert!(
-            breaker
-                .before_request(now + Duration::from_millis(100))
-                .is_ok()
-        );
+        let probe = breaker
+            .before_request(now + Duration::from_millis(100))
+            .unwrap();
         assert_eq!(breaker.state, CircuitState::HalfOpen);
         assert!(
             breaker
@@ -285,7 +325,7 @@ mod tests {
                 .is_err()
         );
 
-        breaker.record_success();
+        breaker.record_success(probe);
         assert_eq!(breaker.state, CircuitState::Closed);
         assert!(
             breaker
@@ -298,18 +338,42 @@ mod tests {
     fn failed_half_open_probe_reopens_the_breaker() {
         let now = Instant::now();
         let mut breaker = CircuitBreaker::new(config());
-        breaker.record_failure(now);
-        breaker.record_failure(now);
-        breaker
+        let first = breaker.before_request(now).unwrap();
+        breaker.record_failure(first, now);
+        let second = breaker.before_request(now).unwrap();
+        breaker.record_failure(second, now);
+        let probe = breaker
             .before_request(now + Duration::from_millis(100))
             .unwrap();
 
-        breaker.record_failure(now + Duration::from_millis(101));
+        breaker.record_failure(probe, now + Duration::from_millis(101));
 
         assert_eq!(breaker.state, CircuitState::Open);
         assert!(
             breaker
                 .before_request(now + Duration::from_millis(150))
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn pre_open_success_cannot_close_a_new_breaker_generation() {
+        let now = Instant::now();
+        let mut policy = config();
+        policy.breaker_failure_threshold = 1;
+        let mut breaker = CircuitBreaker::new(policy);
+        let older_request = breaker.before_request(now).unwrap();
+        let failing_request = breaker.before_request(now).unwrap();
+
+        breaker.record_failure(failing_request, now);
+        assert_eq!(breaker.state, CircuitState::Open);
+
+        breaker.record_success(older_request);
+
+        assert_eq!(breaker.state, CircuitState::Open);
+        assert!(
+            breaker
+                .before_request(now + Duration::from_millis(99))
                 .is_err()
         );
     }
