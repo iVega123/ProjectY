@@ -1,6 +1,8 @@
 using Moq;
 using RabbitMQ.Client;
 using RiderManager.Services.RabbitMQService;
+using ProjectY.Shared.Observability;
+using System.Text;
 
 namespace RiderManagerTests.Unit.Messaging;
 
@@ -10,6 +12,8 @@ public sealed class BoundedRabbitMqRetryRouterTests
     public void RouteFailure_BeforeLimit_RepublishesPersistentlyAtEndOfSourceQueue()
     {
         var (channel, original, outgoing) = CreateChannel();
+        var traceParent = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01";
+        original.Object.Headers[MessagingTraceContext.TraceParentHeader] = Encoding.UTF8.GetBytes(traceParent);
         var router = new BoundedRabbitMqRetryRouter();
         ReadOnlyMemory<byte> body = "registration"u8.ToArray();
 
@@ -23,6 +27,10 @@ public sealed class BoundedRabbitMqRetryRouterTests
         Assert.Equal(FailureRoute.Retry, route);
         Assert.True(outgoing.Object.Persistent);
         Assert.Equal(1, outgoing.Object.Headers[BoundedRabbitMqRetryRouter.RetryHeader]);
+        Assert.Equal(
+            traceParent,
+            Encoding.UTF8.GetString(
+                Assert.IsType<byte[]>(outgoing.Object.Headers[MessagingTraceContext.TraceParentHeader])));
         channel.Verify(item => item.BasicPublish(
             string.Empty,
             "rider-info",

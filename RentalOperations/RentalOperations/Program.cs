@@ -12,6 +12,7 @@ using RentalOperations.Repository;
 using RentalOperations.Services;
 using RentalOperations.Services.RabbitMQService;
 using Serilog;
+using Serilog.Formatting.Compact;
 
 if (await HealthProbeCommand.TryRunAsync(args))
 {
@@ -24,12 +25,16 @@ var serviceName = builder.Configuration["OTEL_SERVICE_NAME"]
     ?? builder.Configuration["ApplicationName"]
     ?? "rental-operations";
 
-builder.Services.AddProjectYTelemetry(builder.Configuration, serviceName);
+builder.Services.AddProjectYTelemetry(
+    builder.Configuration,
+    serviceName,
+    configureTracing: null,
+    MongoTelemetry.ActivitySourceName);
 
 Log.Logger = new LoggerConfiguration()
     .Enrich.FromLogContext()
     .Enrich.WithProperty("ApplicationName", serviceName)
-    .WriteTo.Console()
+    .WriteTo.Console(new RenderedCompactJsonFormatter())
     .WriteToProjectYTelemetry(builder.Configuration, serviceName)
     .CreateLogger();
 builder.Host.UseSerilog();

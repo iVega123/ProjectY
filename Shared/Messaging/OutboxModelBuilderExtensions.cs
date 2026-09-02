@@ -14,6 +14,8 @@ public static class OutboxModelBuilderExtensions
         message.Property(item => item.EventType).HasMaxLength(200);
         message.Property(item => item.Destination).HasMaxLength(200);
         message.Property(item => item.Payload).HasColumnType("text");
+        message.Property(item => item.TraceParent).HasMaxLength(55);
+        message.Property(item => item.TraceState).HasMaxLength(512);
         message.Property(item => item.LastError).HasMaxLength(2000);
         message.HasIndex(item => new
         {

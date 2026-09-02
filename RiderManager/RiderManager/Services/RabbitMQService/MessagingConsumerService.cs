@@ -4,6 +4,7 @@ using System.Text;
 using RiderManager.Configurations;
 using RiderManager.Entities;
 using ProjectY.Shared.Messaging;
+using ProjectY.Shared.Observability;
 
 namespace RiderManager.Services.RabbitMQService
 {
@@ -65,6 +66,11 @@ namespace RiderManager.Services.RabbitMQService
             {
                 var body = ea.Body.ToArray();
                 var message = Encoding.UTF8.GetString(body);
+                using var activity = MessagingTraceContext.StartConsumerActivity(
+                    "rabbitmq",
+                    queueName,
+                    ea.BasicProperties.Headers,
+                    ea.BasicProperties.MessageId);
                 try
                 {
                     await processMessageFunc(message);
@@ -72,11 +78,13 @@ namespace RiderManager.Services.RabbitMQService
                 }
                 catch (QueueMessageAuthenticationException ex)
                 {
+                    MessagingTraceContext.RecordException(activity, ex);
                     _channel.BasicNack(ea.DeliveryTag, false, false);
                     _logger.LogWarning(ex, "Rejected unauthenticated message from queue {QueueName}.", queueName);
                 }
                 catch (Exception ex)
                 {
+                    MessagingTraceContext.RecordException(activity, ex);
                     if (poisonQueueName is null)
                     {
                         _channel.BasicNack(ea.DeliveryTag, false, true);

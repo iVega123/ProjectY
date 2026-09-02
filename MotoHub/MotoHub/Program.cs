@@ -1,5 +1,6 @@
 using Serilog.Formatting.Compact;
 using Serilog;
+using OpenTelemetry.Trace;
 using Microsoft.EntityFrameworkCore;
 using MotoHub.Data;
 using MotoHub.Services;
@@ -27,12 +28,15 @@ var serviceName = builder.Configuration["OTEL_SERVICE_NAME"]
     ?? builder.Configuration["ApplicationName"]
     ?? "moto-hub";
 
-builder.Services.AddProjectYTelemetry(builder.Configuration, serviceName);
+builder.Services.AddProjectYTelemetry(
+    builder.Configuration,
+    serviceName,
+    tracing => tracing.AddEntityFrameworkCoreInstrumentation());
 
 Log.Logger = new LoggerConfiguration()
     .Enrich.FromLogContext()
     .Enrich.WithProperty("ApplicationName", serviceName)
-    .WriteTo.Console()
+    .WriteTo.Console(new RenderedCompactJsonFormatter())
     .WriteToProjectYTelemetry(builder.Configuration, serviceName)
     .CreateLogger();
 builder.Host.UseSerilog();
