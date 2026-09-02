@@ -35,7 +35,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "1 - (sum(increase(traces_span_metrics_calls_total{service_name=\"rental-core\",span_name=~\".*CreateRental.*\",status_code=\"STATUS_CODE_ERROR\"}[30d])) / clamp_min(sum(increase(traces_span_metrics_calls_total{service_name=\"rental-core\",span_name=~\".*CreateRental.*\"}[30d])), 1))",
+          "expr": "1 - (sum(increase(traces_span_metrics_calls_total{service_name=\"rental-operations\",span_name=~\"POST /?api/Rental/create\",status_code=\"STATUS_CODE_ERROR\"}[30d])) / clamp_min(sum(increase(traces_span_metrics_calls_total{service_name=\"rental-operations\",span_name=~\"POST /?api/Rental/create\"}[30d])), 1))",
           "legendFormat": "disponibilidade"
         }
       ],
@@ -73,7 +73,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "clamp_min(1 - ((sum(increase(traces_span_metrics_calls_total{service_name=\"rental-core\",span_name=~\".*CreateRental.*\",status_code=\"STATUS_CODE_ERROR\"}[30d])) / clamp_min(sum(increase(traces_span_metrics_calls_total{service_name=\"rental-core\",span_name=~\".*CreateRental.*\"}[30d])), 1)) / (1 - $objetivo)), 0)",
+          "expr": "clamp_min(1 - ((sum(increase(traces_span_metrics_calls_total{service_name=\"rental-operations\",span_name=~\"POST /?api/Rental/create\",status_code=\"STATUS_CODE_ERROR\"}[30d])) / clamp_min(sum(increase(traces_span_metrics_calls_total{service_name=\"rental-operations\",span_name=~\"POST /?api/Rental/create\"}[30d])), 1)) / (1 - $objetivo)), 0)",
           "legendFormat": "restante"
         }
       ],
@@ -110,7 +110,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "(sum(rate(traces_span_metrics_calls_total{service_name=\"rental-core\",span_name=~\".*CreateRental.*\",status_code=\"STATUS_CODE_ERROR\"}[1h])) / clamp_min(sum(rate(traces_span_metrics_calls_total{service_name=\"rental-core\",span_name=~\".*CreateRental.*\"}[1h])), 0.001)) / (1 - $objetivo)",
+          "expr": "(sum(rate(traces_span_metrics_calls_total{service_name=\"rental-operations\",span_name=~\"POST /?api/Rental/create\",status_code=\"STATUS_CODE_ERROR\"}[1h])) / clamp_min(sum(rate(traces_span_metrics_calls_total{service_name=\"rental-operations\",span_name=~\"POST /?api/Rental/create\"}[1h])), 0.001)) / (1 - $objetivo)",
           "legendFormat": "burn rate"
         }
       ],
@@ -146,12 +146,12 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "(sum(rate(traces_span_metrics_calls_total{service_name=\"rental-core\",span_name=~\".*CreateRental.*\",status_code=\"STATUS_CODE_ERROR\"}[5m])) / clamp_min(sum(rate(traces_span_metrics_calls_total{service_name=\"rental-core\",span_name=~\".*CreateRental.*\"}[5m])), 0.001)) / (1 - $objetivo)",
+          "expr": "(sum(rate(traces_span_metrics_calls_total{service_name=\"rental-operations\",span_name=~\"POST /?api/Rental/create\",status_code=\"STATUS_CODE_ERROR\"}[5m])) / clamp_min(sum(rate(traces_span_metrics_calls_total{service_name=\"rental-operations\",span_name=~\"POST /?api/Rental/create\"}[5m])), 0.001)) / (1 - $objetivo)",
           "legendFormat": "janela curta (5 min)"
         },
         {
           "refId": "B",
-          "expr": "(sum(rate(traces_span_metrics_calls_total{service_name=\"rental-core\",span_name=~\".*CreateRental.*\",status_code=\"STATUS_CODE_ERROR\"}[1h])) / clamp_min(sum(rate(traces_span_metrics_calls_total{service_name=\"rental-core\",span_name=~\".*CreateRental.*\"}[1h])), 0.001)) / (1 - $objetivo)",
+          "expr": "(sum(rate(traces_span_metrics_calls_total{service_name=\"rental-operations\",span_name=~\"POST /?api/Rental/create\",status_code=\"STATUS_CODE_ERROR\"}[1h])) / clamp_min(sum(rate(traces_span_metrics_calls_total{service_name=\"rental-operations\",span_name=~\"POST /?api/Rental/create\"}[1h])), 0.001)) / (1 - $objetivo)",
           "legendFormat": "janela longa (1 h)"
         }
       ],
@@ -195,17 +195,17 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "histogram_quantile(0.50, sum by (le) (rate(traces_span_metrics_duration_milliseconds_bucket{service_name=\"rental-core\",span_name=~\".*CreateRental.*\"}[5m])))",
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(traces_span_metrics_duration_milliseconds_bucket{service_name=\"rental-operations\",span_name=~\"POST /?api/Rental/create\"}[5m])))",
           "legendFormat": "p50"
         },
         {
           "refId": "B",
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(traces_span_metrics_duration_milliseconds_bucket{service_name=\"rental-core\",span_name=~\".*CreateRental.*\"}[5m])))",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(traces_span_metrics_duration_milliseconds_bucket{service_name=\"rental-operations\",span_name=~\"POST /?api/Rental/create\"}[5m])))",
           "legendFormat": "p95"
         },
         {
           "refId": "C",
-          "expr": "histogram_quantile(0.99, sum by (le) (rate(traces_span_metrics_duration_milliseconds_bucket{service_name=\"rental-core\",span_name=~\".*CreateRental.*\"}[5m])))",
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(traces_span_metrics_duration_milliseconds_bucket{service_name=\"rental-operations\",span_name=~\"POST /?api/Rental/create\"}[5m])))",
           "legendFormat": "p99"
         }
       ],
@@ -239,12 +239,12 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(rate(traces_span_metrics_calls_total{service_name=\"rental-core\",span_name=~\".*CreateRental.*\",status_code!=\"STATUS_CODE_ERROR\"}[1m])) * 60",
+          "expr": "sum(rate(traces_span_metrics_calls_total{service_name=\"rental-operations\",span_name=~\"POST /?api/Rental/create\",status_code!=\"STATUS_CODE_ERROR\"}[1m])) * 60",
           "legendFormat": "sucesso"
         },
         {
           "refId": "B",
-          "expr": "sum(rate(traces_span_metrics_calls_total{service_name=\"rental-core\",span_name=~\".*CreateRental.*\",status_code=\"STATUS_CODE_ERROR\"}[1m])) * 60",
+          "expr": "sum(rate(traces_span_metrics_calls_total{service_name=\"rental-operations\",span_name=~\"POST /?api/Rental/create\",status_code=\"STATUS_CODE_ERROR\"}[1m])) * 60",
           "legendFormat": "falha"
         }
       ],

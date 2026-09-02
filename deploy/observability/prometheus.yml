@@ -19,8 +19,6 @@ scrape_configs:
     static_configs:
       - targets: ["api-gateway:8090"]
         labels: { service: api-gateway, language: rust }
-      - targets: ["rental-core:8091"]
-        labels: { service: rental-core, language: dotnet }
       - targets: ["media-guard:8092"]
         labels: { service: media-guard, language: rust }
       - targets: ["risk-pricing:8093"]

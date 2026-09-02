@@ -13,6 +13,7 @@ using ProjectY.Shared.Health;
 using ProjectY.Shared.Hosting;
 using ProjectY.Shared.Messaging;
 using ProjectY.Shared.Idempotency;
+using ProjectY.Shared.Observability;
 using ProjectY.Shared.Security;
 
 if (await HealthProbeCommand.TryRunAsync(args))
@@ -22,12 +23,17 @@ if (await HealthProbeCommand.TryRunAsync(args))
 
 var builder = WebApplication.CreateBuilder(args);
 
-var applicationName = builder.Configuration["ApplicationName"];
+var serviceName = builder.Configuration["OTEL_SERVICE_NAME"]
+    ?? builder.Configuration["ApplicationName"]
+    ?? "moto-hub";
+
+builder.Services.AddProjectYTelemetry(builder.Configuration, serviceName);
 
 Log.Logger = new LoggerConfiguration()
     .Enrich.FromLogContext()
-    .Enrich.WithProperty("ApplicationName", applicationName)
+    .Enrich.WithProperty("ApplicationName", serviceName)
     .WriteTo.Console()
+    .WriteToProjectYTelemetry(builder.Configuration, serviceName)
     .CreateLogger();
 builder.Host.UseSerilog();
 

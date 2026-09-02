@@ -46,6 +46,28 @@ jobs:
           grep --recursive --quiet "${metric_prefix}_duration_milliseconds_bucket" deploy/observability/grafana
           grep --quiet --extended-regexp '^[[:space:]]+unit: ms$' deploy/observability/otel-collector.yaml
           ! grep --recursive --quiet "traces_spanmetrics_" deploy/observability/grafana
+          grep --fixed-strings --quiet 'service_name=\"rental-operations\"' deploy/observability/grafana/dashboards/slo-aluguel.json
+          grep --fixed-strings --quiet 'span_name=~\"POST /?api/Rental/create\"' deploy/observability/grafana/dashboards/slo-aluguel.json
+          ! grep --recursive --quiet 'rental-core' deploy/observability
+
+      - name: Validate application telemetry exporters
+        shell: bash
+        run: |
+          for project in \
+            AuthGate/AuthGate/AuthGate.csproj \
+            MotoHub/MotoHub/MotoHub.csproj \
+            RentalOperations/RentalOperations/RentalOperations.csproj \
+            RiderManager/RiderManager/RiderManager.csproj; do
+            grep --quiet 'OpenTelemetry.Exporter.OpenTelemetryProtocol' "$project"
+            grep --quiet 'Serilog.Sinks.OpenTelemetry' "$project"
+            grep --quiet 'Shared\\Observability' "$project"
+          done
+          grep --quiet 'AddAspNetCoreInstrumentation' Shared/Observability/ProjectYTelemetryExtensions.cs
+          grep --quiet 'AddHttpClientInstrumentation' Shared/Observability/ProjectYTelemetryExtensions.cs
+          grep --quiet 'WriteTo.OpenTelemetry' Shared/Observability/ProjectYTelemetryExtensions.cs
+          grep --quiet 'opentelemetry-otlp' services/api-gateway/Cargo.toml
+          grep --quiet 'OpenTelemetryTracingBridge' services/api-gateway/src/telemetry.rs
+          grep --quiet 'HeaderInjector' services/api-gateway/src/lib.rs
 
       - name: Detect relevant paths
         id: filter
@@ -65,8 +87,7 @@ jobs:
               - 'NuGet.config'
             moto_hub:
               - 'MotoHub/**'
-              - 'Shared/Health/**'
-              - 'Shared/Hosting/**'
+              - 'Shared/**'
               - '.dockerignore'
               - '.github/workflows/ci.yml'
               - '.grype.yaml'
@@ -77,8 +98,7 @@ jobs:
               - 'NuGet.config'
             rental_operations:
               - 'RentalOperations/**'
-              - 'Shared/Health/**'
-              - 'Shared/Hosting/**'
+              - 'Shared/**'
               - '.dockerignore'
               - '.github/workflows/ci.yml'
               - '.grype.yaml'

@@ -20,6 +20,8 @@ use axum::{
 use config::{Config, TokenBucketConfig, UpstreamName};
 use futures_util::StreamExt;
 use metrics::GatewayMetrics;
+use opentelemetry::global;
+use opentelemetry_http::{HeaderExtractor, HeaderInjector};
 use policy::{Access, access_for, is_canonical_path, requires_revocation_check};
 use rate_limit::{RateLimitDecision, RateLimitError, RateLimiter, RedisRateLimiter};
 use reqwest::redirect::Policy;
@@ -30,7 +32,8 @@ use revocation::{RedisRevocationStore, RevocationError, RevocationStore};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use tokio::net::TcpListener;
-use tracing::{info, warn};
+use tracing::{Instrument, Span, field, info, info_span, warn};
+use tracing_opentelemetry::OpenTelemetrySpanExt;
 use url::Url;
 
 struct AppState {
@@ -200,6 +203,28 @@ async fn metrics(State(state): State<Arc<AppState>>) -> Response {
 }
 
 async fn proxy(State(state): State<Arc<AppState>>, request: Request) -> Response {
+    let parent_context = global::get_text_map_propagator(|propagator| {
+        propagator.extract(&HeaderExtractor(request.headers()))
+    });
+    let span = info_span!(
+        "gateway.request",
+        otel.kind = "server",
+        http.request.method = %request.method(),
+        url.path = %request.uri().path(),
+        http.response.status_code = field::Empty,
+        otel.status_code = field::Empty
+    );
+    let _ = span.set_parent(parent_context);
+
+    let response = proxy_inner(state, request).instrument(span.clone()).await;
+    span.record("http.response.status_code", response.status().as_u16());
+    if response.status().is_server_error() {
+        span.record("otel.status_code", "ERROR");
+    }
+    response
+}
+
+async fn proxy_inner(state: Arc<AppState>, request: Request) -> Response {
     let path = request.uri().path().to_owned();
     if !is_canonical_path(&path) {
         return problem(
@@ -366,6 +391,21 @@ async fn forward(
     target.set_query(parts.uri.query());
 
     let connection_headers = connection_header_names(&parts.headers);
+    let mut upstream_headers = HeaderMap::new();
+    for (name, value) in &parts.headers {
+        if !is_hop_by_hop(name, &connection_headers) && !is_sensitive_client_header(name) {
+            upstream_headers.append(name.clone(), value.clone());
+        }
+    }
+    if let Some(identity_headers) = &identity_headers {
+        for (name, value) in identity_headers {
+            upstream_headers.append(name.clone(), value.clone());
+        }
+    }
+    let trace_context = Span::current().context();
+    global::get_text_map_propagator(|propagator| {
+        propagator.inject_context(&trace_context, &mut HeaderInjector(&mut upstream_headers));
+    });
     let retry_allowed = retry_allowed(&parts.method, &parts.headers);
     let (buffered_body, mut streaming_body) = if retry_allowed {
         (
@@ -398,17 +438,9 @@ async fn forward(
             tokio::time::sleep(delay).await;
         }
 
-        let mut upstream_request = client.request(parts.method.clone(), target.clone());
-        for (name, value) in &parts.headers {
-            if !is_hop_by_hop(name, &connection_headers) && !is_sensitive_client_header(name) {
-                upstream_request = upstream_request.header(name, value);
-            }
-        }
-        if let Some(identity_headers) = &identity_headers {
-            for (name, value) in identity_headers {
-                upstream_request = upstream_request.header(name, value);
-            }
-        }
+        let mut upstream_request = client
+            .request(parts.method.clone(), target.clone())
+            .headers(upstream_headers.clone());
         upstream_request = if let Some(body) = &buffered_body {
             upstream_request.body(body.clone())
         } else {

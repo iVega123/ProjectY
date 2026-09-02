@@ -50,7 +50,7 @@ source locations are in the
 |---|---|
 | Audited baseline | Four ASP.NET Core services: `AuthGate`, `MotoHub`, `RiderManager`, and `RentalOperations` |
 | Data and messaging | PostgreSQL, MongoDB, RabbitMQ, and MinIO in the original local stack |
-| Active observability | OpenTelemetry Collector, Prometheus, Tempo, Loki, and Grafana |
+| Active observability | Application OTLP exporters, OpenTelemetry Collector, Prometheus, Tempo, Loki, and Grafana |
 | Retired observability | The unauthenticated Elasticsearch, Logstash, and Kibana stack |
 | Modernization scaffold | A container topology under `deploy/` for the planned transactional core and fault injection |
 | Decision records | Eight records under [`docs/adr/`](docs/adr/README.md): 0000-0005 are the design trail, 0006-0007 are remediation decisions |

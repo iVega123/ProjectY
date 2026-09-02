@@ -125,6 +125,13 @@ Grafana is available at <http://localhost:3000>. Sign in with the generated
 dashboards and the Prometheus, Tempo, and Loki datasources are provisioned at
 startup.
 
+The four ASP.NET Core services instrument inbound requests and outbound
+`HttpClient` calls with the OpenTelemetry SDK. The Rust gateway creates a
+server span for each proxied request and propagates its W3C trace context to the
+upstream. Both runtimes keep their structured console output and also export
+logs and traces over OTLP to the Collector. The rental SLO dashboard selects
+the active `rental-operations` service and its `POST /api/Rental/create` span.
+
 The audited baseline Compose stack runs every application in `Production`, so
 Swagger and the developer exception page are disabled. Local IDE launch
 profiles use `Development`; their `appsettings.Development.json` files enable

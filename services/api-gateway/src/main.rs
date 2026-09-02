@@ -3,26 +3,18 @@ use std::process::ExitCode;
 use api_gateway::{build_app, config::Config, healthcheck, serve};
 use tokio::net::TcpListener;
 use tracing::info;
-use tracing_subscriber::EnvFilter;
+
+mod telemetry;
 
 #[tokio::main]
 async fn main() -> ExitCode {
-    let (writer, guard) = tracing_appender::non_blocking(std::io::stdout());
-    tracing_subscriber::fmt()
-        .json()
-        .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()))
-        .with_writer(writer)
-        .init();
-
     let arguments: Vec<_> = std::env::args().skip(1).collect();
     let result = match arguments.as_slice() {
-        [] => run_server().await,
+        [] => run_server_with_telemetry().await,
         [argument] if argument == "--healthcheck" => run_healthcheck().await,
         _ => Err("usage: api-gateway [--healthcheck]".to_owned()),
     };
 
-    // Dropping the non-blocking writer guard flushes buffered telemetry before exit.
-    drop(guard);
     match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(message) => {
@@ -30,6 +22,14 @@ async fn main() -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+async fn run_server_with_telemetry() -> Result<(), String> {
+    let telemetry = telemetry::TelemetryGuard::initialize()
+        .map_err(|error| format!("could not initialize OpenTelemetry: {error}"))?;
+    let result = run_server().await;
+    telemetry.shutdown();
+    result
 }
 
 async fn run_healthcheck() -> Result<(), String> {
