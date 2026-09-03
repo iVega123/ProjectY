@@ -38,7 +38,7 @@ datasources:
         spanEndTimeShift: 5m
         tags:
           - key: service.name
-            value: service
+            value: service_name
         queries:
           - name: Taxa de requisição
             query: sum(rate(traces_span_metrics_calls_total{$__tags}[5m]))

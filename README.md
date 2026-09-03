@@ -73,6 +73,10 @@ See [Running the audited baseline locally](docs/getting-started.md). This code
 contains known security flaws and development credentials; use it only in an
 isolated local environment.
 
+Use the [telemetry correlation runbook](docs/observability-correlation.md) to
+verify metric-to-trace, trace-to-log, log-to-trace, and service-graph links in
+the running LGTM stack.
+
 The [rental creation SLO and error-budget policy](docs/operations/rental-creation-slo.md)
 defines the 30-day availability and latency objectives, paging thresholds, and
 the release decision made when the budget is exhausted.
