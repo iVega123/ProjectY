@@ -46,9 +46,18 @@ jobs:
           grep --recursive --quiet "${metric_prefix}_duration_milliseconds_bucket" deploy/observability/grafana
           grep --quiet --extended-regexp '^[[:space:]]+unit: ms$' deploy/observability/otel-collector.yaml
           ! grep --recursive --quiet "traces_spanmetrics_" deploy/observability/grafana
-          grep --fixed-strings --quiet 'service_name=\"rental-operations\"' deploy/observability/grafana/dashboards/slo-aluguel.json
-          grep --fixed-strings --quiet 'span_name=~\"POST /?api/Rental/create\"' deploy/observability/grafana/dashboards/slo-aluguel.json
+          grep --fixed-strings --quiet 'service_name=\"rental-operations\"' deploy/observability/grafana/dashboards/rental-creation-slo.json
+          grep --fixed-strings --quiet 'span_name=~\"POST /?api/Rental/create\"' deploy/observability/grafana/dashboards/rental-creation-slo.json
+          grep --fixed-strings --quiet 'http_response_status_code!~\"2..\"' deploy/observability/grafana/dashboards/rental-creation-slo.json
+          grep --fixed-strings --quiet 'le=\"2000.0\"' deploy/observability/grafana/dashboards/rental-creation-slo.json
+          test ! -e deploy/observability/grafana/dashboards/slo-aluguel.json
           ! grep --recursive --quiet 'rental-core' deploy/observability
+          grep --fixed-strings --quiet 'value: service_name' deploy/observability/grafana/provisioning/datasources/datasources.yaml
+          grep --fixed-strings --quiet 'matcherRegex: trace_id' deploy/observability/grafana/provisioning/datasources/datasources.yaml
+          grep --fixed-strings --quiet 'allow_structured_metadata: true' deploy/observability/loki.yaml
+          grep --fixed-strings --quiet 'processors: [service-graphs]' deploy/observability/tempo.yaml
+          grep --fixed-strings --quiet 'postgres-data:/var/lib/postgresql' docker-compose.yml
+          grep --fixed-strings --quiet 'amq\.default|rider_info_queue' scripts/New-LocalSecrets.ps1
 
       - name: Validate application telemetry exporters
         shell: bash
@@ -200,6 +209,28 @@ jobs:
       - name: Generate ephemeral local credentials
         shell: pwsh
         run: ./scripts/New-LocalSecrets.ps1
+
+      - name: Verify Prometheus alert rules
+        run: |
+          docker run --rm --entrypoint promtool \
+            --volume "$PWD/deploy/observability:/observability:ro" \
+            prom/prometheus:v3.14.0 \
+            check rules \
+              /observability/rules/outbox.yml \
+              /observability/rules/rental-creation-slo.yml
+          docker run --rm --entrypoint promtool \
+            --volume "$PWD/deploy/observability:/observability:ro" \
+            prom/prometheus:v3.14.0 \
+            test rules /observability/tests/rental-creation-slo.test.yml
+
+      - name: Validate rental SLO drill
+        run: |
+          docker run --rm \
+            --volume "$PWD/load/k6:/scripts:ro" \
+            grafana/k6:2.2.0 \
+            inspect \
+              --env GATEWAY_IDENTITY_SIGNING_KEY=00000000000000000000000000000000 \
+              /scripts/rental-slo-drill.js
 
       - name: Start LGTM stack
         run: |

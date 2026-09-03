@@ -28,6 +28,7 @@ schema_config:
 
 limits_config:
   retention_period: 24h
+  allow_structured_metadata: true
   # Mantém trace_id e service_name como rótulos: é o que liga log↔trace no Grafana.
   otlp_config:
     resource_attributes:

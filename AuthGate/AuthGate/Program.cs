@@ -3,6 +3,8 @@ using AuthGate.Model;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Serilog;
+using Serilog.Formatting.Compact;
+using OpenTelemetry.Trace;
 using AuthGate.Configurations;
 using AuthGate.Services.RabbitMQ;
 using AuthGate.Services.File;
@@ -26,12 +28,15 @@ var serviceName = builder.Configuration["OTEL_SERVICE_NAME"]
     ?? builder.Configuration["ApplicationName"]
     ?? "auth-gate";
 
-builder.Services.AddProjectYTelemetry(builder.Configuration, serviceName);
+builder.Services.AddProjectYTelemetry(
+    builder.Configuration,
+    serviceName,
+    tracing => tracing.AddEntityFrameworkCoreInstrumentation());
 
 Log.Logger = new LoggerConfiguration()
     .Enrich.FromLogContext()
     .Enrich.WithProperty("ApplicationName", serviceName)
-    .WriteTo.Console()
+    .WriteTo.Console(new RenderedCompactJsonFormatter())
     .WriteToProjectYTelemetry(builder.Configuration, serviceName)
     .CreateLogger();
 builder.Host.UseSerilog();

@@ -14,7 +14,9 @@ public static class ProjectYTelemetryExtensions
     public static IServiceCollection AddProjectYTelemetry(
         this IServiceCollection services,
         IConfiguration configuration,
-        string fallbackServiceName)
+        string fallbackServiceName,
+        Action<TracerProviderBuilder>? configureTracing = null,
+        params string[] additionalActivitySources)
     {
         var endpoint = GetEndpoint(configuration);
         if (endpoint is null)
@@ -27,16 +29,22 @@ public static class ProjectYTelemetryExtensions
 
         services.AddOpenTelemetry()
             .ConfigureResource(resource => resource.AddService(serviceName))
-            .WithTracing(tracing => tracing
-                .AddAspNetCoreInstrumentation(options =>
+            .WithTracing(tracing =>
+            {
+                tracing
+                    .AddSource(MessagingTraceContext.ActivitySourceName)
+                    .AddSource(additionalActivitySources)
+                    .AddAspNetCoreInstrumentation(options =>
                     options.Filter = context =>
                         !context.Request.Path.StartsWithSegments("/health"))
-                .AddHttpClientInstrumentation()
-                .AddOtlpExporter(options =>
-                {
-                    options.Endpoint = endpoint;
-                    options.Protocol = protocol;
-                }));
+                    .AddHttpClientInstrumentation()
+                    .AddOtlpExporter(options =>
+                    {
+                        options.Endpoint = endpoint;
+                        options.Protocol = protocol;
+                    });
+                configureTracing?.Invoke(tracing);
+            });
 
         return services;
     }
