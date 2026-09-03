@@ -1,42 +1,27 @@
 {
-  "uid": "projecty-slo-aluguel",
-  "title": "ProjectY — SLO da criação de aluguel",
-  "description": "Objetivo: 99,5% das criações de aluguel bem-sucedidas em janela de 30 dias. O que separa um painel bonito de engenharia é ter um número que decide alguma coisa — aqui é o orçamento de erro.",
+  "uid": "projecty-rental-creation-slo",
+  "title": "ProjectY — Rental Creation SLO",
+  "description": "Objectives over a rolling 30-day window: 99.5% of rental creation requests return 2xx, and 99% complete within 2 seconds. The error budget controls release policy.",
   "tags": ["projecty", "slo"],
   "timezone": "browser",
   "editable": true,
   "schemaVersion": 39,
   "refresh": "30s",
   "time": { "from": "now-6h", "to": "now" },
-  "templating": {
-    "list": [
-      {
-        "name": "objetivo",
-        "label": "Objetivo (SLO)",
-        "type": "custom",
-        "query": "0.99,0.995,0.999",
-        "current": { "text": "0.995", "value": "0.995" },
-        "options": [
-          { "text": "0.99", "value": "0.99", "selected": false },
-          { "text": "0.995", "value": "0.995", "selected": true },
-          { "text": "0.999", "value": "0.999", "selected": false }
-        ]
-      }
-    ]
-  },
+  "templating": { "list": [] },
   "panels": [
     {
       "id": 1,
       "type": "stat",
-      "title": "Disponibilidade — 30 dias",
-      "description": "Requisições bem-sucedidas sobre o total, na janela do SLO.",
+      "title": "Availability — 30 days",
+      "description": "2xx rental creation responses divided by all eligible rental creation responses.",
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "gridPos": { "h": 6, "w": 8, "x": 0, "y": 0 },
       "targets": [
         {
           "refId": "A",
-          "expr": "1 - (sum(increase(traces_span_metrics_calls_total{service_name=\"rental-operations\",span_name=~\"POST /?api/Rental/create\",status_code=\"STATUS_CODE_ERROR\"}[30d])) / clamp_min(sum(increase(traces_span_metrics_calls_total{service_name=\"rental-operations\",span_name=~\"POST /?api/Rental/create\"}[30d])), 1))",
-          "legendFormat": "disponibilidade"
+          "expr": "sum(increase(traces_span_metrics_calls_total{service_name=\"rental-operations\",span_name=~\"POST /?api/Rental/create\",span_kind=\"SPAN_KIND_SERVER\",http_response_status_code=~\"2..\"}[30d])) / clamp_min(sum(increase(traces_span_metrics_calls_total{service_name=\"rental-operations\",span_name=~\"POST /?api/Rental/create\",span_kind=\"SPAN_KIND_SERVER\"}[30d])), 1)",
+          "legendFormat": "availability"
         }
       ],
       "options": {
@@ -66,15 +51,15 @@
     {
       "id": 2,
       "type": "gauge",
-      "title": "Orçamento de erro restante",
-      "description": "Quanto do 0,5% de falha permitido ainda está disponível neste mês. Zerou, congela lançamento e o time volta para confiabilidade.",
+      "title": "Availability error budget remaining",
+      "description": "The remaining share of the 0.5% bad-event budget over the rolling 30-day window.",
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "gridPos": { "h": 6, "w": 8, "x": 8, "y": 0 },
       "targets": [
         {
           "refId": "A",
-          "expr": "clamp_min(1 - ((sum(increase(traces_span_metrics_calls_total{service_name=\"rental-operations\",span_name=~\"POST /?api/Rental/create\",status_code=\"STATUS_CODE_ERROR\"}[30d])) / clamp_min(sum(increase(traces_span_metrics_calls_total{service_name=\"rental-operations\",span_name=~\"POST /?api/Rental/create\"}[30d])), 1)) / (1 - $objetivo)), 0)",
-          "legendFormat": "restante"
+          "expr": "clamp(1 - ((sum(increase(traces_span_metrics_calls_total{service_name=\"rental-operations\",span_name=~\"POST /?api/Rental/create\",span_kind=\"SPAN_KIND_SERVER\",http_response_status_code!~\"2..\"}[30d])) / clamp_min(sum(increase(traces_span_metrics_calls_total{service_name=\"rental-operations\",span_name=~\"POST /?api/Rental/create\",span_kind=\"SPAN_KIND_SERVER\"}[30d])), 1)) / 0.005), 0, 1)",
+          "legendFormat": "remaining"
         }
       ],
       "options": {
@@ -103,14 +88,14 @@
     {
       "id": 3,
       "type": "stat",
-      "title": "Queima agora (1 h)",
-      "description": "1x consome o orçamento exatamente no ritmo do mês. 14,4x esgota em pouco mais de dois dias — é o limiar de página.",
+      "title": "Current availability burn (1 hour)",
+      "description": "A burn rate of 1 consumes the budget exactly over 30 days. Paging requires both the long and short windows to cross their threshold.",
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "gridPos": { "h": 6, "w": 8, "x": 16, "y": 0 },
       "targets": [
         {
           "refId": "A",
-          "expr": "(sum(rate(traces_span_metrics_calls_total{service_name=\"rental-operations\",span_name=~\"POST /?api/Rental/create\",status_code=\"STATUS_CODE_ERROR\"}[1h])) / clamp_min(sum(rate(traces_span_metrics_calls_total{service_name=\"rental-operations\",span_name=~\"POST /?api/Rental/create\"}[1h])), 0.001)) / (1 - $objetivo)",
+          "expr": "projecty:rental_creation_availability_bad_event_ratio:rate1h / 0.005",
           "legendFormat": "burn rate"
         }
       ],
@@ -139,20 +124,20 @@
     {
       "id": 4,
       "type": "timeseries",
-      "title": "Velocidade de queima em duas janelas",
-      "description": "A janela curta detecta rápido; a longa evita alarme por ruído. Só é incidente quando as duas cruzam o limiar juntas — é o padrão multi-window do SRE Workbook.",
+      "title": "Availability burn rate — short and long windows",
+      "description": "The short window detects an active incident; the long window rejects transient noise. Paging requires both windows to cross together.",
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "gridPos": { "h": 9, "w": 24, "x": 0, "y": 6 },
       "targets": [
         {
           "refId": "A",
-          "expr": "(sum(rate(traces_span_metrics_calls_total{service_name=\"rental-operations\",span_name=~\"POST /?api/Rental/create\",status_code=\"STATUS_CODE_ERROR\"}[5m])) / clamp_min(sum(rate(traces_span_metrics_calls_total{service_name=\"rental-operations\",span_name=~\"POST /?api/Rental/create\"}[5m])), 0.001)) / (1 - $objetivo)",
-          "legendFormat": "janela curta (5 min)"
+          "expr": "projecty:rental_creation_availability_bad_event_ratio:rate5m / 0.005",
+          "legendFormat": "short window (5 minutes)"
         },
         {
           "refId": "B",
-          "expr": "(sum(rate(traces_span_metrics_calls_total{service_name=\"rental-operations\",span_name=~\"POST /?api/Rental/create\",status_code=\"STATUS_CODE_ERROR\"}[1h])) / clamp_min(sum(rate(traces_span_metrics_calls_total{service_name=\"rental-operations\",span_name=~\"POST /?api/Rental/create\"}[1h])), 0.001)) / (1 - $objetivo)",
-          "legendFormat": "janela longa (1 h)"
+          "expr": "projecty:rental_creation_availability_bad_event_ratio:rate1h / 0.005",
+          "legendFormat": "long window (1 hour)"
         }
       ],
       "options": {
@@ -186,12 +171,49 @@
       }
     },
     {
+      "id": 7,
+      "type": "stat",
+      "title": "Latency compliance — 30 days",
+      "description": "Share of eligible rental creation requests that completed within the 2-second objective.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 6, "w": 24, "x": 0, "y": 15 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(increase(traces_span_metrics_duration_milliseconds_bucket{service_name=\"rental-operations\",span_name=~\"POST /?api/Rental/create\",span_kind=\"SPAN_KIND_SERVER\",le=\"2000.0\"}[30d])) / clamp_min(sum(increase(traces_span_metrics_duration_milliseconds_count{service_name=\"rental-operations\",span_name=~\"POST /?api/Rental/create\",span_kind=\"SPAN_KIND_SERVER\"}[30d])), 1)",
+          "legendFormat": "within 2 seconds"
+        }
+      ],
+      "options": {
+        "graphMode": "area",
+        "colorMode": "value",
+        "textMode": "value",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 3,
+          "min": 0.95,
+          "max": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "green", "value": 0.99 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
       "id": 5,
       "type": "timeseries",
-      "title": "Latência de criação de aluguel — p50, p95, p99",
-      "description": "O SLO de latência caminha junto com o de disponibilidade: uma requisição que responde em 8 s tecnicamente não falhou, mas o usuário desistiu.",
+      "title": "Rental creation latency — p50, p95, p99",
+      "description": "Latency objective: 99% of eligible rental creation requests complete within 2 seconds over 30 days.",
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 15 },
+      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 21 },
       "targets": [
         {
           "refId": "A",
@@ -232,20 +254,20 @@
     {
       "id": 6,
       "type": "timeseries",
-      "title": "Sucesso e falha por minuto",
-      "description": "O numerador e o denominador do SLO, lado a lado — para conferir que a conta acima está olhando volume de verdade e não uma amostra vazia.",
+      "title": "Success and failure per minute",
+      "description": "The availability SLI numerator and denominator shown together to expose low traffic and empty samples.",
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 15 },
+      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 21 },
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(rate(traces_span_metrics_calls_total{service_name=\"rental-operations\",span_name=~\"POST /?api/Rental/create\",status_code!=\"STATUS_CODE_ERROR\"}[1m])) * 60",
-          "legendFormat": "sucesso"
+          "expr": "sum(rate(traces_span_metrics_calls_total{service_name=\"rental-operations\",span_name=~\"POST /?api/Rental/create\",span_kind=\"SPAN_KIND_SERVER\",http_response_status_code=~\"2..\"}[1m])) * 60",
+          "legendFormat": "success"
         },
         {
           "refId": "B",
-          "expr": "sum(rate(traces_span_metrics_calls_total{service_name=\"rental-operations\",span_name=~\"POST /?api/Rental/create\",status_code=\"STATUS_CODE_ERROR\"}[1m])) * 60",
-          "legendFormat": "falha"
+          "expr": "sum(rate(traces_span_metrics_calls_total{service_name=\"rental-operations\",span_name=~\"POST /?api/Rental/create\",span_kind=\"SPAN_KIND_SERVER\",http_response_status_code!~\"2..\"}[1m])) * 60",
+          "legendFormat": "failure"
         }
       ],
       "options": {
@@ -268,7 +290,7 @@
         },
         "overrides": [
           {
-            "matcher": { "id": "byName", "options": "falha" },
+            "matcher": { "id": "byName", "options": "failure" },
             "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } }]
           }
         ]
