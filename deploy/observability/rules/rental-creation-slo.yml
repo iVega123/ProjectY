@@ -1,0 +1,135 @@
+groups:
+  - name: projecty-rental-creation-slo
+    interval: 30s
+    rules:
+      - record: projecty:rental_creation_availability_bad_event_ratio:rate5m
+        expr: |
+          sum(rate(traces_span_metrics_calls_total{service_name="rental-operations",span_name=~"POST /?api/Rental/create",span_kind="SPAN_KIND_SERVER",http_response_status_code!~"2.."}[5m]))
+          /
+          clamp_min(sum(rate(traces_span_metrics_calls_total{service_name="rental-operations",span_name=~"POST /?api/Rental/create",span_kind="SPAN_KIND_SERVER"}[5m])), 0.001)
+        labels:
+          service: rental-operations
+
+      - record: projecty:rental_creation_availability_bad_event_ratio:rate30m
+        expr: |
+          sum(rate(traces_span_metrics_calls_total{service_name="rental-operations",span_name=~"POST /?api/Rental/create",span_kind="SPAN_KIND_SERVER",http_response_status_code!~"2.."}[30m]))
+          /
+          clamp_min(sum(rate(traces_span_metrics_calls_total{service_name="rental-operations",span_name=~"POST /?api/Rental/create",span_kind="SPAN_KIND_SERVER"}[30m])), 0.001)
+        labels:
+          service: rental-operations
+
+      - record: projecty:rental_creation_availability_bad_event_ratio:rate1h
+        expr: |
+          sum(rate(traces_span_metrics_calls_total{service_name="rental-operations",span_name=~"POST /?api/Rental/create",span_kind="SPAN_KIND_SERVER",http_response_status_code!~"2.."}[1h]))
+          /
+          clamp_min(sum(rate(traces_span_metrics_calls_total{service_name="rental-operations",span_name=~"POST /?api/Rental/create",span_kind="SPAN_KIND_SERVER"}[1h])), 0.001)
+        labels:
+          service: rental-operations
+
+      - record: projecty:rental_creation_availability_bad_event_ratio:rate6h
+        expr: |
+          sum(rate(traces_span_metrics_calls_total{service_name="rental-operations",span_name=~"POST /?api/Rental/create",span_kind="SPAN_KIND_SERVER",http_response_status_code!~"2.."}[6h]))
+          /
+          clamp_min(sum(rate(traces_span_metrics_calls_total{service_name="rental-operations",span_name=~"POST /?api/Rental/create",span_kind="SPAN_KIND_SERVER"}[6h])), 0.001)
+        labels:
+          service: rental-operations
+
+      - record: projecty:rental_creation_latency_bad_event_ratio:rate5m
+        expr: |
+          clamp_min(
+            1 - (
+              sum(rate(traces_span_metrics_duration_milliseconds_bucket{service_name="rental-operations",span_name=~"POST /?api/Rental/create",span_kind="SPAN_KIND_SERVER",le="2000.0"}[5m]))
+              /
+              clamp_min(sum(rate(traces_span_metrics_duration_milliseconds_count{service_name="rental-operations",span_name=~"POST /?api/Rental/create",span_kind="SPAN_KIND_SERVER"}[5m])), 0.001)
+            ),
+            0
+          )
+        labels:
+          service: rental-operations
+
+      - record: projecty:rental_creation_latency_bad_event_ratio:rate30m
+        expr: |
+          clamp_min(
+            1 - (
+              sum(rate(traces_span_metrics_duration_milliseconds_bucket{service_name="rental-operations",span_name=~"POST /?api/Rental/create",span_kind="SPAN_KIND_SERVER",le="2000.0"}[30m]))
+              /
+              clamp_min(sum(rate(traces_span_metrics_duration_milliseconds_count{service_name="rental-operations",span_name=~"POST /?api/Rental/create",span_kind="SPAN_KIND_SERVER"}[30m])), 0.001)
+            ),
+            0
+          )
+        labels:
+          service: rental-operations
+
+      - record: projecty:rental_creation_latency_bad_event_ratio:rate1h
+        expr: |
+          clamp_min(
+            1 - (
+              sum(rate(traces_span_metrics_duration_milliseconds_bucket{service_name="rental-operations",span_name=~"POST /?api/Rental/create",span_kind="SPAN_KIND_SERVER",le="2000.0"}[1h]))
+              /
+              clamp_min(sum(rate(traces_span_metrics_duration_milliseconds_count{service_name="rental-operations",span_name=~"POST /?api/Rental/create",span_kind="SPAN_KIND_SERVER"}[1h])), 0.001)
+            ),
+            0
+          )
+        labels:
+          service: rental-operations
+
+      - record: projecty:rental_creation_latency_bad_event_ratio:rate6h
+        expr: |
+          clamp_min(
+            1 - (
+              sum(rate(traces_span_metrics_duration_milliseconds_bucket{service_name="rental-operations",span_name=~"POST /?api/Rental/create",span_kind="SPAN_KIND_SERVER",le="2000.0"}[6h]))
+              /
+              clamp_min(sum(rate(traces_span_metrics_duration_milliseconds_count{service_name="rental-operations",span_name=~"POST /?api/Rental/create",span_kind="SPAN_KIND_SERVER"}[6h])), 0.001)
+            ),
+            0
+          )
+        labels:
+          service: rental-operations
+
+      - alert: ProjectYRentalCreationAvailabilityBudgetFastBurn
+        expr: |
+          (
+            projecty:rental_creation_availability_bad_event_ratio:rate1h > (14.4 * 0.005)
+            and
+            projecty:rental_creation_availability_bad_event_ratio:rate5m > (14.4 * 0.005)
+          )
+          or
+          (
+            projecty:rental_creation_availability_bad_event_ratio:rate6h > (6 * 0.005)
+            and
+            projecty:rental_creation_availability_bad_event_ratio:rate30m > (6 * 0.005)
+          )
+        for: 2m
+        labels:
+          severity: page
+          service: rental-operations
+          slo: availability
+          team: rentals
+        annotations:
+          summary: Rental creation availability is consuming error budget too quickly
+          description: Both a long and a short burn-rate window crossed the paging threshold.
+          runbook_url: https://github.com/iVega123/ProjectY/blob/main/docs/operations/rental-creation-slo.md
+
+      - alert: ProjectYRentalCreationLatencyBudgetFastBurn
+        expr: |
+          (
+            projecty:rental_creation_latency_bad_event_ratio:rate1h > (14.4 * 0.01)
+            and
+            projecty:rental_creation_latency_bad_event_ratio:rate5m > (14.4 * 0.01)
+          )
+          or
+          (
+            projecty:rental_creation_latency_bad_event_ratio:rate6h > (6 * 0.01)
+            and
+            projecty:rental_creation_latency_bad_event_ratio:rate30m > (6 * 0.01)
+          )
+        for: 2m
+        labels:
+          severity: page
+          service: rental-operations
+          slo: latency
+          team: rentals
+        annotations:
+          summary: Rental creation latency is consuming error budget too quickly
+          description: Both a long and a short burn-rate window crossed the paging threshold.
+          runbook_url: https://github.com/iVega123/ProjectY/blob/main/docs/operations/rental-creation-slo.md

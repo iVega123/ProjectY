@@ -1,0 +1,95 @@
+rule_files:
+  - ../rules/rental-creation-slo.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: sustained availability failures page after both windows cross
+    interval: 1m
+    input_series:
+      - series: 'traces_span_metrics_calls_total{service_name="rental-operations",span_name="POST api/Rental/create",span_kind="SPAN_KIND_SERVER",http_response_status_code="200"}'
+        values: '0+90x420'
+      - series: 'traces_span_metrics_calls_total{service_name="rental-operations",span_name="POST api/Rental/create",span_kind="SPAN_KIND_SERVER",http_response_status_code="500"}'
+        values: '0+10x420'
+      - series: 'traces_span_metrics_duration_milliseconds_count{service_name="rental-operations",span_name="POST api/Rental/create",span_kind="SPAN_KIND_SERVER"}'
+        values: '0+100x420'
+      - series: 'traces_span_metrics_duration_milliseconds_bucket{service_name="rental-operations",span_name="POST api/Rental/create",span_kind="SPAN_KIND_SERVER",le="2000.0"}'
+        values: '0+100x420'
+    alert_rule_test:
+      - eval_time: 7h
+        alertname: ProjectYRentalCreationAvailabilityBudgetFastBurn
+        exp_alerts:
+          - exp_labels:
+              severity: page
+              service: rental-operations
+              slo: availability
+              team: rentals
+            exp_annotations:
+              summary: Rental creation availability is consuming error budget too quickly
+              description: Both a long and a short burn-rate window crossed the paging threshold.
+              runbook_url: https://github.com/iVega123/ProjectY/blob/main/docs/operations/rental-creation-slo.md
+      - eval_time: 7h
+        alertname: ProjectYRentalCreationLatencyBudgetFastBurn
+        exp_alerts: []
+
+  - name: sustained slow requests page without an availability page
+    interval: 1m
+    input_series:
+      - series: 'traces_span_metrics_calls_total{service_name="rental-operations",span_name="POST api/Rental/create",span_kind="SPAN_KIND_SERVER",http_response_status_code="200"}'
+        values: '0+100x420'
+      - series: 'traces_span_metrics_duration_milliseconds_count{service_name="rental-operations",span_name="POST api/Rental/create",span_kind="SPAN_KIND_SERVER"}'
+        values: '0+100x420'
+      - series: 'traces_span_metrics_duration_milliseconds_bucket{service_name="rental-operations",span_name="POST api/Rental/create",span_kind="SPAN_KIND_SERVER",le="2000.0"}'
+        values: '0+80x420'
+    alert_rule_test:
+      - eval_time: 7h
+        alertname: ProjectYRentalCreationAvailabilityBudgetFastBurn
+        exp_alerts: []
+      - eval_time: 7h
+        alertname: ProjectYRentalCreationLatencyBudgetFastBurn
+        exp_alerts:
+          - exp_labels:
+              severity: page
+              service: rental-operations
+              slo: latency
+              team: rentals
+            exp_annotations:
+              summary: Rental creation latency is consuming error budget too quickly
+              description: Both a long and a short burn-rate window crossed the paging threshold.
+              runbook_url: https://github.com/iVega123/ProjectY/blob/main/docs/operations/rental-creation-slo.md
+
+  - name: healthy traffic does not page
+    interval: 1m
+    input_series:
+      - series: 'traces_span_metrics_calls_total{service_name="rental-operations",span_name="POST api/Rental/create",span_kind="SPAN_KIND_SERVER",http_response_status_code="200"}'
+        values: '0+100x420'
+      - series: 'traces_span_metrics_duration_milliseconds_count{service_name="rental-operations",span_name="POST api/Rental/create",span_kind="SPAN_KIND_SERVER"}'
+        values: '0+100x420'
+      - series: 'traces_span_metrics_duration_milliseconds_bucket{service_name="rental-operations",span_name="POST api/Rental/create",span_kind="SPAN_KIND_SERVER",le="2000.0"}'
+        values: '0+100x420'
+    alert_rule_test:
+      - eval_time: 7h
+        alertname: ProjectYRentalCreationAvailabilityBudgetFastBurn
+        exp_alerts: []
+      - eval_time: 7h
+        alertname: ProjectYRentalCreationLatencyBudgetFastBurn
+        exp_alerts: []
+
+  - name: a short-window availability spike cannot page by itself
+    interval: 1m
+    input_series:
+      - series: 'traces_span_metrics_calls_total{service_name="rental-operations",span_name="POST api/Rental/create",span_kind="SPAN_KIND_SERVER",http_response_status_code="200"}'
+        values: '0+100x414 41490+90x5'
+      - series: 'traces_span_metrics_calls_total{service_name="rental-operations",span_name="POST api/Rental/create",span_kind="SPAN_KIND_SERVER",http_response_status_code="500"}'
+        values: '0+0x414 10+10x5'
+      - series: 'traces_span_metrics_duration_milliseconds_count{service_name="rental-operations",span_name="POST api/Rental/create",span_kind="SPAN_KIND_SERVER"}'
+        values: '0+100x420'
+      - series: 'traces_span_metrics_duration_milliseconds_bucket{service_name="rental-operations",span_name="POST api/Rental/create",span_kind="SPAN_KIND_SERVER",le="2000.0"}'
+        values: '0+100x420'
+    alert_rule_test:
+      - eval_time: 7h
+        alertname: ProjectYRentalCreationAvailabilityBudgetFastBurn
+        exp_alerts: []
+      - eval_time: 7h
+        alertname: ProjectYRentalCreationLatencyBudgetFastBurn
+        exp_alerts: []

@@ -40,7 +40,7 @@ connectors:
     histogram:
       unit: ms
       explicit:
-        buckets: [2ms, 5ms, 10ms, 25ms, 50ms, 100ms, 250ms, 500ms, 1s, 2.5s, 5s]
+        buckets: [2ms, 5ms, 10ms, 25ms, 50ms, 100ms, 250ms, 500ms, 1s, 2s, 2.5s, 5s]
     dimensions:
       - name: http.route
       - name: http.request.method
