@@ -4,6 +4,14 @@ This runbook proves that the local stack can move in both directions between
 the telemetry signals produced by one request. Run it only against the local
 Compose environment.
 
+## Recorded evidence
+
+![Tempo trace correlated with Loki logs](images/observability-correlation.png)
+
+The capture shows the expected `401` authentication probe crossing
+`api-gateway` and `auth-gate`, followed by the Tempo **Logs for this trace**
+navigation. Loki returns the request log lines filtered by the same trace ID.
+
 ## Generate a trace with a known ID
 
 Start the stack and wait until every long-running service is healthy:
@@ -68,7 +76,8 @@ $exemplars.data.exemplars | Where-Object { $_.labels.trace_id -eq $traceId }
 ## Trace to logs
 
 1. In Tempo, select the `auth-gate` server span.
-2. Select **Logs for this span**.
+2. Select **Logs for this trace** (called **Logs for this span** in earlier
+   Grafana versions).
 3. Confirm that the generated Loki query contains both `service_name` and the
    trace ID, and that it returns the request log lines.
 
