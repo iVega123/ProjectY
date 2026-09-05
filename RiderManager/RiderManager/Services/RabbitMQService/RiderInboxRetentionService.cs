@@ -6,7 +6,8 @@ namespace RiderManager.Services.RabbitMQService;
 public sealed class RiderInboxRetentionOptions
 {
     public TimeSpan RetentionPeriod { get; set; } = TimeSpan.FromDays(7);
-    public TimeSpan SweepInterval { get; set; } = TimeSpan.FromHours(1);
+    public TimeSpan ImageRetentionPeriod { get; set; } = TimeSpan.FromHours(1);
+    public TimeSpan SweepInterval { get; set; } = TimeSpan.FromMinutes(15);
 }
 
 public sealed class RiderInboxRetentionService : BackgroundService
@@ -43,8 +44,10 @@ public sealed class RiderInboxRetentionService : BackgroundService
         var deletedMessages = await context.InboxMessages
             .Where(message => message.ProcessedAtUtc < cutoff)
             .ExecuteDeleteAsync(cancellationToken);
+        var imageCutoff = _timeProvider.GetUtcNow().UtcDateTime - _options.ImageRetentionPeriod;
         var deletedParts = await context.InboxImageParts
-            .Where(part => part.ReceivedAtUtc < cutoff)
+            .Where(part => context.InboxImageParts.Any(expired => expired.UserId == part.UserId
+                && expired.FileName == part.FileName && expired.ReceivedAtUtc < imageCutoff))
             .ExecuteDeleteAsync(cancellationToken);
         return deletedMessages + deletedParts;
     }

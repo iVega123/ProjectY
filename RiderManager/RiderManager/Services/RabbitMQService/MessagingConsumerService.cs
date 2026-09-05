@@ -88,7 +88,7 @@ namespace RiderManager.Services.RabbitMQService
                             queueName,
                             poisonQueueName,
                             ea.BasicProperties,
-                            ea.Body, permanent: ex is QueueMessageAuthenticationException);
+                            ea.Body, permanent: ex is QueueMessageAuthenticationException or InvalidDataException);
                         _channel.BasicAck(ea.DeliveryTag, false);
                         if (route == FailureRoute.Retry)
                         {
