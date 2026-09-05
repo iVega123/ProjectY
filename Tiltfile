@@ -118,3 +118,23 @@ dc_resource(
 print('Tilt UI:  http://localhost:10350')
 print('Gateway:  http://localhost:8090')
 print('Grafana:  http://localhost:3000')
+
+# Keep unavailable target-service drills visible and explicitly disabled.
+load('ext://uibutton', 'cmd_button')
+chaos_shell = 'powershell' if os.name == 'nt' else 'pwsh'
+chaos_prefix = [chaos_shell, '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', 'scripts/Invoke-ChaosDrill.ps1']
+for drill in read_json('deploy/chaos/drills.json'):
+    cmd_button(
+        'chaos-' + drill['id'],
+        resource = 'toxiproxy',
+        argv = chaos_prefix + [drill['id']],
+        text = drill['label'],
+        disabled = not drill['available'],
+    )
+    cmd_button(
+        'chaos-clear-' + drill['id'],
+        resource = 'toxiproxy',
+        argv = chaos_prefix + [drill['id'], '-Clear'],
+        text = 'Clear: ' + drill['label'],
+        disabled = not drill['available'],
+    )

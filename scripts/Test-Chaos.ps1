@@ -48,7 +48,22 @@ try {
     & "$PSScriptRoot/Invoke-Chaos.ps1" add redis test-timeout -Type timeout -Value 0 -Url $api
     & "$PSScriptRoot/Invoke-Chaos.ps1" reset -Url $api
     $null = PingProxy
-    Write-Host "PASS: proxy latency baseline=$before ms injected=$during ms recovered=$after ms; reset restored traffic."
+    $catalog = Get-Content 'deploy/chaos/drills.json' -Raw | ConvertFrom-Json
+    foreach ($drill in $catalog) {
+        if (-not $drill.available) {
+            $rejected = $false
+            try { & "$PSScriptRoot/Invoke-ChaosDrill.ps1" $drill.id -Url $api }
+            catch { $rejected = $true }
+            if (-not $rejected) { throw "Unavailable drill was executable: $($drill.id)" }
+            continue
+        }
+        & "$PSScriptRoot/Invoke-ChaosDrill.ps1" $drill.id -Url $api
+        $proxy = Invoke-RestMethod "$api/proxies/$($drill.proxy)" -UserAgent 'ProjectY-Chaos-Test/1.0'
+        if (@($proxy.toxics).Count -ne @($drill.toxics).Count) { throw "Drill did not inject every toxic: $($drill.id)" }
+        & "$PSScriptRoot/Invoke-ChaosDrill.ps1" $drill.id -Clear -Url $api
+        $proxy = Invoke-RestMethod "$api/proxies/$($drill.proxy)" -UserAgent 'ProjectY-Chaos-Test/1.0'
+        if (@($proxy.toxics).Count -ne 0) { throw "Drill did not clear: $($drill.id)" }
+    }    Write-Host "PASS: proxy latency baseline=$before ms injected=$during ms recovered=$after ms; reset restored traffic."
 } finally {
     if (Test-Path -LiteralPath $fixture) {
         docker compose -p $project -f $fixture down
