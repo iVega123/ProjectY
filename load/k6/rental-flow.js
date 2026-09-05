@@ -7,6 +7,7 @@ const base = __ENV.BASE_URL || "http://api-gateway:8090";
 const accepted = new Counter("projecty_rentals_created");
 const limited = new Counter("projecty_rate_limited");
 const latency = new Trend("projecty_rental_create_ms");
+const refusalLatency = new Trend("projecty_rental_refusal_ms");
 const expected = http.expectedStatuses(200, 201, 429);
 
 export const options = {
@@ -37,7 +38,13 @@ export function setup() {
   if (response.status !== 200) fail("Test identity fixture unavailable");
   const token = response.json("token");
   const run = Date.now().toString();
-  const warmup = create(token, "KAA9999", "warmup-" + run, "warmup");
+  const readyUntil = Date.now() + 40000;
+  let warmup;
+  do {
+    warmup = create(token, "KAA9999", "warmup-" + run, "warmup");
+    if (warmup.status === 200 || warmup.status === 201) break;
+    sleep(1); // Allow a previously opened breaker to enter half-open after a cleared drill.
+  } while (Date.now() < readyUntil);
   if (warmup.status !== 200 && warmup.status !== 201) fail("Rental warmup failed: " + warmup.status + " " + warmup.body);
   const mode = __ENV.MODE || "baseline";
   if (mode !== "baseline") {
@@ -61,6 +68,7 @@ export default function(data) {
   accepted.add(created ? 1 : 0);
   if (created) latency.add(response.timings.duration);
   limited.add(response.status === 429 ? 1 : 0);
+  if (response.status === 503) refusalLatency.add(response.timings.duration);
   check(response, { "created or explicitly rate limited": () => created || response.status === 429 });
   sleep(0.1);
 }
