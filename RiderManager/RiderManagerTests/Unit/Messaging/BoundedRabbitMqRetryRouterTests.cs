@@ -1,6 +1,6 @@
 using Moq;
 using RabbitMQ.Client;
-using RiderManager.Services.RabbitMQService;
+using ProjectY.Shared.Messaging;
 using ProjectY.Shared.Observability;
 using System.Text;
 
@@ -9,7 +9,7 @@ namespace RiderManagerTests.Unit.Messaging;
 public sealed class BoundedRabbitMqRetryRouterTests
 {
     [Fact]
-    public void RouteFailure_BeforeLimit_RepublishesPersistentlyAtEndOfSourceQueue()
+    public void RouteFailure_BeforeLimit_PublishesPersistentlyToDelayedQueue()
     {
         var (channel, original, outgoing) = CreateChannel();
         var traceParent = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01";
@@ -33,7 +33,7 @@ public sealed class BoundedRabbitMqRetryRouterTests
                 Assert.IsType<byte[]>(outgoing.Object.Headers[MessagingTraceContext.TraceParentHeader])));
         channel.Verify(item => item.BasicPublish(
             string.Empty,
-            "rider-info",
+            "rider-info.retry.1",
             true,
             outgoing.Object,
             body), Times.Once);
@@ -69,13 +69,32 @@ public sealed class BoundedRabbitMqRetryRouterTests
             false,
             It.IsAny<IDictionary<string, object>>()), Times.Once);
         channel.Verify(item => item.BasicPublish(
-            string.Empty,
-            "rider-poison",
+            "rider-info.dead",
+            "rider-info",
             true,
             outgoing.Object,
             body), Times.Once);
     }
 
+    [Fact]
+    public void RouteFailure_WhenConfirmationFails_DoesNotReportSuccessfulRouting()
+    {
+        var (channel, original, _) = CreateChannel();
+        channel.Setup(item => item.WaitForConfirmsOrDie(It.IsAny<TimeSpan>()))
+            .Throws(new IOException("Broker confirmation failed"));
+        Assert.Throws<IOException>(() => new BoundedRabbitMqRetryRouter().RouteFailure(
+            channel.Object, "source", "poison", original.Object, ReadOnlyMemory<byte>.Empty));
+    }
+
+    [Fact]
+    public void RouteFailure_PermanentFailure_DoesNotEnterRetryQueue()
+    {
+        var (channel, original, outgoing) = CreateChannel();
+        Assert.Equal(FailureRoute.Poison, new BoundedRabbitMqRetryRouter().RouteFailure(
+            channel.Object, "source", "poison", original.Object, ReadOnlyMemory<byte>.Empty, permanent: true));
+        channel.Verify(item => item.BasicPublish("source.dead", "source", true,
+            outgoing.Object, ReadOnlyMemory<byte>.Empty), Times.Once);
+    }
     private static (
         Mock<IModel> Channel,
         Mock<IBasicProperties> Original,

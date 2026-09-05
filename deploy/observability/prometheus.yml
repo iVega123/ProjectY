@@ -36,3 +36,10 @@ scrape_configs:
     static_configs:
       - targets: ["prometheus:9090"]
       - targets: ["tempo:3200"]
+
+  - job_name: rabbitmq-queues
+    metrics_path: /metrics/detailed
+    params:
+      family: [queue_coarse_metrics, queue_consumer_count]
+    static_configs:
+      - targets: ["rabbitmq:15692"]

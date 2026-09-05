@@ -47,4 +47,5 @@
     <Compile Include="..\..\Shared\Validation\*.cs" Link="Shared\Validation\%(Filename)%(Extension)" />
   </ItemGroup>
 
+  <ItemGroup><Compile Include="..\..\Shared\Messaging\BoundedRabbitMqRetryRouter.cs" Link="Shared\Messaging\BoundedRabbitMqRetryRouter.cs" /></ItemGroup>
 </Project>
