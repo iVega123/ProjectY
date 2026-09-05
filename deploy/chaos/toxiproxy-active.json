@@ -1,0 +1,32 @@
+[
+    {
+        "name":  "postgres",
+        "listen":  "0.0.0.0:5432",
+        "upstream":  "postgres:5432",
+        "enabled":  true
+    },
+    {
+        "name":  "redis",
+        "listen":  "0.0.0.0:6379",
+        "upstream":  "redis:6379",
+        "enabled":  true
+    },
+    {
+        "name":  "rabbitmq",
+        "listen":  "0.0.0.0:5672",
+        "upstream":  "rabbitmq:5672",
+        "enabled":  true
+    },
+    {
+        "name":  "mongodb",
+        "listen":  "0.0.0.0:27017",
+        "upstream":  "mongodb:27017",
+        "enabled":  true
+    },
+    {
+        "name":  "minio",
+        "listen":  "0.0.0.0:9000",
+        "upstream":  "minio:9000",
+        "enabled":  true
+    }
+]

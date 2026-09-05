@@ -45,7 +45,7 @@ if missing_local_files:
     fail(missing_files_message)
 
 docker_compose(
-    'docker-compose.yml',
+    ['docker-compose.yml', 'docker-compose.chaos.yml'],
     env_file = '.env',
     project_name = 'projecty',
 )
@@ -83,7 +83,7 @@ configure_live_update(
     'cd /workspace && cargo fetch --locked',
     'cd /workspace && cargo build --locked',
 )
-infra_resources = ['postgres', 'redis', 'rabbitmq', 'mongodb', 'minio']
+infra_resources = ['toxiproxy', 'postgres', 'redis', 'rabbitmq', 'mongodb', 'minio']
 observability_resources = ['tempo', 'loki', 'otel-collector', 'prometheus', 'grafana']
 setup_resources = ['auth-gate-migrations', 'rider-manager-migrations', 'moto-hub-migrations']
 service_resources = ['auth-gate', 'rider-manager', 'moto-hub', 'rental-operations']
@@ -118,3 +118,23 @@ dc_resource(
 print('Tilt UI:  http://localhost:10350')
 print('Gateway:  http://localhost:8090')
 print('Grafana:  http://localhost:3000')
+
+# Keep unavailable target-service drills visible and explicitly disabled.
+load('ext://uibutton', 'cmd_button')
+chaos_shell = 'powershell' if os.name == 'nt' else 'pwsh'
+chaos_prefix = [chaos_shell, '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', 'scripts/Invoke-ChaosDrill.ps1']
+for drill in read_json('deploy/chaos/drills.json'):
+    cmd_button(
+        'chaos-' + drill['id'],
+        resource = 'toxiproxy',
+        argv = chaos_prefix + [drill['id']],
+        text = drill['label'],
+        disabled = not drill['available'],
+    )
+    cmd_button(
+        'chaos-clear-' + drill['id'],
+        resource = 'toxiproxy',
+        argv = chaos_prefix + [drill['id'], '-Clear'],
+        text = 'Clear: ' + drill['label'],
+        disabled = not drill['available'],
+    )

@@ -12,6 +12,18 @@ namespace ProjectY.Shared.Idempotency;
 
 public sealed class RedisIdempotencyMiddleware
 {
+    private static readonly object RetryBeforeSideEffects = new();
+
+    // Server-side signal only: callers must establish that no write has been attempted.
+    public static void AllowRetryBeforeSideEffects(HttpContext context)
+        => context.Items[RetryBeforeSideEffects] = true;
+
+    private const string ReleaseScript = """
+        if redis.call('GET', KEYS[1]) == ARGV[1] then
+            return redis.call('DEL', KEYS[1])
+        end
+        return 0
+        """;
     private const string PendingState = "pending";
     private const string CompletedState = "completed";
     private const string UnknownState = "unknown";
@@ -169,6 +181,25 @@ public sealed class RedisIdempotencyMiddleware
             throw new IdempotencyOutcomeUnknownException(
                 "The endpoint failed after execution began, so its outcome is unknown.",
                 exception);
+        }
+
+        if (context.Response.StatusCode == StatusCodes.Status503ServiceUnavailable
+            && context.Items.TryGetValue(RetryBeforeSideEffects, out var retry) && retry is true)
+        {
+            context.Response.Body = originalBody;
+            try
+            {
+                var released = (long)await database.ScriptEvaluateAsync(ReleaseScript, [redisKey], [pendingJson]);
+                if (released != 1)
+                    throw new IdempotencyOutcomeUnknownException("The retryable idempotency claim was lost.");
+            }
+            catch (Exception exception) when (exception is RedisException or TimeoutException)
+            {
+                throw new IdempotencyOutcomeUnknownException("The retryable idempotency claim could not be released.", exception);
+            }
+            responseBuffer.Position = 0;
+            await responseBuffer.CopyToAsync(originalBody, context.RequestAborted);
+            return;
         }
 
         var completed = new IdempotencyRecord

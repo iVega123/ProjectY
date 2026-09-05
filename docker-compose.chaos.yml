@@ -1,0 +1,86 @@
+# Development-only: loaded by Tilt, never by the production entrypoint.
+services:
+  toxiproxy:
+    image: ghcr.io/shopify/toxiproxy:2.12.0
+    command: ["-host=0.0.0.0", "-config=/config/toxiproxy.json"]
+    ports:
+      - "127.0.0.1:8474:8474"
+    volumes:
+      - ./deploy/chaos/toxiproxy-active.json:/config/toxiproxy.json:ro
+    networks: [projecty]
+    healthcheck:
+      test: ["CMD", "/toxiproxy-cli", "list"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  api-gateway:
+    environment:
+      GATEWAY_REDIS_URL: redis://toxiproxy:6379/
+    depends_on:
+      toxiproxy:
+        condition: service_healthy
+  auth-gate-migrations:
+    environment:
+      ConnectionStrings__Postgresql: "Host=toxiproxy;Port=5432;Database=${AUTH_GATE_POSTGRES_DB};Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD}"
+      Redis__ConnectionString: toxiproxy:6379
+      RabbitMQ__HostName: toxiproxy
+    depends_on:
+      toxiproxy:
+        condition: service_healthy
+
+  auth-gate:
+    environment:
+      ConnectionStrings__Postgresql: "Host=toxiproxy;Port=5432;Database=${AUTH_GATE_POSTGRES_DB};Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD}"
+      Redis__ConnectionString: toxiproxy:6379
+      RabbitMQ__HostName: toxiproxy
+    depends_on:
+      toxiproxy:
+        condition: service_healthy
+
+  rider-manager-migrations:
+    environment:
+      ConnectionStrings__Postgresql: "Host=toxiproxy;Port=5432;Database=${RIDER_MANAGER_POSTGRES_DB};Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD}"
+      Redis__ConnectionString: toxiproxy:6379
+      RabbitMQ__HostName: toxiproxy
+      MinIO__Endpoint: toxiproxy
+    depends_on:
+      toxiproxy:
+        condition: service_healthy
+
+  rider-manager:
+    environment:
+      ConnectionStrings__Postgresql: "Host=toxiproxy;Port=5432;Database=${RIDER_MANAGER_POSTGRES_DB};Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD}"
+      Redis__ConnectionString: toxiproxy:6379
+      RabbitMQ__HostName: toxiproxy
+      MinIO__Endpoint: toxiproxy
+    depends_on:
+      toxiproxy:
+        condition: service_healthy
+
+  moto-hub-migrations:
+    environment:
+      ConnectionStrings__Postgresql: "Host=toxiproxy;Port=5432;Database=${MOTO_HUB_POSTGRES_DB};Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD}"
+      Redis__ConnectionString: toxiproxy:6379
+      RabbitMQ__HostName: toxiproxy
+    depends_on:
+      toxiproxy:
+        condition: service_healthy
+
+  moto-hub:
+    environment:
+      ConnectionStrings__Postgresql: "Host=toxiproxy;Port=5432;Database=${MOTO_HUB_POSTGRES_DB};Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD}"
+      Redis__ConnectionString: toxiproxy:6379
+      RabbitMQ__HostName: toxiproxy
+    depends_on:
+      toxiproxy:
+        condition: service_healthy
+
+  rental-operations:
+    environment:
+      MongoDbSettings__ConnectionString: "mongodb://${MONGO_USER}:${MONGO_PASSWORD}@toxiproxy:27017/?directConnection=true"
+      Redis__ConnectionString: toxiproxy:6379
+      RabbitMQ__HostName: toxiproxy
+    depends_on:
+      toxiproxy:
+        condition: service_healthy

@@ -1,0 +1,11 @@
+groups:
+  - name: projecty-messaging
+    rules:
+      - alert: RabbitMqDeadLetters
+        expr: rabbitmq_detailed_queue_messages{queue=~".*_poison_queue"} > 0
+        for: 30s
+        labels:
+          severity: warning
+        annotations:
+          summary: "Messages require manual review in {{ $labels.queue }}"
+          description: "Inspect the DLQ payload and originating trace; fix the cause before replaying. Never purge as a retry strategy."

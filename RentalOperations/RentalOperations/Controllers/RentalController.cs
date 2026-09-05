@@ -14,6 +14,21 @@ namespace RentalOperations.Controllers
     {
         private readonly IRentalService _rentalService;
 
+        private ObjectResult Unavailable(Exception exception)
+        {
+            DependencyFailure.Record(exception);
+            if (exception is PreWriteDependencyException)
+            {
+                ProjectY.Shared.Idempotency.RedisIdempotencyMiddleware.AllowRetryBeforeSideEffects(HttpContext);
+            }
+            Response.Headers.RetryAfter = "1";
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, new ProblemDetails
+            {
+                Status = StatusCodes.Status503ServiceUnavailable,
+                Title = "Dependency unavailable",
+                Detail = "A required dependency is temporarily unavailable. Retry later."
+            });
+        }
         public RentalController(IRentalService rentalService)
         {
             _rentalService = rentalService;
@@ -50,6 +65,10 @@ namespace RentalOperations.Controllers
                     Detail = ex.Message
                 });
             }
+            catch (Exception ex) when (DependencyFailure.IsUnavailable(ex))
+            {
+                return Unavailable(ex);
+            }
             catch (Exception ex)
             {
                 return BadRequest(ex.Message);
@@ -73,6 +92,10 @@ namespace RentalOperations.Controllers
                     cursor,
                     pageSize));
             }
+            catch (Exception ex) when (DependencyFailure.IsUnavailable(ex))
+            {
+                return Unavailable(ex);
+            }
             catch (Exception ex)
             {
                 return BadRequest(ex.Message);
@@ -89,6 +112,10 @@ namespace RentalOperations.Controllers
             try
             {
                 return Ok(await _rentalService.GetRentalsByUserIdAsync(userId, cursor, pageSize));
+            }
+            catch (Exception ex) when (DependencyFailure.IsUnavailable(ex))
+            {
+                return Unavailable(ex);
             }
             catch (Exception ex)
             {
@@ -113,6 +140,10 @@ namespace RentalOperations.Controllers
             {
                 return Forbid();
             }
+            catch (Exception ex) when (DependencyFailure.IsUnavailable(ex))
+            {
+                return Unavailable(ex);
+            }
             catch (Exception ex)
             {
                 return BadRequest(ex.Message);
@@ -127,6 +158,10 @@ namespace RentalOperations.Controllers
                 bool isRented = await _rentalService.IsMotorcycleCurrentlyRentedAsync(licencePlate);
                 return Ok(isRented);
             }
+            catch (Exception ex) when (DependencyFailure.IsUnavailable(ex))
+            {
+                return Unavailable(ex);
+            }
             catch (Exception ex)
             {
                 return BadRequest($"Error checking rental status: {ex.Message}");
@@ -137,15 +172,22 @@ namespace RentalOperations.Controllers
         [HttpPost("motorcycle-retirements/{licencePlate}")]
         public async Task<IActionResult> TryRetireMotorcycle(string licencePlate)
         {
-            var acquired = await _rentalService.TryRetireMotorcycleAsync(licencePlate);
-            return acquired
-                ? NoContent()
-                : Conflict(new ProblemDetails
-                {
-                    Status = StatusCodes.Status409Conflict,
-                    Title = "Active rental conflict",
-                    Detail = $"Motorcycle {licencePlate} has an active rental."
-                });
+            try
+            {
+                var acquired = await _rentalService.TryRetireMotorcycleAsync(licencePlate);
+                return acquired
+                    ? NoContent()
+                    : Conflict(new ProblemDetails
+                    {
+                        Status = StatusCodes.Status409Conflict,
+                        Title = "Active rental conflict",
+                        Detail = $"Motorcycle {licencePlate} has an active rental."
+                    });
+            }
+            catch (Exception ex) when (DependencyFailure.IsUnavailable(ex))
+            {
+                return Unavailable(ex);
+            }
         }
 
         [Authorize(Roles = "Admin")]
@@ -153,17 +195,24 @@ namespace RentalOperations.Controllers
         public async Task<IActionResult> TryReserveMotorcycleRename(
             [FromBody] MotorcycleRenameReservationDto request)
         {
-            var acquired = await _rentalService.TryReserveLicensePlateRenameAsync(
-                request.OldLicencePlate,
-                request.NewLicencePlate);
-            return acquired
-                ? NoContent()
-                : Conflict(new ProblemDetails
-                {
-                    Status = StatusCodes.Status409Conflict,
-                    Title = "Motorcycle claim conflict",
-                    Detail = $"Motorcycle {request.NewLicencePlate} is already claimed."
-                });
+            try
+            {
+                var acquired = await _rentalService.TryReserveLicensePlateRenameAsync(
+                    request.OldLicencePlate,
+                    request.NewLicencePlate);
+                return acquired
+                    ? NoContent()
+                    : Conflict(new ProblemDetails
+                    {
+                        Status = StatusCodes.Status409Conflict,
+                        Title = "Motorcycle claim conflict",
+                        Detail = $"Motorcycle {request.NewLicencePlate} is already claimed."
+                    });
+            }
+            catch (Exception ex) when (DependencyFailure.IsUnavailable(ex))
+            {
+                return Unavailable(ex);
+            }
         }
     }
 }

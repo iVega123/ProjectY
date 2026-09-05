@@ -4,6 +4,7 @@ using OpenTelemetry;
 using OpenTelemetry.Exporter;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
+using OpenTelemetry.Metrics;
 using Serilog;
 using Serilog.Sinks.OpenTelemetry;
 
@@ -29,6 +30,11 @@ public static class ProjectYTelemetryExtensions
 
         services.AddOpenTelemetry()
             .ConfigureResource(resource => resource.AddService(serviceName))
+            .WithMetrics(metrics => metrics.AddMeter("ProjectY.Messaging", "ProjectY.Resilience").AddOtlpExporter(options =>
+            {
+                options.Endpoint = endpoint;
+                options.Protocol = protocol;
+            }))
             .WithTracing(tracing =>
             {
                 tracing

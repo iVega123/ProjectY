@@ -39,4 +39,5 @@
     <Compile Include="..\..\Shared\Validation\VehicleAttributes.cs" Link="Shared\Validation\VehicleAttributes.cs" />
   </ItemGroup>
 
+  <ItemGroup><Compile Include="..\..\Shared\Messaging\BoundedRabbitMqRetryRouter.cs" Link="Shared\Messaging\BoundedRabbitMqRetryRouter.cs" /></ItemGroup>
 </Project>

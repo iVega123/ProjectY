@@ -254,7 +254,7 @@ jobs:
             --user "$grafana_user:$grafana_password" \
             'http://localhost:3000/api/search?type=dash-db' \
             | jq --exit-status \
-              '[.[] | select(.folderTitle == "ProjectY")] | length == 2' >/dev/null
+              '[.[] | select(.folderTitle == "ProjectY")] | length == 3' >/dev/null
 
       - name: Print observability logs on failure
         if: failure()

@@ -1,4 +1,4 @@
-﻿using System.Text.Json;
+using System.Text.Json;
 using RentalOperations.CrossCutting.Model;
 
 namespace RentalOperations.CrossCutting.Services
@@ -15,11 +15,11 @@ namespace RentalOperations.CrossCutting.Services
         {
             try
             {
-                var response = await _httpClient.GetAsync($"api/Motorcycles/{licensePlate}");
+                using var response = await _httpClient.GetAsync($"api/Motorcycles/{licensePlate}");
                 if (!response.IsSuccessStatusCode)
                 {
                     var errorContent = await response.Content.ReadAsStringAsync();
-                    throw new HttpRequestException($"Request failed with status {response.StatusCode}: {errorContent}");
+                    throw new HttpRequestException($"Request failed with status {response.StatusCode}: {errorContent}", null, response.StatusCode);
                 }
 
                 string responseBody = await response.Content.ReadAsStringAsync();
@@ -33,7 +33,7 @@ namespace RentalOperations.CrossCutting.Services
 
         public async Task EnsureHistoricalReferencesAsync(IEnumerable<string> licensePlates)
         {
-            var response = await _httpClient.PostAsJsonAsync(
+            using var response = await _httpClient.PostAsJsonAsync(
                 "api/Motorcycles/historical-references",
                 new { LicensePlates = licensePlates });
             if (!response.IsSuccessStatusCode)
