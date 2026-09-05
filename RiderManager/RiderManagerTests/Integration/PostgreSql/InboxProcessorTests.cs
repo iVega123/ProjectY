@@ -240,6 +240,54 @@ public sealed class InboxProcessorTests : IAsyncLifetime
         Assert.Equal("recent", (await verification.InboxImageParts.SingleAsync()).UserId);
     }
 
+    [Fact]
+    [Trait("Category", "Integration")]
+    public async Task RetentionSweep_WaitsForHandlerLock_AndRechecksExpiry()
+    {
+        const string rider = "retention-race";
+        await using var handlerContext = new ApplicationDbContext(_options);
+        handlerContext.InboxImageParts.Add(new InboxImagePart
+        {
+            UserId = rider,
+            FileName = "race.png",
+            SequenceNumber = 0,
+            Content = [1, 2],
+            ReceivedAtUtc = DateTime.UtcNow.AddHours(-2)
+        });
+        await handlerContext.SaveChangesAsync();
+        await using var transaction = await handlerContext.Database.BeginTransactionAsync();
+        await handlerContext.Database.ExecuteSqlInterpolatedAsync(
+            $"SELECT pg_advisory_xact_lock(hashtextextended({rider}, 0))");
+        using var services = new ServiceCollection()
+            .AddDbContext<ApplicationDbContext>(options => options.UseNpgsql(_database.GetConnectionString()))
+            .BuildServiceProvider();
+        var retention = new RiderInboxRetentionService(services.GetRequiredService<IServiceScopeFactory>(),
+            new RiderInboxRetentionOptions(), TimeProvider.System);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var sweep = retention.DeleteExpiredAsync(timeout.Token);
+        try
+        {
+            var waiting = false;
+            while (!waiting && !sweep.IsCompleted)
+            {
+                waiting = await handlerContext.Database.SqlQueryRaw<bool>(
+                    """SELECT EXISTS(SELECT 1 FROM pg_locks WHERE locktype = 'advisory' AND NOT granted) AS "Value" """)
+                    .SingleAsync(timeout.Token);
+                if (!waiting) await Task.Delay(10, timeout.Token);
+            }
+            Assert.True(waiting, "Retention must acquire the handler lock before deleting.");
+            await handlerContext.InboxImageParts.Where(p => p.UserId == rider)
+                .ExecuteUpdateAsync(setters => setters.SetProperty(p => p.ReceivedAtUtc, DateTime.UtcNow));
+        }
+        finally
+        {
+            await transaction.CommitAsync();
+        }
+        Assert.Equal(0, await sweep);
+        await using var verification = new ApplicationDbContext(_options);
+        Assert.Equal(new byte[] { 1, 2 }, (await verification.InboxImageParts.SingleAsync()).Content);
+    }
+
     private async Task<bool> ProcessRegistrationAsync(string messageId, string email)
     {
         await using var context = new ApplicationDbContext(_options);

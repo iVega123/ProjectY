@@ -5,6 +5,7 @@ on:
       - 'docker-compose*.yml'
       - 'deploy/chaos/**'
       - 'scripts/*Chaos.ps1'
+      - 'scripts/Invoke-ChaosDrill.ps1'
       - 'scripts/chaos.sh'
       - '.github/workflows/chaos.yml'
   workflow_dispatch:

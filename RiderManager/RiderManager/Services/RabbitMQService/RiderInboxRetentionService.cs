@@ -45,10 +45,23 @@ public sealed class RiderInboxRetentionService : BackgroundService
             .Where(message => message.ProcessedAtUtc < cutoff)
             .ExecuteDeleteAsync(cancellationToken);
         var imageCutoff = _timeProvider.GetUtcNow().UtcDateTime - _options.ImageRetentionPeriod;
-        var deletedParts = await context.InboxImageParts
-            .Where(part => context.InboxImageParts.Any(expired => expired.UserId == part.UserId
-                && expired.FileName == part.FileName && expired.ReceivedAtUtc < imageCutoff))
-            .ExecuteDeleteAsync(cancellationToken);
+        var expiredRiders = await context.InboxImageParts
+            .Where(part => part.ReceivedAtUtc < imageCutoff)
+            .Select(part => part.UserId).Distinct().ToListAsync(cancellationToken);
+        var deletedParts = 0;
+        foreach (var userId in expiredRiders)
+        {
+            await using var transaction = await context.Database.BeginTransactionAsync(cancellationToken);
+            // Match the handler lock, then re-evaluate expiry after any in-flight assembly commits.
+            await context.Database.ExecuteSqlInterpolatedAsync(
+                $"SELECT pg_advisory_xact_lock(hashtextextended({userId}, 0))", cancellationToken);
+            deletedParts += await context.InboxImageParts
+                .Where(part => part.UserId == userId && context.InboxImageParts.Any(expired =>
+                    expired.UserId == part.UserId && expired.FileName == part.FileName
+                    && expired.ReceivedAtUtc < imageCutoff))
+                .ExecuteDeleteAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+        }
         return deletedMessages + deletedParts;
     }
 }

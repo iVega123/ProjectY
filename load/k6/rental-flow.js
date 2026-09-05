@@ -33,10 +33,19 @@ function create(token, plate, key, name) {
   });
 }
 
-export function setup() {
+let vuCredentials;
+function fetchCredentials() {
   const response = http.get((__ENV.IDENTITY_URL || "http://load-identity:8080") + "/token", { tags: { name: "fixture-token" } });
   if (response.status !== 200) fail("Test identity fixture unavailable");
-  const token = response.json("token");
+  const credentials = response.json();
+  if (!credentials.token || !Number.isFinite(credentials.expiresAt) || credentials.expiresAt * 1000 <= Date.now() + 30000)
+    fail("Test identity fixture returned invalid or expiring credentials");
+  return credentials;
+}
+
+export function setup() {
+  const credentials = fetchCredentials();
+  const token = credentials.token;
   const run = Date.now().toString();
   const readyUntil = Date.now() + 40000;
   let warmup;
@@ -56,13 +65,16 @@ export function setup() {
       { headers: { "Content-Type": "application/json" }, tags: { name: "chaos-injection" } });
     if (injection.status !== 200) fail("Could not inject benchmark fault: " + injection.status);
   }
-  return { token, run };
+  return { credentials, run };
 }
 
 export default function(data) {
   const index = execution.scenario.iterationInTest;
   if (index >= 9999) fail("Fixture capacity exceeded; increase the seeded range before increasing the workload");
-  const response = create(data.token, "KAA" + String(index).padStart(4, "0"),
+  // Each VU retains renewed credentials; setup time is included in the expiry check.
+  if (!vuCredentials) vuCredentials = data.credentials;
+  if (Date.now() >= vuCredentials.expiresAt * 1000 - 30000) vuCredentials = fetchCredentials();
+  const response = create(vuCredentials.token, "KAA" + String(index).padStart(4, "0"),
     data.run + "-" + index, "rental-create");
   const created = response.status === 200 || response.status === 201;
   accepted.add(created ? 1 : 0);

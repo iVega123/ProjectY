@@ -12,6 +12,35 @@ namespace RentalOperationsTests.Unit;
 
 public sealed class DependencyFailureTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void WrappedMongoFailure_PreservesMetricAndTraceAttribution(bool wrapped)
+    {
+        using var activity = new System.Diagnostics.Activity("dependency-attribution-test").Start();
+        string? measuredDependency = null;
+        using var listener = new System.Diagnostics.Metrics.MeterListener();
+        listener.InstrumentPublished = (instrument, meterListener) =>
+        {
+            if (instrument.Meter.Name == "ProjectY.Resilience" && instrument.Name == "dependency.refusals")
+                meterListener.EnableMeasurementEvents(instrument);
+        };
+        listener.SetMeasurementEventCallback<long>((_, value, tags, _) =>
+        {
+            if (System.Diagnostics.Activity.Current != activity) return;
+            foreach (var tag in tags)
+                if (tag.Key == "dependency") measuredDependency = tag.Value?.ToString();
+        });
+        listener.Start();
+        Exception failure = new MongoException("database unavailable");
+        if (wrapped) failure = new PreWriteDependencyException(new Exception("wrapper", failure));
+        DependencyFailure.Record(failure);
+        Assert.Equal("mongodb", measuredDependency);
+        Assert.Equal("mongodb", activity.GetTagItem("projecty.degradation"));
+        Assert.Equal(System.Diagnostics.ActivityStatusCode.Error, activity.Status);
+    }
+
+
     [Fact]
     public async Task DatabaseFailure_RefusesWith503AndRetryAfter_WithoutLeakingException()
     {
@@ -51,6 +80,55 @@ public sealed class DependencyFailureTests
         Assert.True(DependencyFailure.IsUnavailable(error));
         Assert.True(timer.Elapsed < TimeSpan.FromSeconds(2.5), $"Driver took {timer.Elapsed}");
     }
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task AdminMutation_DependencyFailure_ReturnsSanitized503(bool rename, bool timeout)
+    {
+        var service = new Mock<IRentalService>();
+        Exception failure = timeout
+            ? new TimeoutException("private connection details")
+            : new MongoException("private connection details");
+        service.Setup(s => s.TryRetireMotorcycleAsync("OLD")).ThrowsAsync(failure);
+        service.Setup(s => s.TryReserveLicensePlateRenameAsync("OLD", "NEW")).ThrowsAsync(failure);
+        var controller = new RentalController(service.Object)
+        {
+            ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() }
+        };
+        var result = rename
+            ? await controller.TryReserveMotorcycleRename(new MotorcycleRenameReservationDto { OldLicencePlate = "OLD", NewLicencePlate = "NEW" })
+            : await controller.TryRetireMotorcycle("OLD");
+        var response = Assert.IsType<ObjectResult>(result);
+        Assert.Equal(503, response.StatusCode);
+        Assert.Equal("1", controller.Response.Headers.RetryAfter.ToString());
+        Assert.DoesNotContain("private", Assert.IsType<ProblemDetails>(response.Value).Detail);
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task AdminMutation_PreservesSuccessAndConflict(bool rename, bool acquired)
+    {
+        var service = new Mock<IRentalService>();
+        service.Setup(s => s.TryRetireMotorcycleAsync("OLD")).ReturnsAsync(acquired);
+        service.Setup(s => s.TryReserveLicensePlateRenameAsync("OLD", "NEW")).ReturnsAsync(acquired);
+        var controller = new RentalController(service.Object)
+        {
+            ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() }
+        };
+        var result = rename
+            ? await controller.TryReserveMotorcycleRename(new MotorcycleRenameReservationDto { OldLicencePlate = "OLD", NewLicencePlate = "NEW" })
+            : await controller.TryRetireMotorcycle("OLD");
+        if (acquired) Assert.IsType<NoContentResult>(result);
+        else Assert.IsType<ConflictObjectResult>(result);
+        Assert.False(controller.Response.Headers.ContainsKey("Retry-After"));
+    }
+
+
     private static RentalCreateDto Request() => new()
     {
         MotocycleLicencePlate = "ABC1D23",

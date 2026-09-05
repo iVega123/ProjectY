@@ -23,6 +23,7 @@ Prometheus name is `dependency_refusals_total`. A 503 trace carries
 to the caller. Individual driver waits are bounded; the gateway's request timeout
 is the overall public deadline, including retries. A timeout is a refusal, never
 proof that a mutation did not commit: retain the same idempotency key when retrying.
+Read-only preflight failures explicitly release the owned idempotency claim, so recovery can execute the same request. Failures during claim or mutation retain their recorded outcome; they are not automatically repeated. This contract also covers admin retirement and rename reservation refusals.
 
 Reproduce the current failure contracts:
 

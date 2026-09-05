@@ -63,3 +63,5 @@ from the RabbitMQ scenario; its target acceptance criteria remain open.
 The `ProjectY — load and resilience` dashboard overlays the k6 percentiles,
 creation/rejection rates, error rate, service health, gateway breaker state and
 durable DLQ depth. k6 remote-writes into the same Prometheus as the application.
+
+Each VU renews its short-lived fixture token 30 seconds before expiry, including time spent in setup. Long workloads therefore keep exercising the rental path after the initial five-minute token expires.
