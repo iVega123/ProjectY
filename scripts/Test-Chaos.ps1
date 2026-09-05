@@ -52,7 +52,7 @@ try {
 } finally {
     if (Test-Path -LiteralPath $fixture) {
         docker compose -p $project -f $fixture down
-        Remove-Item -LiteralPath $fixture
+        Remove-Item -LiteralPath $fixture -Force
     }
     Pop-Location
 }
