@@ -7,7 +7,7 @@ that drill's named toxics; it does not restart a container or clear other drills
 
 | Drill | Injection | Expected / acceptance status | Observe |
 |---|---|---|---|
-| Slow database | 500 ms on the active MongoDB proxy | Measure increased p99. The target “no 5xx” promise remains unverified with the current multi-call rental flow. | Grafana rental SLO, Mongo spans |
+| Slow database | 500 ms on the active MongoDB proxy | Measure increased p99. Measured 4.35% unexpected responses; acceptance failed, tracked in [#160](https://github.com/iVega123/ProjectY/issues/160). | Grafana rental SLO, Mongo spans |
 | Database down | MongoDB downstream timeout | 503 with Retry-After; gateway breaker opens after repeated failures | Gateway metrics and degraded traces |
 | Redis down | Redis downstream timeout | Limiter fails open; revocation and idempotency fail closed | Degradation counter and response status |
 | Kafka down | Disabled until the rental Kafka path exists | Target: rental writes continue, outbox accumulates and drains | Blocked by #130 / event-service work |

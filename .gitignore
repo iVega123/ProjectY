@@ -48,3 +48,6 @@ msbuild.wrn
 .env.*
 !.env.example
 .rabbitmq-definitions.json
+
+# Generated benchmark summaries (published evidence lives in docs/measurements)
+load/results/
