@@ -158,3 +158,35 @@ Dependency fault injection in the active development stack: [commands and recove
 
 [Tilt chaos drills: injection, expected behavior and observation points](docs/chaos-drills.md).
 See the [active degradation contract and prerequisite gaps](docs/degradation-contract.md) for what each dependency failure does today.
+
+## Measured load and chaos
+
+Measured 2026-09-05 on AMD Ryzen 9 9950X3D2, Docker 29.7.2 with 32 logical CPUs
+and 61.55 GiB RAM; 5 VUs for 30 seconds using one seeded rider and the default limiter.
+
+| Scenario | Created | Rate limited (429) | Unexpected errors | Successful p95 / p99 |
+|---|---:|---:|---:|---:|
+| Normal | 179 | 1,220 | 0% | 37.8 / 87.2 ms |
+| MongoDB +500 ms | 88 | 0 | 4.35% | 1,528.8 / 2,533.0 ms |
+| MongoDB down | 0 | 957 | 15.76% | N/A |
+| RabbitMQ down | 179 | 1,231 | 0% | 26.9 / 33.2 ms |
+
+Reproduce: `powershell -File scripts/Run-LoadTest.ps1`; append
+`-Mode slow-db`, `-Mode db-down` or `-Mode rabbit-down` for fault runs.
+Both MongoDB fault runs fail the unchanged k6 thresholds. These measurements
+include rate limiting and do not estimate maximum capacity.
+[Raw results and caveats](docs/measurements/epic-9/README.md).
+
+| Tilt drill | Injection | Acceptance / observation |
+|---|---|---|
+| Slow database | MongoDB +500 ms | No-errors criterion failed: [#160](https://github.com/iVega123/ProjectY/issues/160) |
+| Database down | MongoDB timeout | Bounded refusals and gateway breaker; inspect traces and metrics |
+| Redis down | Redis timeout | Limiter open; revocation/idempotency closed |
+| Kafka down | Disabled | Waiting for Kafka rental path, #130 |
+| Bad network | MongoDB slicer + connection byte limit | Error-rate acceptance still open |
+| Service killed | Disabled | Waiting for live tracking/map, #10 |
+
+Each Tilt drill has a clear button. [Detailed commands](docs/chaos-drills.md).
+[Load and resilience dashboard](http://localhost:3000/d/projecty-load-resilience)
+uses port 13000 with the isolated load runner's `-KeepStack` option.
+
