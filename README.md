@@ -157,3 +157,4 @@ the scans that run before publication.
 Dependency fault injection in the active development stack: [commands and recovery contract](docs/dependency-fault-injection.md).
 
 [Tilt chaos drills: injection, expected behavior and observation points](docs/chaos-drills.md).
+See the [active degradation contract and prerequisite gaps](docs/degradation-contract.md) for what each dependency failure does today.

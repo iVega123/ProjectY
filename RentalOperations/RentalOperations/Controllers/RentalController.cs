@@ -14,6 +14,17 @@ namespace RentalOperations.Controllers
     {
         private readonly IRentalService _rentalService;
 
+        private ObjectResult Unavailable(Exception exception)
+        {
+            DependencyFailure.Record(exception);
+            Response.Headers.RetryAfter = "1";
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, new ProblemDetails
+            {
+                Status = StatusCodes.Status503ServiceUnavailable,
+                Title = "Dependency unavailable",
+                Detail = "A required dependency is temporarily unavailable. Retry later."
+            });
+        }
         public RentalController(IRentalService rentalService)
         {
             _rentalService = rentalService;
@@ -50,6 +61,10 @@ namespace RentalOperations.Controllers
                     Detail = ex.Message
                 });
             }
+            catch (Exception ex) when (DependencyFailure.IsUnavailable(ex))
+            {
+                return Unavailable(ex);
+            }
             catch (Exception ex)
             {
                 return BadRequest(ex.Message);
@@ -73,6 +88,10 @@ namespace RentalOperations.Controllers
                     cursor,
                     pageSize));
             }
+            catch (Exception ex) when (DependencyFailure.IsUnavailable(ex))
+            {
+                return Unavailable(ex);
+            }
             catch (Exception ex)
             {
                 return BadRequest(ex.Message);
@@ -89,6 +108,10 @@ namespace RentalOperations.Controllers
             try
             {
                 return Ok(await _rentalService.GetRentalsByUserIdAsync(userId, cursor, pageSize));
+            }
+            catch (Exception ex) when (DependencyFailure.IsUnavailable(ex))
+            {
+                return Unavailable(ex);
             }
             catch (Exception ex)
             {
@@ -113,6 +136,10 @@ namespace RentalOperations.Controllers
             {
                 return Forbid();
             }
+            catch (Exception ex) when (DependencyFailure.IsUnavailable(ex))
+            {
+                return Unavailable(ex);
+            }
             catch (Exception ex)
             {
                 return BadRequest(ex.Message);
@@ -126,6 +153,10 @@ namespace RentalOperations.Controllers
             {
                 bool isRented = await _rentalService.IsMotorcycleCurrentlyRentedAsync(licencePlate);
                 return Ok(isRented);
+            }
+            catch (Exception ex) when (DependencyFailure.IsUnavailable(ex))
+            {
+                return Unavailable(ex);
             }
             catch (Exception ex)
             {
