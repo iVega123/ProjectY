@@ -22,7 +22,15 @@ public static class DependencyFailure
 
     public static void Record(Exception exception)
     {
-        var dependency = exception is MongoException ? "mongodb" : "upstream";
+        var dependency = "upstream";
+        for (Exception? current = exception; current is not null; current = current.InnerException)
+        {
+            if (current is MongoException)
+            {
+                dependency = "mongodb";
+                break;
+            }
+        }
         Refusals.Add(1, new KeyValuePair<string, object?>("dependency", dependency));
         Activity.Current?.SetTag("projecty.degradation", dependency);
         Activity.Current?.SetStatus(ActivityStatusCode.Error, "Dependency unavailable");

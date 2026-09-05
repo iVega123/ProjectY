@@ -12,6 +12,35 @@ namespace RentalOperationsTests.Unit;
 
 public sealed class DependencyFailureTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void WrappedMongoFailure_PreservesMetricAndTraceAttribution(bool wrapped)
+    {
+        using var activity = new System.Diagnostics.Activity("dependency-attribution-test").Start();
+        string? measuredDependency = null;
+        using var listener = new System.Diagnostics.Metrics.MeterListener();
+        listener.InstrumentPublished = (instrument, meterListener) =>
+        {
+            if (instrument.Meter.Name == "ProjectY.Resilience" && instrument.Name == "dependency.refusals")
+                meterListener.EnableMeasurementEvents(instrument);
+        };
+        listener.SetMeasurementEventCallback<long>((_, value, tags, _) =>
+        {
+            if (System.Diagnostics.Activity.Current != activity) return;
+            foreach (var tag in tags)
+                if (tag.Key == "dependency") measuredDependency = tag.Value?.ToString();
+        });
+        listener.Start();
+        Exception failure = new MongoException("database unavailable");
+        if (wrapped) failure = new PreWriteDependencyException(new Exception("wrapper", failure));
+        DependencyFailure.Record(failure);
+        Assert.Equal("mongodb", measuredDependency);
+        Assert.Equal("mongodb", activity.GetTagItem("projecty.degradation"));
+        Assert.Equal(System.Diagnostics.ActivityStatusCode.Error, activity.Status);
+    }
+
+
     [Fact]
     public async Task DatabaseFailure_RefusesWith503AndRetryAfter_WithoutLeakingException()
     {
