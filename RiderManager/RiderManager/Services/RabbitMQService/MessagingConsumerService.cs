@@ -1,4 +1,4 @@
-﻿using RabbitMQ.Client.Events;
+using RabbitMQ.Client.Events;
 using RabbitMQ.Client;
 using System.Text;
 using RiderManager.Configurations;
@@ -35,10 +35,10 @@ namespace RiderManager.Services.RabbitMQService
             _riderInfoPoisonQueueName = options.RiderPoisonStreamQueueName;
             _channel = _connection.CreateModel();
             _retryChannel = _connection.CreateModel();
+            _retryRouter = retryRouter;
             InitializeQueues();
             _serviceProvider = serviceProvider;
             _messageAuthenticator = messageAuthenticator;
-            _retryRouter = retryRouter;
         }
 
         private void InitializeQueues()
@@ -46,20 +46,22 @@ namespace RiderManager.Services.RabbitMQService
             _channel.QueueDeclare(queue: _riderInfoQueueName, durable: true, exclusive: false, autoDelete: false);
             _channel.QueueDeclare(queue: _imageStreamQueueName, durable: true, exclusive: false, autoDelete: false);
             _channel.QueueDeclare(queue: _riderInfoPoisonQueueName, durable: true, exclusive: false, autoDelete: false);
+            _retryRouter.DeclareTopology(_retryChannel, _riderInfoQueueName, _riderInfoPoisonQueueName);
+            _retryRouter.DeclareTopology(_retryChannel, _imageStreamQueueName, _riderInfoPoisonQueueName);
             _channel.BasicQos(prefetchSize: 0, prefetchCount: 1, global: false);
         }
 
         public Task StartConsuming()
         {
             ConsumeQueueAsync(_riderInfoQueueName, ProcessRiderInfo, _riderInfoPoisonQueueName);
-            ConsumeQueueAsync(_imageStreamQueueName, ProcessImageStream);
+            ConsumeQueueAsync(_imageStreamQueueName, ProcessImageStream, _riderInfoPoisonQueueName);
             return Task.CompletedTask;
         }
 
         private void ConsumeQueueAsync(
             string queueName,
             Func<string, Task> processMessageFunc,
-            string? poisonQueueName = null)
+            string poisonQueueName)
         {
             var consumer = new AsyncEventingBasicConsumer(_channel);
             consumer.Received += async (model, ea) =>
@@ -76,22 +78,9 @@ namespace RiderManager.Services.RabbitMQService
                     await processMessageFunc(message);
                     _channel.BasicAck(ea.DeliveryTag, false);
                 }
-                catch (QueueMessageAuthenticationException ex)
-                {
-                    MessagingTraceContext.RecordException(activity, ex);
-                    _channel.BasicNack(ea.DeliveryTag, false, false);
-                    _logger.LogWarning(ex, "Rejected unauthenticated message from queue {QueueName}.", queueName);
-                }
                 catch (Exception ex)
                 {
                     MessagingTraceContext.RecordException(activity, ex);
-                    if (poisonQueueName is null)
-                    {
-                        _channel.BasicNack(ea.DeliveryTag, false, true);
-                        _logger.LogError(ex, "Error processing message from {QueueName}; delivery requeued.", queueName);
-                        return;
-                    }
-
                     try
                     {
                         var route = _retryRouter.RouteFailure(
@@ -99,28 +88,29 @@ namespace RiderManager.Services.RabbitMQService
                             queueName,
                             poisonQueueName,
                             ea.BasicProperties,
-                            ea.Body);
+                            ea.Body, permanent: ex is QueueMessageAuthenticationException);
                         _channel.BasicAck(ea.DeliveryTag, false);
                         if (route == FailureRoute.Retry)
                         {
                             _logger.LogWarning(
                                 ex,
-                                "Registration failed; delivery was republished for a bounded retry.");
+                                "Message processing failed; delivery was republished for a bounded retry.");
                         }
                         else
                         {
                             _logger.LogWarning(
                                 ex,
-                                "Registration failed permanently; delivery was quarantined in {PoisonQueueName}.",
+                                "Message processing failed permanently; delivery was quarantined in {PoisonQueueName}.",
                                 poisonQueueName);
                         }
                     }
                     catch (Exception routingException)
                     {
-                        _channel.BasicNack(ea.DeliveryTag, false, true);
+                        _channel.Abort();
+                        _serviceProvider.GetRequiredService<IHostApplicationLifetime>().StopApplication();
                         _logger.LogError(
                             routingException,
-                            "Could not route failed registration; original delivery was requeued.");
+                            "Could not route failed message; consumer stopped with original delivery unacknowledged.");
                     }
                 }
             };
@@ -160,6 +150,7 @@ namespace RiderManager.Services.RabbitMQService
             _channel?.Dispose();
             _retryChannel?.Close();
             _retryChannel?.Dispose();
+            _connection.Dispose();
             _logger.LogInformation("RabbitMQ channel closed.");
         }
     }

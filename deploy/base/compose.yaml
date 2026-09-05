@@ -62,6 +62,7 @@ services:
     image: rabbitmq:4.3-management-alpine
     volumes:
       - rabbitmq-data:/var/lib/rabbitmq
+      - ./rabbitmq/enabled_plugins:/etc/rabbitmq/enabled_plugins:ro
     networks: [projecty]
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "-q", "check_running"]
