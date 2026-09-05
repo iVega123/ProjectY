@@ -43,6 +43,23 @@ x-moto-hub-environment: &moto-hub-environment
   GatewayIdentity__SigningKeyId: local-v1
 
 services:
+  media-guard:
+    image: projecty/media-guard:dev
+    build:
+      context: services/media-guard
+    networks: [projecty]
+    environment:
+      <<: *otel-environment
+      OTEL_SERVICE_NAME: media-guard
+    mem_limit: 768m
+    cpus: 2
+    healthcheck:
+      test: ["CMD", "/app/media-guard", "--healthcheck"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 10s
+
   otel-collector:
     image: projecty/otel-collector:dev
     build:

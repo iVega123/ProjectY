@@ -95,6 +95,11 @@ builder.Services.AddSingleton(
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddHostedService<RiderInboxRetentionService>();
 builder.Services.AddScoped<IMinioFileStorageService, MinioFileStorageService>();
+builder.Services.AddHttpClient<IMediaGuardClient, MediaGuardClient>(client =>
+{
+    client.BaseAddress = new Uri(builder.Configuration["MediaGuard:Url"] ?? "http://media-guard:8092");
+    client.Timeout = TimeSpan.FromSeconds(15);
+});
 builder.Services.AddScoped<IPresignedUrlService, PresignedUrlService>();
 builder.Services.AddScoped<IRiderManager, RidersManager>();
 builder.Services.AddSwaggerGen(c =>

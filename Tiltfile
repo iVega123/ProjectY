@@ -83,10 +83,17 @@ configure_live_update(
     'cd /workspace && cargo fetch --locked',
     'cd /workspace && cargo build --locked',
 )
+configure_live_update(
+    'projecty/media-guard:dev',
+    'services/media-guard',
+    ['services/media-guard/Cargo.toml', 'services/media-guard/Cargo.lock'],
+    'cd /workspace && cargo fetch --locked',
+    'cd /workspace && cargo build --locked',
+)
 infra_resources = ['toxiproxy', 'postgres', 'redis', 'rabbitmq', 'mongodb', 'minio']
 observability_resources = ['tempo', 'loki', 'otel-collector', 'prometheus', 'grafana']
 setup_resources = ['auth-gate-migrations', 'rider-manager-migrations', 'moto-hub-migrations']
-service_resources = ['auth-gate', 'rider-manager', 'moto-hub', 'rental-operations']
+service_resources = ['auth-gate', 'rider-manager', 'moto-hub', 'rental-operations', 'media-guard']
 
 for resource in infra_resources:
     dc_resource(resource, labels = ['infra'])
