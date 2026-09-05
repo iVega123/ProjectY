@@ -182,6 +182,42 @@ public sealed class IdempotencyMiddlewareTests : IAsyncLifetime
         Assert.Equal(StatusCodes.Status422UnprocessableEntity, mismatch.Response.StatusCode);
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    [Trait("Category", "Integration")]
+    public async Task Dependency503_OnlyReleasesExplicitPreWriteFailures(bool beforeWrite)
+    {
+        var attempts = 0;
+        var effects = 0;
+        var middleware = CreateMiddleware(async context =>
+        {
+            attempts++;
+            if (attempts == 1)
+            {
+                if (beforeWrite) RedisIdempotencyMiddleware.AllowRetryBeforeSideEffects(context);
+                else effects++;
+                context.Response.StatusCode = 503;
+                context.Response.Headers.RetryAfter = "1";
+                await context.Response.WriteAsync("dependency unavailable");
+                return;
+            }
+            effects++;
+            context.Response.StatusCode = 201;
+            await context.Response.WriteAsync("created");
+        });
+        var key = Guid.NewGuid().ToString("N");
+        var first = await ExecuteAsync(middleware, key, "{}");
+        var retry = await ExecuteAsync(middleware, key, "{}");
+        var replay = await ExecuteAsync(middleware, key, "{}");
+        Assert.Equal(503, first.Response.StatusCode);
+        Assert.Equal("1", first.Response.Headers.RetryAfter.ToString());
+        Assert.Equal(beforeWrite ? 201 : 503, retry.Response.StatusCode);
+        Assert.Equal(beforeWrite ? 2 : 1, attempts);
+        Assert.Equal(1, effects);
+        Assert.Equal("true", replay.Response.Headers["Idempotency-Replayed"].ToString());
+    }
+
     private RedisIdempotencyMiddleware CreateMiddleware(RequestDelegate next)
         => new(
             next,

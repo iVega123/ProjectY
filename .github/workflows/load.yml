@@ -12,6 +12,7 @@ on:
       - 'deploy/**'
       - 'load/**'
       - 'scripts/Run-LoadTest.ps1'
+      - 'scripts/Invoke-Chaos.ps1'
       - 'scripts/New-LocalSecrets.ps1'
       - '.github/workflows/load.yml'
   workflow_dispatch:
@@ -26,6 +27,8 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
+      - name: Verify token refresh across long workloads
+        run: node --test load/tests/token-refresh.test.mjs
       - name: Build isolated stack and enforce rental thresholds
         shell: pwsh
         run: ./scripts/Run-LoadTest.ps1

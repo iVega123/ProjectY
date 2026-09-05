@@ -11,6 +11,40 @@ namespace RentalOperationsTests.Unit.Services;
 
 public sealed class RentalServiceTests
 {
+    [Theory]
+    [InlineData("database")]
+    [InlineData("rider")]
+    [InlineData("motorcycle")]
+    [InlineData("claim")]
+    [InlineData("insert")]
+    public async Task CreateRental_OnlyPreflightFailuresPermitIdempotentRetry(string stage)
+    {
+        var failure = new TimeoutException("dependency timeout");
+        var repository = new Mock<IRentalRepository>();
+        repository.Setup(r => r.HasOverlappingRentalAsync(It.IsAny<string>(), It.IsAny<DateTime>(), It.IsAny<DateTime>())).ReturnsAsync(false);
+        repository.Setup(r => r.TryClaimRentalAsync(It.IsAny<string>(), It.IsAny<string>())).ReturnsAsync(MotorcycleClaimResult.Acquired);
+        var riders = new Mock<IRiderManagerService>();
+        riders.Setup(r => r.GetRiderByIdAsync("rider")).ReturnsAsync(new Rider { UserId = "rider", CNHType = "A" });
+        var motorcycles = new Mock<IMotorcycleService>();
+        motorcycles.Setup(m => m.GetMotorcycleByIdAsync("ABC1D23")).ReturnsAsync(new Motorcycle { licensePlate = "ABC1D23" });
+        if (stage == "database") repository.Setup(r => r.HasOverlappingRentalAsync(It.IsAny<string>(), It.IsAny<DateTime>(), It.IsAny<DateTime>())).ThrowsAsync(failure);
+        if (stage == "rider") riders.Setup(r => r.GetRiderByIdAsync("rider")).ThrowsAsync(failure);
+        if (stage == "motorcycle") motorcycles.Setup(m => m.GetMotorcycleByIdAsync("ABC1D23")).ThrowsAsync(failure);
+        if (stage == "claim") repository.Setup(r => r.TryClaimRentalAsync(It.IsAny<string>(), It.IsAny<string>())).ThrowsAsync(failure);
+        if (stage == "insert") repository.Setup(r => r.CreateRentalAsync(It.IsAny<RentalOperations.Model.Rental>())).ThrowsAsync(failure);
+        var service = new RentalService(repository.Object, Mock.Of<IMapper>(), riders.Object, motorcycles.Object);
+        var request = new RentalCreateDto { MotocycleLicencePlate = "ABC1D23",
+            StartDate = DateTime.UtcNow.AddDays(1), PredictedEndDate = DateTime.UtcNow.AddDays(8) };
+        var error = await Record.ExceptionAsync(() => service.CreateRentalAsync(request, "rider"));
+        if (stage is "claim" or "insert") Assert.Same(failure, error);
+        else
+        {
+            Assert.Same(failure, Assert.IsType<PreWriteDependencyException>(error).InnerException);
+            repository.Verify(r => r.TryClaimRentalAsync(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
+            repository.Verify(r => r.CreateRentalAsync(It.IsAny<RentalOperations.Model.Rental>()), Times.Never);
+        }
+    }
+
     [Fact]
     public async Task CreateRental_WhenRetirementClaimWins_RejectsWithoutInsertingRental()
     {

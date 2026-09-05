@@ -38,15 +38,15 @@ namespace RentalOperations.Services
                 throw new InvalidOperationException("The Rent time must at least one day");
             }
 
-            if (await _repository.HasOverlappingRentalAsync(
+            if (await BeforeWriteAsync(() => _repository.HasOverlappingRentalAsync(
                 createDto.MotocycleLicencePlate,
                 createDto.StartDate,
-                createDto.PredictedEndDate))
+                createDto.PredictedEndDate)))
             {
                 throw new ActiveRentalConflictException(createDto.MotocycleLicencePlate);
             }
 
-            var rider = await _riderManagerService.GetRiderByIdAsync(userId);
+            var rider = await BeforeWriteAsync(() => _riderManagerService.GetRiderByIdAsync(userId));
             if (rider == null)
             {
                 throw new ArgumentException("Rider does not exist.");
@@ -56,7 +56,7 @@ namespace RentalOperations.Services
                 throw new ArgumentException("Rider does not have the correct license type.");
             }
 
-            var motorcycle = await _motorcycleService.GetMotorcycleByIdAsync(createDto.MotocycleLicencePlate);
+            var motorcycle = await BeforeWriteAsync(() => _motorcycleService.GetMotorcycleByIdAsync(createDto.MotocycleLicencePlate));
             if (motorcycle == null)
             {
                 throw new ArgumentException("Motorcycle does not exist.");
@@ -98,7 +98,7 @@ namespace RentalOperations.Services
 
         public async Task<ResponseRentalDTO> CalculateFinalCostAsync(string rentalId, string userId, DateTime actualEndDate)
         {
-            var rental = await _repository.GetRentalByIdAsync(rentalId);
+            var rental = await BeforeWriteAsync(() => _repository.GetRentalByIdAsync(rentalId));
 
             if (rental == null)
                 throw new KeyNotFoundException($"No rental found with ID {rentalId}");
@@ -188,6 +188,15 @@ namespace RentalOperations.Services
             var result = await _repository.TryClaimRetirementAsync(
                 BrazilianLicensePlateAttribute.Normalize(licencePlate));
             return result is MotorcycleClaimResult.Acquired or MotorcycleClaimResult.Retired;
+        }
+
+        private static async Task<T> BeforeWriteAsync<T>(Func<Task<T>> read)
+        {
+            try { return await read(); }
+            catch (Exception ex) when (DependencyFailure.IsUnavailable(ex))
+            {
+                throw new PreWriteDependencyException(ex);
+            }
         }
 
         private decimal DetermineDailyRate(int days)

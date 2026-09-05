@@ -12,7 +12,7 @@ http.createServer((request, response) => {
     const body = encode({ alg: "EdDSA", kid: key.kid, typ: "JWT" }) + "." +
       encode({ iss: "projecty.identity", aud: "projecty.rental-operations", sub: "load-rider",
         roles: ["Rider"], iat: now, exp: now + 300, jti: randomUUID() });
-    return response.end(JSON.stringify({ token: body + "." + sign(null, Buffer.from(body), privateKey).toString("base64url") }));
+    return response.end(JSON.stringify({ expiresAt: now + 300, token: body + "." + sign(null, Buffer.from(body), privateKey).toString("base64url") }));
   }
   response.statusCode = request.url === "/health" ? 200 : 404;
   response.end("{}");
