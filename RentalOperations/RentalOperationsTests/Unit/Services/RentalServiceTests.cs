@@ -33,8 +33,12 @@ public sealed class RentalServiceTests
         if (stage == "claim") repository.Setup(r => r.TryClaimRentalAsync(It.IsAny<string>(), It.IsAny<string>())).ThrowsAsync(failure);
         if (stage == "insert") repository.Setup(r => r.CreateRentalAsync(It.IsAny<RentalOperations.Model.Rental>())).ThrowsAsync(failure);
         var service = new RentalService(repository.Object, Mock.Of<IMapper>(), riders.Object, motorcycles.Object);
-        var request = new RentalCreateDto { MotocycleLicencePlate = "ABC1D23",
-            StartDate = DateTime.UtcNow.AddDays(1), PredictedEndDate = DateTime.UtcNow.AddDays(8) };
+        var request = new RentalCreateDto
+        {
+            MotocycleLicencePlate = "ABC1D23",
+            StartDate = DateTime.UtcNow.AddDays(1),
+            PredictedEndDate = DateTime.UtcNow.AddDays(8)
+        };
         var error = await Record.ExceptionAsync(() => service.CreateRentalAsync(request, "rider"));
         if (stage is "claim" or "insert") Assert.Same(failure, error);
         else

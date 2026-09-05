@@ -248,8 +248,11 @@ public sealed class InboxProcessorTests : IAsyncLifetime
         await using var handlerContext = new ApplicationDbContext(_options);
         handlerContext.InboxImageParts.Add(new InboxImagePart
         {
-            UserId = rider, FileName = "race.png", SequenceNumber = 0,
-            Content = [1, 2], ReceivedAtUtc = DateTime.UtcNow.AddHours(-2)
+            UserId = rider,
+            FileName = "race.png",
+            SequenceNumber = 0,
+            Content = [1, 2],
+            ReceivedAtUtc = DateTime.UtcNow.AddHours(-2)
         });
         await handlerContext.SaveChangesAsync();
         await using var transaction = await handlerContext.Database.BeginTransactionAsync();
