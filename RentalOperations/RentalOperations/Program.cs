@@ -76,6 +76,7 @@ builder.Services.AddSwaggerGen(c =>
 builder.Services
     .AddHttpClient("rider-manager", client =>
     {
+        client.Timeout = TimeSpan.FromSeconds(1);
         client.BaseAddress = new Uri(
             builder.Configuration["RiderManagerSettings:BaseUrl"]
                 ?? throw new InvalidOperationException(
@@ -85,6 +86,7 @@ builder.Services
 builder.Services
     .AddHttpClient("moto-hub", client =>
     {
+        client.Timeout = TimeSpan.FromSeconds(1);
         client.BaseAddress = new Uri(
             builder.Configuration["MotoHubSettings:BaseUrl"]
                 ?? throw new InvalidOperationException(

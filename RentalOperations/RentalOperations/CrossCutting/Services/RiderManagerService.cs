@@ -1,4 +1,4 @@
-﻿using RentalOperations.CrossCutting.Model;
+using RentalOperations.CrossCutting.Model;
 using System.Text.Json;
 
 namespace RentalOperations.CrossCutting.Services
@@ -15,7 +15,7 @@ namespace RentalOperations.CrossCutting.Services
         {
             try
             {
-                var response = await _httpClient.GetAsync($"api/Riders/{riderId}");
+                using var response = await _httpClient.GetAsync($"api/Riders/{riderId}");
                 response.EnsureSuccessStatusCode();
                 var responseBody = await response.Content.ReadAsStringAsync();
                 return JsonSerializer.Deserialize<Rider>(responseBody, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
