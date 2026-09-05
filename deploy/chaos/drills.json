@@ -1,0 +1,85 @@
+[
+  {
+    "id": "slow-db",
+    "label": "Slow database",
+    "available": true,
+    "proxy": "mongodb",
+    "toxics": [
+      {
+        "name": "slow-db",
+        "type": "latency",
+        "value": 500
+      }
+    ],
+    "expectation": "Latency should rise. Compare p95/p99 and 503s with baseline; the original no-5xx target is not yet proven.",
+    "observe": "Grafana rental SLO and MongoDB spans in Tempo."
+  },
+  {
+    "id": "db-down",
+    "label": "Database down",
+    "available": true,
+    "proxy": "mongodb",
+    "toxics": [
+      {
+        "name": "db-down",
+        "type": "timeout",
+        "value": 0
+      }
+    ],
+    "expectation": "Rental creation refuses with 503 and Retry-After; repeated failures open the gateway breaker.",
+    "observe": "Gateway /metrics, rental SLO, and trace projecty.degradation."
+  },
+  {
+    "id": "redis-down",
+    "label": "Redis down",
+    "available": true,
+    "proxy": "redis",
+    "toxics": [
+      {
+        "name": "redis-down",
+        "type": "timeout",
+        "value": 0
+      }
+    ],
+    "expectation": "Rate limiting degrades open; high-value revocation and idempotency refuse closed.",
+    "observe": "gateway_ratelimit_degraded_total and gateway 503 traces."
+  },
+  {
+    "id": "kafka-down",
+    "label": "Kafka down (blocked)",
+    "available": false,
+    "proxy": "kafka",
+    "toxics": [],
+    "expectation": "Blocked: the active rental service has no Kafka producer/outbox; requires #130 and event-service work.",
+    "observe": "No active Kafka drill evidence exists."
+  },
+  {
+    "id": "bad-network",
+    "label": "Bad network",
+    "available": true,
+    "proxy": "mongodb",
+    "toxics": [
+      {
+        "name": "bad-network-slicer",
+        "type": "slicer",
+        "value": 100
+      },
+      {
+        "name": "bad-network-limit",
+        "type": "limit_data",
+        "value": 60000
+      }
+    ],
+    "expectation": "Fragment responses and interrupt long connections. Measure client retries and errors; unchanged error rate is not yet proven.",
+    "observe": "MongoDB client spans, gateway resilience metrics and k6 error rate."
+  },
+  {
+    "id": "service-killed",
+    "label": "Tracking stopped (blocked)",
+    "available": false,
+    "proxy": "telemetry",
+    "toxics": [],
+    "expectation": "Blocked: live tracking and the map are not present; requires #10.",
+    "observe": "No active map-freeze drill evidence exists."
+  }
+]
