@@ -45,7 +45,7 @@ if missing_local_files:
     fail(missing_files_message)
 
 docker_compose(
-    'docker-compose.yml',
+    ['docker-compose.yml', 'docker-compose.chaos.yml'],
     env_file = '.env',
     project_name = 'projecty',
 )
@@ -83,7 +83,7 @@ configure_live_update(
     'cd /workspace && cargo fetch --locked',
     'cd /workspace && cargo build --locked',
 )
-infra_resources = ['postgres', 'redis', 'rabbitmq', 'mongodb', 'minio']
+infra_resources = ['toxiproxy', 'postgres', 'redis', 'rabbitmq', 'mongodb', 'minio']
 observability_resources = ['tempo', 'loki', 'otel-collector', 'prometheus', 'grafana']
 setup_resources = ['auth-gate-migrations', 'rider-manager-migrations', 'moto-hub-migrations']
 service_resources = ['auth-gate', 'rider-manager', 'moto-hub', 'rental-operations']

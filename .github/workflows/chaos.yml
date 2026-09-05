@@ -1,0 +1,24 @@
+name: Dependency chaos
+on:
+  pull_request:
+    paths:
+      - 'docker-compose*.yml'
+      - 'deploy/chaos/**'
+      - 'scripts/*Chaos.ps1'
+      - 'scripts/chaos.sh'
+      - '.github/workflows/chaos.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  proxy-recovery:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+      - name: Generate isolated credentials
+        shell: pwsh
+        run: ./scripts/New-LocalSecrets.ps1
+      - name: Verify dependency routing and live fault recovery
+        shell: pwsh
+        run: ./scripts/Test-Chaos.ps1
