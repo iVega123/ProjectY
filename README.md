@@ -153,3 +153,5 @@ the scans that run before publication.
 - [All modernization epics](https://github.com/iVega123/ProjectY/issues?q=is%3Aissue%20state%3Aopen%20label%3Aepic)
 - [Architecture decision records](docs/adr/README.md)
 - [Six-part article series](https://github.com/iVega123/ProjectY/issues/13)
+
+Dependency fault injection in the active development stack: [commands and recovery contract](docs/dependency-fault-injection.md).
