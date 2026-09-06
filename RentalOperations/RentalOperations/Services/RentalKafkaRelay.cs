@@ -29,6 +29,7 @@ public sealed class RentalKafkaRelay(MongoDbContext context, IConfiguration conf
         {
             try
             {
+                await BackfillActiveRentalsAsync(rentals, stoppingToken);
                 var batch = await rentals.Find(pending).Limit(100).ToListAsync(stoppingToken);
                 foreach (var rental in batch)
                     foreach (var item in rental.PendingEvents)
@@ -42,7 +43,7 @@ public sealed class RentalKafkaRelay(MongoDbContext context, IConfiguration conf
                             headers.Add("traceparent", Encoding.UTF8.GetBytes(trace));
                         await producer.ProduceAsync(item.Topic, new Message<string, byte[]>
                         {
-                            Key = rental.MotorcycleId,
+                            Key = RentalEventEnvelope.PartitionKey(rental),
                             Value = item.Payload,
                             Headers = headers
                         }, stoppingToken);
@@ -56,6 +57,23 @@ public sealed class RentalKafkaRelay(MongoDbContext context, IConfiguration conf
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { break; }
             catch (Exception error) { log.LogWarning(error, "Kafka relay delayed; rental events retained"); }
             await Task.Delay(TimeSpan.FromSeconds(2), stoppingToken);
+        }
+    }
+
+    public static async Task BackfillActiveRentalsAsync(IMongoCollection<Rental> rentals,
+        CancellationToken cancellationToken = default)
+    {
+        // The legacy schema has no PendingEvents field. An empty persisted array
+        // means the start was already enqueued/acknowledged and must not be replayed.
+        var legacy = Builders<Rental>.Filter.Exists(r => r.PendingEvents, false) &
+                     Builders<Rental>.Filter.Eq(r => r.Status, RentalStatus.Active);
+        var batch = await rentals.Find(legacy).Limit(100).ToListAsync(cancellationToken);
+        foreach (var rental in batch)
+        {
+            var start = RentalEventEnvelope.Create(rental, "rental.started", rental._id!.Value.CreationTime);
+            await rentals.UpdateOneAsync(legacy & Builders<Rental>.Filter.Eq(r => r._id, rental._id),
+                Builders<Rental>.Update.Set(r => r.PendingEvents, new List<RentalEventEnvelope> { start }),
+                cancellationToken: cancellationToken);
         }
     }
 }

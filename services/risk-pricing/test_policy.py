@@ -2,6 +2,48 @@ from policy import verify_number, pricing, score
 from state import State
 from rider_pb2 import RiderEvent
 from rental_pb2 import RentalEvent
+import pytest
+
+
+def test_deleted_document_does_not_block_replacement_or_other_riders(monkeypatch, tmp_path):
+    import worker
+    from botocore.exceptions import ClientError
+
+    class Storage:
+        def get_object(self, **kwargs):
+            raise ClientError({"Error": {"Code": "NoSuchKey"}}, "GetObject")
+
+    monkeypatch.setenv("S3_ENDPOINT", "http://storage")
+    monkeypatch.setenv("S3_BUCKET", "test")
+    monkeypatch.setattr(worker.boto3, "client", lambda *args, **kwargs: Storage())
+    state = State(str(tmp_path / "deleted.db"))
+    old = RiderEvent(event_id="deleted", rider_id="r1", occurred_at_ms=100,
+                     object_key="riders/r1/old.png")
+    assert state.apply("document.stored", old, 101, worker.ocr(old))
+    replacement = RiderEvent(event_id="replacement", rider_id="r1", occurred_at_ms=200)
+    assert state.apply("document.stored", replacement, 201, True)
+    other = RiderEvent(event_id="other", rider_id="r2", occurred_at_ms=200)
+    assert state.apply("document.stored", other, 202, True)
+    assert not state.apply("document.stored", old, 203, worker.ocr(old))
+    assert state.db.execute("SELECT verified FROM riders ORDER BY id").fetchall() == [(1,), (1,)]
+    assert state.db.execute("SELECT COUNT(*) FROM inbox").fetchone()[0] == 3
+    state.db.close()
+
+
+@pytest.mark.parametrize("code", ["AccessDenied", "NoSuchBucket", "InternalError", "SlowDown"])
+def test_storage_faults_remain_retryable(monkeypatch, code):
+    import worker
+    from botocore.exceptions import ClientError
+
+    class Storage:
+        def get_object(self, **kwargs):
+            raise ClientError({"Error": {"Code": code}}, "GetObject")
+
+    monkeypatch.setenv("S3_ENDPOINT", "http://storage")
+    monkeypatch.setenv("S3_BUCKET", "test")
+    monkeypatch.setattr(worker.boto3, "client", lambda *args, **kwargs: Storage())
+    with pytest.raises(ClientError):
+        worker.ocr(RiderEvent(object_key="riders/r1/document.png"))
 
 def test_real_tesseract_on_sanitized_document(monkeypatch):
     import io

@@ -5,6 +5,7 @@ import time
 from concurrent.futures import Future
 import boto3
 from botocore.config import Config
+from botocore.exceptions import ClientError
 from confluent_kafka import Consumer, Producer, TopicPartition
 from PIL import Image
 import pytesseract
@@ -22,7 +23,15 @@ def ocr(event):
         raise ValueError("document must reference a sanitized object")
     s3 = boto3.client("s3", endpoint_url=os.environ["S3_ENDPOINT"],
                       config=Config(connect_timeout=2, read_timeout=5, retries={"max_attempts":1}))
-    result = s3.get_object(Bucket=os.environ["S3_BUCKET"], Key=event.object_key)
+    try:
+        result = s3.get_object(Bucket=os.environ["S3_BUCKET"], Key=event.object_key)
+    except ClientError as error:
+        if error.response.get("Error", {}).get("Code") != "NoSuchKey":
+            raise
+        # Replacements/deletions remove private objects before delayed events
+        # arrive. Consume these as unverified; newer facts still win by timestamp.
+        log.info("document no longer available; verification failed closed")
+        return False
     with result["Body"] as stream:
         content = stream.read(64*1024*1024+1)
     if len(content)>64*1024*1024:
