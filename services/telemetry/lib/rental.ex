@@ -34,11 +34,19 @@ defmodule ProjectYTelemetry.Rental do
   def position(id, payload), do: GenServer.call(via(id), {:position, payload})
 
   def init({id, rider}) do
-    Process.send_after(self(), :idle, @max_age)
-    {:ok, %{id: id, rider: rider, last: Store.last(id), accepted_at: 0}}
+    state = %{id: id, rider: rider, last: Store.last(id), accepted_at: 0, idle_timer: nil}
+    {:ok, refresh_idle(state)}
   end
 
-  def handle_info(:idle, state), do: {:stop, :normal, state}
+  defp refresh_idle(state) do
+    if state.idle_timer, do: Process.cancel_timer(state.idle_timer)
+    %{state | idle_timer: :erlang.start_timer(@max_age, self(), :idle)}
+  end
+
+  def handle_info({:timeout, ref, :idle}, %{idle_timer: ref} = state),
+    do: {:stop, :normal, state}
+
+  def handle_info({:timeout, _, :idle}, state), do: {:noreply, state}
   def handle_call(:last, _, state), do: {:reply, state.last, state}
 
   def handle_call({:position, payload}, _, state) do
@@ -50,7 +58,7 @@ defmodule ProjectYTelemetry.Rental do
          :ok <- Store.reserve_position(state.rider),
          :ok <- Store.put(state.id, state.rider, position) do
       Tracer.with_span "tracking.position", %{attributes: %{"messaging.system" => "phoenix"}} do
-        {:reply, {:ok, position}, %{state | last: position, accepted_at: now}}
+        {:reply, {:ok, position}, refresh_idle(%{state | last: position, accepted_at: now})}
       end
     else
       _ -> {:reply, {:error, "invalid position, inactive rental or rate exceeded"}, state}

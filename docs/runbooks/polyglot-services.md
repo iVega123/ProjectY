@@ -70,6 +70,9 @@ requires; temporary compiler dependencies are removed after installation.
 * Rust: `cargo test --manifest-path services/media-guard/Cargo.toml --locked`;
   `cargo clippy --manifest-path services/media-guard/Cargo.toml --locked --all-targets -- -D warnings`.
 * Elixir: `mix format --check-formatted` and `mix test` in services/telemetry.
+  The lifetime regression uses Redis at `TEST_REDIS_URL` (default localhost:6379);
+  CI provides an isolated Redis service. It exercises a real rental process,
+  accepted/rejected positions and stale/current timeout delivery.
 * Python: build services/risk-pricing/Dockerfile from the repo root, then run
   its image with `--entrypoint pytest -q -p no:cacheprovider`. This invokes real
   Tesseract on a generated PNG as well as restart/idempotency tests.
@@ -86,6 +89,30 @@ primary key is ((rider_id, day), recorded_at), with server timestamps and 90-day
 TTL. Query the actual rider/day after the probe to verify stored rows and TTL.
 
 ## Failure expectations
+
+On rollout, the rental Kafka relay reconciles active legacy Mongo documents in
+batches of 100. A missing `PendingEvents` field identifies the old schema; an
+empty persisted array already belongs to the outbox schema and is not replayed.
+The relay atomically adds a stable `rental.started` envelope only while the
+document remains active and uninitialized. Its occurrence time is the original
+Mongo ObjectId creation time, so a delayed backfill cannot reopen a closed rental
+in consumers. Legacy records lack an immutable motorcycle ID: their start/close
+events use the stable `legacy-rental:<id>` key, independent of licence plate
+renames. New rentals continue to use their real motorcycle ID. Settlement updates
+preserve concurrent outbox writes and acknowledgements. No SQL migration or
+manual database rewrite is needed; tracking becomes available after Kafka catches up.
+
+Replacing or deleting a document may remove its object before a delayed
+`document.stored` event arrives. Only S3 `NoSuchKey` is consumed as failed
+verification; the inbox and output events commit normally and newer verification
+facts win by timestamp. Access failures, missing buckets, timeouts and server
+errors still retry. This keeps deleted private documents from blocking unrelated
+riders without treating an unavailable storage service as an OCR result.
+
+The telemetry rental process expires after 24 hours without an accepted position.
+Each accepted position renews the timer; rejected writes do not. A timeout already
+queued for a previous timer is ignored, so continuously tracked multi-day rentals
+remain connected.
 
 | Stop/unavailable dependency | Observable behavior |
 | --- | --- |

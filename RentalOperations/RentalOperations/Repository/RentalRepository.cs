@@ -105,10 +105,21 @@ namespace RentalOperations.Repository
 
         public async Task UpdateRentalAsync(Rental rental)
         {
-            if (rental.Status == RentalStatus.Completed &&
-                !rental.PendingEvents.Any(e => e.Topic == "rental.closed"))
-                rental.PendingEvents.Add(RentalEventEnvelope.Create(rental, "rental.closed"));
-            await _rentals.ReplaceOneAsync(r => r._id == rental._id, rental);
+            // Patch settlement fields: replacing a stale snapshot can erase a
+            // concurrent backfill or restore envelopes acknowledged by the relay.
+            var update = Builders<Rental>.Update
+                .Set(r => r.EndDate, rental.EndDate)
+                .Set(r => r.FinalCost, rental.FinalCost)
+                .Set(r => r.AdditionalCostsOrSavings, rental.AdditionalCostsOrSavings)
+                .Set(r => r.StatusMessage, rental.StatusMessage)
+                .Set(r => r.Status, rental.Status);
+            var filter = Builders<Rental>.Filter.Eq(r => r._id, rental._id);
+            if (rental.Status == RentalStatus.Completed)
+            {
+                filter &= Builders<Rental>.Filter.Ne(r => r.Status, RentalStatus.Completed);
+                update = update.Push(r => r.PendingEvents, RentalEventEnvelope.Create(rental, "rental.closed"));
+            }
+            await _rentals.UpdateOneAsync(filter, update);
         }
 
         public async Task DeleteRentalAsync(string id)

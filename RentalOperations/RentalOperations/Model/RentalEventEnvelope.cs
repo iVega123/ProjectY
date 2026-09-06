@@ -11,16 +11,19 @@ public sealed class RentalEventEnvelope
     public byte[] Payload { get; set; } = [];
     public string? TraceParent { get; set; }
 
-    public static RentalEventEnvelope Create(Rental rental, string topic)
+    public static string PartitionKey(Rental rental) => string.IsNullOrEmpty(rental.MotorcycleId)
+        ? $"legacy-rental:{rental._id}" : rental.MotorcycleId;
+
+    public static RentalEventEnvelope Create(Rental rental, string topic, DateTime? occurredAt = null)
     {
         var id = $"{rental._id}:{topic}:v1";
-        var time = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        var time = new DateTimeOffset(occurredAt ?? DateTime.UtcNow).ToUnixTimeMilliseconds();
         var message = new RentalEvent
         {
             EventId = id,
             RentalId = rental._id!.Value.ToString(),
             RiderId = rental.UserId,
-            MotorcycleId = rental.MotorcycleId,
+            MotorcycleId = PartitionKey(rental),
             OccurredAtMs = time,
             PlanDays = (rental.PredictedEndDate - rental.StartDate).Days,
             StartedAtMs = new DateTimeOffset(rental.StartDate.ToUniversalTime()).ToUnixTimeMilliseconds(),
