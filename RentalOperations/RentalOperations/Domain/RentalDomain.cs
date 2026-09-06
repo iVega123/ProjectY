@@ -24,7 +24,7 @@ namespace RentalOperations.Domain
                 StartDate = dto.StartDate,
                 EndDate = null,
                 PredictedEndDate = dto.PredictedEndDate,
-                TotalCost = CalculateTotalCost(dto.StartDate, dto.PredictedEndDate)
+                TotalCost = CalculateTotalCost(dto.StartDate, dto.PredictedEndDate, userId)
             };
 
             return domain;
@@ -36,20 +36,12 @@ namespace RentalOperations.Domain
                 throw new ArgumentException("Start date must be before the end and predicted end dates.");
         }
 
-        private static decimal CalculateTotalCost(DateTime startDate, DateTime predictedEndDate)
+        private static decimal CalculateTotalCost(DateTime startDate, DateTime predictedEndDate, string rider)
         {
             int totalDays = (predictedEndDate - startDate).Days;
-            decimal dailyRate = DetermineDailyRate(totalDays);
+            decimal dailyRate = RentalOperations.Services.LocalPricing.DailyRate(totalDays, rider);
             return totalDays * dailyRate;
         }
 
-        private static decimal DetermineDailyRate(int days)
-        {
-            if (days <= 7) return 30m;
-            if (days <= 15) return 28m;
-            if (days <= 30) return 22m;
-            if (days <= 45) return 20m;
-            return 18m;
-        }
     }
 }

@@ -119,7 +119,7 @@ namespace RentalOperations.Services
             response.ActualEndDate = actualEndDate;
 
             int daysPlanned = (rental.PredictedEndDate - rental.StartDate).Days;
-            decimal dailyRate = DetermineDailyRate(daysPlanned);
+            decimal dailyRate = daysPlanned > 0 ? rental.InitCost / daysPlanned : 0;
 
             if (actualEndDate < rental.PredictedEndDate)
             {
@@ -198,15 +198,6 @@ namespace RentalOperations.Services
             {
                 throw new PreWriteDependencyException(ex);
             }
-        }
-
-        private decimal DetermineDailyRate(int days)
-        {
-            if (days <= 7) return 30m;
-            if (days <= 15) return 28m;
-            if (days <= 30) return 22m;
-            if (days <= 45) return 20m;
-            return 18m;
         }
 
         private decimal GetPenaltyRate(int days)

@@ -2,6 +2,44 @@ services:
   rental-operations:
     environment:
       Kafka__BootstrapServers: kafka:9092
+  rider-manager:
+    environment:
+      Kafka__BootstrapServers: kafka:9092
+  kafka-init:
+    image: apache/kafka:4.3.1
+    networks: [projecty]
+    volumes: [./deploy/kafka/topics.txt:/topics.txt:ro]
+    entrypoint: [/bin/bash, -c]
+    command:
+      - |
+        set -e
+        while read -r topic; do
+          [[ -z "$$topic" || "$$topic" == \#* ]] && continue
+          /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic "$$topic" --partitions 3 --replication-factor 1 --config retention.ms=604800000
+        done < <(tr -d '\r' < /topics.txt)
+    depends_on:
+      kafka: {condition: service_healthy}
+  risk-pricing:
+    image: projecty/risk-pricing:dev
+    build: {context: ., dockerfile: services/risk-pricing/Dockerfile}
+    networks: [projecty]
+    volumes: [risk-state:/data]
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      S3_ENDPOINT: http://minio:9000
+      S3_BUCKET: my-bucket
+      AWS_ACCESS_KEY_ID: '${MINIO_USER:?Set MINIO_USER}'
+      AWS_SECRET_ACCESS_KEY: '${MINIO_PASSWORD:?Set MINIO_PASSWORD}'
+      AWS_DEFAULT_REGION: us-east-1
+      OTEL_SERVICE_NAME: risk-pricing
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://localhost:8093/health/ready', timeout=2)"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+    depends_on:
+      kafka-init: {condition: service_completed_successfully}
   kafka:
     image: apache/kafka:4.3.1
     networks: [projecty]
@@ -62,8 +100,10 @@ services:
       retries: 12
     depends_on:
       cassandra-init: {condition: service_completed_successfully}
+      kafka-init: {condition: service_completed_successfully}
       kafka: {condition: service_healthy}
       redis: {condition: service_healthy}
 volumes:
+  risk-state:
   polyglot-kafka:
   polyglot-cassandra:

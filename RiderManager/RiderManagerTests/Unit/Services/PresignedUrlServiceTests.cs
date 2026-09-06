@@ -39,6 +39,12 @@ public sealed class PresignedUrlServiceTests
 
         var stored = await context.PresignedUrls.SingleAsync();
         Assert.Equal("internal-rider-id", stored.RiderId);
+        var pending = await context.EventOutbox.SingleAsync();
+        Assert.Equal("document.stored", pending.Topic);
+        var fact = ProjectY.Events.RiderEvent.Parser.ParseFrom(pending.Payload);
+        Assert.Equal("auth-user-id", fact.RiderId);
+        Assert.Equal("12345678901", fact.CnhNumber);
+        Assert.Equal(stored.ObjectName, fact.ObjectKey);
 
         var (isExpired, upload) = await service.GetOrCreatePresignedUrlAsync("auth-user-id");
         Assert.True(isExpired);
