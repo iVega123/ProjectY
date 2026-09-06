@@ -3,6 +3,14 @@ defmodule ProjectYTelemetry.Store do
   require OpenTelemetry.Tracer, as: Tracer
   @redis ProjectYTelemetry.Redis
   @ttl 7_776_000
+  # Shared across rentals and replicas: one row/second bounds each rider/day partition.
+  def reserve_position(rider) do
+    case Redix.command(@redis, ["SET", "tracking:rate:" <> rider, "1", "NX", "PX", "1000"]) do
+      {:ok, "OK"} -> :ok
+      _ -> {:error, :rate_limited}
+    end
+  end
+
   def apply_event(event, topic) do
     script = """
     local prior = tonumber(redis.call('GET', KEYS[1]) or '-1')
@@ -55,32 +63,45 @@ defmodule ProjectYTelemetry.Store do
   def put(id, rider, p) do
     case Redix.command(@redis, ["SET", "tracking:last:" <> id, Jason.encode!(p), "EX", @ttl]) do
       {:ok, "OK"} ->
-        Tracer.with_span "cassandra.position", %{attributes: %{"db.system.name" => "cassandra"}} do
-          day = DateTime.from_unix!(p.recorded_at, :millisecond) |> DateTime.to_date()
-
-          statement =
-            "INSERT INTO projecty.rider_positions (rider_id, day, recorded_at, latitude, longitude, rental_id) VALUES (?, ?, ?, ?, ?, ?) USING TTL #{@ttl}"
-
-          with {:ok, query} <- Xandra.prepare(ProjectYTelemetry.Cassandra, statement),
-               {:ok, _} <-
-                 Xandra.execute(ProjectYTelemetry.Cassandra, query, [
-                   rider,
-                   day,
-                   p.recorded_at,
-                   p.latitude,
-                   p.longitude,
-                   id
-                 ]) do
-            :ok
-          else
-            _ -> Logger.warning("tracking history unavailable; live position retained in Redis")
-          end
-        end
-
+        history(id, rider, p)
         :ok
 
       _ ->
         {:error, :redis}
     end
+  end
+
+  defp history(id, rider, p) do
+    Tracer.with_span "cassandra.position", %{attributes: %{"db.system.name" => "cassandra"}} do
+      day = DateTime.from_unix!(p.recorded_at, :millisecond) |> DateTime.to_date()
+
+      statement =
+        "INSERT INTO projecty.rider_positions (rider_id, day, recorded_at, latitude, longitude, rental_id) VALUES (?, ?, ?, ?, ?, ?) USING TTL #{@ttl}"
+
+      with {:ok, query} <-
+             Xandra.prepare(ProjectYTelemetry.Cassandra, statement, timeout: 500),
+           {:ok, _} <-
+             Xandra.execute(
+               ProjectYTelemetry.Cassandra,
+               query,
+               [
+                 rider,
+                 day,
+                 p.recorded_at,
+                 p.latitude,
+                 p.longitude,
+                 id
+               ],
+               timeout: 500
+             ) do
+        :ok
+      else
+        _ -> Logger.warning("tracking history unavailable; live position retained in Redis")
+      end
+    end
+  catch
+    :exit, _ ->
+      Logger.warning("tracking history connection unavailable; live position retained in Redis")
+      :ok
   end
 end

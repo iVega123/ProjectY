@@ -12,8 +12,9 @@ console obtains it only after a gateway-authorized rental read. The channel
 rechecks expiry and active ownership for writes. Client timestamps are ignored.
 
 Cassandra uses ((rider_id, day), recorded_at) with 90-day TTL. One accepted
-position per second bounds a day partition to 86,400 rows per rider per active
-rental. Redis keeps the last position and active rental state with the same TTL.
+position per second, reserved atomically in shared Redis across rentals and
+replicas, bounds each rider/day partition to 86,400 rows. Redis keeps the last
+position and active rental state with the same TTL.
 Instances must share Redis and connect BEAM distribution for cross-node Presence.
 
 ## Alternatives and costs

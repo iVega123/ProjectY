@@ -47,6 +47,7 @@ defmodule ProjectYTelemetry.Rental do
     with true <- Store.owner(state.id) == state.rider,
          true <- now - state.accepted_at >= 1000,
          {:ok, position} <- validate(payload, now),
+         :ok <- Store.reserve_position(state.rider),
          :ok <- Store.put(state.id, state.rider, position) do
       Tracer.with_span "tracking.position", %{attributes: %{"messaging.system" => "phoenix"}} do
         {:reply, {:ok, position}, %{state | last: position, accepted_at: now}}
