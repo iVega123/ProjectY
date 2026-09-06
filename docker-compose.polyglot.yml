@@ -1,4 +1,21 @@
 services:
+  console:
+    image: projecty/console:dev
+    build: {context: services/console}
+    networks: [projecty]
+    ports: ['127.0.0.1:3001:3001']
+    environment:
+      GATEWAY_URL: http://api-gateway:8090
+      CONSOLE_ORIGIN: http://localhost:3001
+      TELEMETRY_PUBLIC_URL: ws://localhost:4000/socket/websocket
+      TELEMETRY_TICKET_KEY: '${GATEWAY_IDENTITY_SIGNING_KEY:?Set local signing key}'
+      TEMPO_URL: http://tempo:3200
+      PROMETHEUS_URL: http://prometheus:9090
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://localhost:3001/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
   rental-operations:
     environment:
       Kafka__BootstrapServers: kafka:9092

@@ -6,6 +6,7 @@ param(
     [string]$Duration = '30s',
     [switch]$KeepStack,
     [switch]$PrepareOnly,
+    [switch]$Polyglot,
     [switch]$NoBuild
 )
 $ErrorActionPreference = 'Stop'
@@ -26,7 +27,9 @@ try {
         & "$PSScriptRoot/New-LocalSecrets.ps1" -OutputPath (Join-Path $root '.env.load') -RabbitMqDefinitionsPath (Join-Path $root '.env.load-rabbitmq.json')
     }
     New-Item -ItemType Directory -Force load/results | Out-Null
-    $json = docker compose --env-file .env.load -f docker-compose.yml -f docker-compose.chaos.yml config --format json
+    $composeFiles = @('-f', 'docker-compose.yml', '-f', 'docker-compose.chaos.yml')
+    if ($Polyglot) { $composeFiles += @('-f', 'docker-compose.polyglot.yml') }
+    $json = docker compose --env-file .env.load @composeFiles config --format json
     if ($LASTEXITCODE) { throw 'Benchmark model generation failed.' }
     $model = $json | ConvertFrom-Json
     $model.name = $project
@@ -61,6 +64,13 @@ try {
         @('grafana',3000,13000), @('prometheus',9090,19090))) {
         Set-Field $model.services.($port[0]) 'ports' @(@{target=$port[1];published=[string]$port[2];host_ip='127.0.0.1';protocol='tcp'})
     }
+    if ($Polyglot) {
+        Set-Field $model.services.console 'ports' @(@{target=3001;published='13001';host_ip='127.0.0.1';protocol='tcp'})
+        Set-Field $model.services.telemetry 'ports' @(@{target=4000;published='14000';host_ip='127.0.0.1';protocol='tcp'})
+        $model.services.console.environment.CONSOLE_ORIGIN = 'http://localhost:13001'
+        $model.services.console.environment.TELEMETRY_PUBLIC_URL = 'ws://localhost:14000/socket/websocket'
+        $model.services.telemetry.environment | Add-Member -NotePropertyName TELEMETRY_ORIGINS -NotePropertyValue '//localhost:13001' -Force
+    }
     Set-Field $model.services 'k6-load' @{
         image='grafana/k6:2.2.0'; user='0:0'; profiles=@('load'); networks=@('projecty')
         command=@('run','--out','experimental-prometheus-rw','/scripts/rental-flow.js')
@@ -76,7 +86,9 @@ try {
     }
     $model | ConvertTo-Json -Depth 100 | Set-Content -LiteralPath $fixture -Encoding utf8
     [string[]]$build = if ($NoBuild) { @() } else { @('--build') }
-    Compose up @build -d --wait --wait-timeout 300 api-gateway grafana minio
+    $startServices = @('api-gateway', 'grafana', 'minio')
+    if ($Polyglot) { $startServices += @('console', 'telemetry', 'risk-pricing') }
+    Compose up @build -d --wait --wait-timeout 300 @startServices
     # Only this generated project and its fresh, separately named volumes are touched.
     Get-Content load/fixtures/seed-rider.sql -Raw | docker compose -p $project -f $fixture exec -T postgres sh -c 'exec psql -U "$POSTGRES_USER" -d "$RIDER_MANAGER_POSTGRES_DB" -v ON_ERROR_STOP=1'
     if ($LASTEXITCODE) { throw 'Rider fixture failed.' }
