@@ -1,0 +1,69 @@
+services:
+  rental-operations:
+    environment:
+      Kafka__BootstrapServers: kafka:9092
+  kafka:
+    image: apache/kafka:4.3.1
+    networks: [projecty]
+    environment:
+      KAFKA_NODE_ID: "1"
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "1"
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: "1"
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: "1"
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      CLUSTER_ID: 5L6g3nShT-eMCtK--X86sw
+    volumes: [polyglot-kafka:/var/lib/kafka/data]
+    healthcheck:
+      test: [CMD-SHELL, /opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 >/dev/null 2>&1]
+      interval: 10s
+      timeout: 10s
+      retries: 20
+  cassandra:
+    image: cassandra:5.0
+    networks: [projecty]
+    environment:
+      MAX_HEAP_SIZE: 1G
+      HEAP_NEWSIZE: 128M
+    volumes: [polyglot-cassandra:/var/lib/cassandra, ./deploy/db/cassandra:/schema:ro]
+    healthcheck:
+      test: [CMD-SHELL, "cqlsh -e 'DESCRIBE KEYSPACES' >/dev/null 2>&1"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+  cassandra-init:
+    image: cassandra:5.0
+    networks: [projecty]
+    volumes: [./deploy/db/cassandra:/schema:ro]
+    entrypoint: [cqlsh, cassandra, -f, /schema/001_init.cql]
+    depends_on:
+      cassandra: {condition: service_healthy}
+  telemetry:
+    image: projecty/telemetry:dev
+    build: {context: services/telemetry}
+    networks: [projecty]
+    ports: ['127.0.0.1:4000:4000']
+    environment:
+      TELEMETRY_SECRET_KEY_BASE: '${GATEWAY_IDENTITY_SIGNING_KEY:?Set local signing key}'
+      TELEMETRY_TICKET_KEY: '${GATEWAY_IDENTITY_SIGNING_KEY:?Set local signing key}'
+      OTEL_SERVICE_NAME: telemetry
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+      OTEL_EXPORTER_OTLP_PROTOCOL: http_protobuf
+    healthcheck:
+      test: [CMD, curl, --fail, --silent, http://localhost:4000/health/ready]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+    depends_on:
+      cassandra-init: {condition: service_completed_successfully}
+      kafka: {condition: service_healthy}
+      redis: {condition: service_healthy}
+volumes:
+  polyglot-kafka:
+  polyglot-cassandra:

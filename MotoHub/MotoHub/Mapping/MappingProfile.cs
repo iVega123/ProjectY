@@ -9,6 +9,7 @@ namespace MotoHub.Mapping
         public MappingProfile()
         {
             CreateMap<MotorcycleDTO, Motorcycle>()
+                .ForMember(motorcycle => motorcycle.Id, options => options.Ignore())
                 .ForMember(motorcycle => motorcycle.RetiredAtUtc, options => options.Ignore())
                 .ForMember(motorcycle => motorcycle.RetirementReason, options => options.Ignore());
             CreateMap<Motorcycle, MotorcycleDTO>();

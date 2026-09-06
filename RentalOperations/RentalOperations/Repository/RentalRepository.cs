@@ -23,6 +23,7 @@ namespace RentalOperations.Repository
         {
             try
             {
+                rental.PendingEvents.Add(RentalEventEnvelope.Create(rental, "rental.started"));
                 await _rentals.InsertOneAsync(rental);
             }
             catch (MongoWriteException exception)
@@ -104,6 +105,9 @@ namespace RentalOperations.Repository
 
         public async Task UpdateRentalAsync(Rental rental)
         {
+            if (rental.Status == RentalStatus.Completed &&
+                !rental.PendingEvents.Any(e => e.Topic == "rental.closed"))
+                rental.PendingEvents.Add(RentalEventEnvelope.Create(rental, "rental.closed"));
             await _rentals.ReplaceOneAsync(r => r._id == rental._id, rental);
         }
 
