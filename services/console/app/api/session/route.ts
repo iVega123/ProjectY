@@ -11,5 +11,5 @@ export async function POST(request:Request) {
     return Response.json({signedIn:true});
   } catch(error) {return failure(error)}
 }
-export async function GET() {try {const data = await session(); return Response.json({userId:data.userId,rentals:data.rentals})} catch(error) {return failure(error)}}
+export async function GET(request:Request) {try {const data = await session(new URL(request.url).searchParams.get('cursor') ?? ''); return Response.json({userId:data.userId,rentals:data.rentals})} catch(error) {return failure(error)}}
 export async function DELETE(request:Request) {try {sameOrigin(request); (await cookies()).delete('projecty-session'); return Response.json({signedIn:false})} catch(error) {return failure(error)}}

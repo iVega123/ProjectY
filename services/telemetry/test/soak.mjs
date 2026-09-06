@@ -1,7 +1,7 @@
 import {createHmac} from 'node:crypto';
 import assert from 'node:assert/strict';
 const seconds=Number(process.env.SOAK_SECONDS ?? 30);
-assert.ok(seconds>=5 && seconds<=3600);
+assert.ok(seconds>=5 && seconds<=280,'SOAK_SECONDS must fit within the five-minute tracking ticket (5–280 seconds)');
 const rental=process.env.TRACKING_RENTAL_ID ?? 'integration-rental';
 const rider=process.env.TRACKING_RIDER_ID ?? 'integration-rider';
 const key=process.env.TELEMETRY_TICKET_KEY ?? process.env.GATEWAY_IDENTITY_SIGNING_KEY;

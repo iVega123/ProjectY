@@ -19,10 +19,15 @@ async function create(plate) {
 }
 const suffix=String(Date.now()%1000).padStart(3,'0');
 const action=await create('KAA8'+suffix);
-const session=await get('/api/session');
-const rental=session.rentals.items.find(r=>r.motocycleLicencePlate===action.plate);
+let cursor='',rental;
+for(let page=0;page<100;page++) {
+  const session=await get('/api/session'+(cursor?'?cursor='+encodeURIComponent(cursor):''));
+  rental=session.rentals.items.find(r=>r.motocycleLicencePlate===action.plate);
+  if(rental || !session.rentals.nextCursor) break;
+  cursor=session.rentals.nextCursor;
+}
 assert.ok(rental);
-const auth=await get('/api/tracking?rentalId='+rental.rentalId);
+const auth=await get('/api/tracking?rentalId='+rental.rentalId+'&cursor='+encodeURIComponent(cursor));
 let socket;
 const position=await new Promise((resolve,reject)=>{
   const timeout=setTimeout(()=>reject(new Error('Position not received')),20000);
@@ -54,6 +59,6 @@ assert.ok(spans.some(s=>s.service==='risk-pricing'),'Missing risk consumer trace
 const metrics=await get('/api/metrics');
 const report={measuredAt:new Date().toISOString(),action:{...action,grant:undefined},rentalId:rental.rentalId,position,services:[...new Set(spans.map(s=>s.service))],spans,metrics};
 writeFileSync('docs/measurements/polyglot-api.json',JSON.stringify(report,null,2)+'\n');
-writeFileSync('.env.console-session.json',JSON.stringify({token,cookie,rentalId:rental.rentalId,action}));
+writeFileSync('.env.console-session.json',JSON.stringify({token,cookie,rentalId:rental.rentalId,cursor,action}));
 socket.close();
 console.log(JSON.stringify({integration:'passed',services:report.services,spanCount:spans.length,metrics}));

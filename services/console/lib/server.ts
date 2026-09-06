@@ -16,9 +16,10 @@ export async function upstream(path: string, value: string, init: RequestInit = 
   return fetch(gateway + path, {...init, cache:'no-store', signal:AbortSignal.timeout(10000),
     headers:{'Authorization':'Bearer '+value, ...init.headers}});
 }
-export async function session(): Promise<{token:string; userId:string; rentals:RentalPage}> {
+export async function session(cursor = ''): Promise<{token:string; userId:string; rentals:RentalPage}> {
+  if(cursor.length > 2048) throw new Error('Invalid rental cursor');
   const value = await token();
-  const result = await upstream('/api/Rental/user?pageSize=100', value);
+  const result = await upstream('/api/Rental/user?pageSize=100'+(cursor?'&cursor='+encodeURIComponent(cursor):''), value);
   if (!result.ok) throw new Error(result.status === 429 ? 'Gateway rate limit; retry shortly.' : 'Session unavailable. Sign in again.');
   // Claims are read only after the gateway has validated signature, issuer, audience and revocation.
   const claims = JSON.parse(Buffer.from(value.split('.')[1], 'base64url').toString());

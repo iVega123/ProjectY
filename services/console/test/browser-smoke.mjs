@@ -24,6 +24,23 @@ const browser=await chromium.launch({headless:true,args:['--no-sandbox']});
 const page=await browser.newPage({viewport:{width:1440,height:1120},deviceScaleFactor:1,
   geolocation:{latitude:-3.119,longitude:-60.021},permissions:['geolocation']});
 const failures=[];
+async function selectRental(id) {
+  const picker=page.getByLabel('Active rental');
+  for(let n=0;n<100;n++) {
+    if(await picker.locator(`option[value="${id}"]`).count()) {await picker.selectOption(id);return}
+    const pending=page.waitForResponse(r=>r.url().includes('/api/session?cursor='));
+    await page.getByRole('button',{name:'Next rental page →',exact:true}).click();
+    const result=await pending;
+    const data=await result.json();
+    if(result.status()===400 && data.error?.includes('rate limit')) {
+      await page.waitForTimeout(2000);
+      continue;
+    }
+    assert.equal(result.status(),200);
+    await picker.locator(`option[value="${data.rentals.items[0].rentalId}"]`).waitFor({state:'attached'});
+  }
+  throw new Error('Fixture rental not found in paginated console');
+}
 page.on('pageerror',e=>failures.push(e.message));
 mkdirSync('docs/images',{recursive:true});
 try {
@@ -33,7 +50,7 @@ try {
   await page.getByRole('button',{name:'Connect ↗',exact:true}).click();
   await page.getByText('Session connected',{exact:true}).waitFor();
   const fixture=JSON.parse(readFileSync('.env.console-session.json','utf8'));
-  await page.getByLabel('Active rental').selectOption(fixture.rentalId);
+  await selectRental(fixture.rentalId);
   await page.getByText('Connected',{exact:true}).waitFor({timeout:30000});
   await page.getByText('-3.11900, -60.02100',{exact:true}).waitFor();
   await page.getByRole('button',{name:'Send my location ↗',exact:true}).click();
@@ -58,6 +75,7 @@ try {
   await page.screenshot({path:'docs/images/console-load-generator.png',fullPage:true});
 
   await page.getByRole('button',{name:'Live map'}).click();
+  await selectRental(fixture.rentalId);
   await page.getByText('-3.11900, -60.02100',{exact:true}).waitFor();
   await page.getByText('Connected',{exact:true}).waitFor({timeout:60000});
   writeFileSync('.env.console-freeze-ready','ready');

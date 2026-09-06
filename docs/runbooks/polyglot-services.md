@@ -43,6 +43,11 @@ and disconnected. The capture report records successful checks and browser error
 
 ## Targeted checks
 
+Console, telemetry and risk-pricing use Alpine runtime images with package updates
+applied at build time. The Python image compiles librdkafka 2.15.0 from the official
+checksum-verified source because Alpine's packaged library is older than the client
+requires; temporary compiler dependencies are removed after installation.
+
 * Rust: `cargo test --manifest-path services/media-guard/Cargo.toml --locked`;
   `cargo clippy --manifest-path services/media-guard/Cargo.toml --locked --all-targets -- -D warnings`.
 * Elixir: `mix format --check-formatted` and `mix test` in services/telemetry.

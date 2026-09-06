@@ -19,6 +19,8 @@ These probes are functional acceptance evidence, not a production capacity claim
 | Failure isolation | With risk and telemetry stopped, rental creation returned 200 in 21.39 ms and listing returned 200; both services restored |
 | Developer configuration | Core and full Tilt models evaluated successfully |
 | Delivery configuration | Actionlint passed; Prometheus accepted the score-staleness alert |
+| Runtime image security | Local Grype 0.118.0 scans of the final Alpine console, telemetry and risk-pricing images passed the Critical gate; no vulnerability suppressions added |
+| Rental pagination | API and browser acceptance selected and tracked a rental beyond the first 100 results |
 
 Machine-readable evidence: [API trace](polyglot-api.json),
 [browser checks](polyglot-browser.json), [failure isolation](polyglot-degradation.json).
