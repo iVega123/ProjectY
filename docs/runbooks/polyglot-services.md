@@ -20,6 +20,25 @@ contract; replacing identity remains #136. This is explicit in ADR 0021.
 
 ## Isolated acceptance environment
 
+### Existing RabbitMQ installations
+
+New installations use `cmd.rider.register`, `cmd.rider.store-document` and
+`cmd.rental.update-licence`. Before upgrading an existing installation, pause
+command-producing traffic and let the old application drain its database outboxes,
+ready/unacknowledged messages and delayed retries. Resolve or archive poison
+messages explicitly; do not delete broker volumes to perform this update.
+
+Run `scripts/Update-CommandQueueNames.ps1` against the existing definitions file,
+then import that file with RabbitMQ's `rabbitmqctl import_definitions` using its
+mounted container path (or restart the broker to load its configured definitions).
+The script adds the new names and ACLs while preserving credentials, old queues
+and old permissions. Deploy all four .NET applications together, verify command
+delivery, then resume writes. To roll back, use the previous applications and
+drain or replay any new pending commands before reverting producers; no queue is
+automatically removed. This is a queue naming update, independent of #130.
+
+### Prepare the fixture
+
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts/Run-LoadTest.ps1 -PrepareOnly -Polyglot
 node services/console/test/stack-smoke.mjs

@@ -40,8 +40,10 @@ unmeasured production throughput or monetary saving is claimed here.
 
 ## RabbitMQ commands and Kafka facts
 
-RabbitMQ keeps addressed work requests and their processing acknowledgements
-(for example existing rider/image work queues). Kafka carries immutable facts:
+RabbitMQ keeps addressed work requests and their processing acknowledgements:
+`cmd.rider.register`, `cmd.rider.store-document` and `cmd.rental.update-licence`.
+Retry queues retain the command prefix; exhausted deliveries reach `cmd.rider.dead`
+or `cmd.rental.licence-update.dead`. Kafka carries immutable facts:
 document.stored, document.verified, rider.verified, rental.started,
 rental.closed, risk.scored and pricing.updated. A command asks an owner to do
 something; a fact reports a state transition and can fan out to independent
@@ -50,6 +52,10 @@ consumer groups. They have different delivery and replay contracts.
 Database outboxes cross the commit/publish boundary. Consumers use IDs and
 source timestamps because delivery can repeat or arrive out of order. Event
 contracts follow Protobuf ADR 0015, keyed by immutable aggregate identity.
+MongoDB remains the most replaceable active store: PostgreSQL JSONB could own
+the rental documents and projections without another database process. Keeping
+it here accepts a separate backup and operational surface until #130; this epic
+does not claim MongoDB is required for the workload.
 Registry governance is #132, and additional identity/billing/BFF services
 #136–#138 are outside the original epic scope.
 

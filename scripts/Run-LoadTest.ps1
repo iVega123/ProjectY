@@ -26,6 +26,7 @@ try {
     if (-not (Test-Path '.env.load')) {
         & "$PSScriptRoot/New-LocalSecrets.ps1" -OutputPath (Join-Path $root '.env.load') -RabbitMqDefinitionsPath (Join-Path $root '.env.load-rabbitmq.json')
     }
+    & "$PSScriptRoot/Update-CommandQueueNames.ps1" -DefinitionsPath (Join-Path $root '.env.load-rabbitmq.json')
     New-Item -ItemType Directory -Force load/results | Out-Null
     $composeFiles = @('-f', 'docker-compose.yml', '-f', 'docker-compose.chaos.yml')
     if ($Polyglot) { $composeFiles += @('-f', 'docker-compose.polyglot.yml') }
@@ -85,6 +86,8 @@ try {
             @{type='bind';source=(Join-Path $root 'load/results');target='/results'})
     }
     $model | ConvertTo-Json -Depth 100 | Set-Content -LiteralPath $fixture -Encoding utf8
+    Compose up -d --wait --wait-timeout 180 rabbitmq
+    Compose exec -T rabbitmq rabbitmqctl import_definitions /etc/rabbitmq/definitions.json
     [string[]]$build = if ($NoBuild) { @() } else { @('--build') }
     $startServices = @('api-gateway', 'grafana', 'minio')
     if ($Polyglot) { $startServices += @('console', 'telemetry', 'risk-pricing') }
