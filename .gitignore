@@ -39,6 +39,13 @@ bld/
 [Oo]bj/
 [Oo]ut/
 **/target/
+**/_build/
+**/deps/
+**/node_modules/
+**/.next/
+**/__pycache__/
+**/.venv/
+**/.pytest_cache/
 msbuild.log
 msbuild.err
 msbuild.wrn

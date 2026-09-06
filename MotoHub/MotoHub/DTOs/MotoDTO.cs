@@ -5,6 +5,7 @@ namespace MotoHub.DTOs
 {
     public class MotorcycleDTO
     {
+        public string? Id { get; set; }
         [PlausibleVehicleYear]
         public int Year { get; set; }
 

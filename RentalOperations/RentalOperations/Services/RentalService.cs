@@ -69,6 +69,7 @@ namespace RentalOperations.Services
             var rentalDomain = RentalDomain.Create(createDto, userId);
             var rental = new Rental
             {
+                MotorcycleId = motorcycle.id,
                 MotorcycleLicencePlate = rentalDomain.MotocycleLicencePlate,
                 UserId = rentalDomain.UserId,
                 StartDate = rentalDomain.StartDate,
