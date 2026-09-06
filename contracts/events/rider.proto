@@ -1,0 +1,12 @@
+syntax = "proto3";
+package project_y.events;
+message RiderEvent {
+  optional string event_id = 1;
+  optional string rider_id = 2;
+  optional int64 occurred_at_ms = 3;
+  optional string object_key = 4;
+  optional string cnh_number = 5;
+  optional bool verified = 6;
+  optional int32 risk_score = 7;
+  optional string pricing_json = 8;
+}

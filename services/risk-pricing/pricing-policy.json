@@ -1,0 +1,12 @@
+{
+  "version": "2026-09-05.1",
+  "currency": "BRL",
+  "default_tier": "conservative",
+  "tiers": [
+    {"max_days": 7, "daily_minor": 3000},
+    {"max_days": 15, "daily_minor": 2800},
+    {"max_days": 30, "daily_minor": 2200},
+    {"max_days": 45, "daily_minor": 2000},
+    {"max_days": 36500, "daily_minor": 1800}
+  ]
+}

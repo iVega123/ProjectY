@@ -13,6 +13,7 @@ namespace RiderManager.Data
         public DbSet<PresignedUrl> PresignedUrls { get; set; }
         public DbSet<InboxMessage> InboxMessages { get; set; }
         public DbSet<InboxImagePart> InboxImageParts { get; set; }
+        public DbSet<RiderEventEnvelope> EventOutbox { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {

@@ -8,6 +8,7 @@ FROM restore AS publish
 COPY RentalOperations/RentalOperations/ RentalOperations/RentalOperations/
 COPY Shared/ Shared/
 COPY contracts/ contracts/
+COPY services/risk-pricing/pricing-policy.json services/risk-pricing/
 RUN dotnet publish RentalOperations/RentalOperations/RentalOperations.csproj \
     --configuration Release \
     --output /app/publish \

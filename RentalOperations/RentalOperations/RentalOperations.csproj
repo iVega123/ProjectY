@@ -45,5 +45,7 @@
   <ItemGroup><Compile Include="..\..\Shared\Messaging\BoundedRabbitMqRetryRouter.cs" Link="Shared\Messaging\BoundedRabbitMqRetryRouter.cs" /></ItemGroup>
   <ItemGroup>
     <Protobuf Include="../../contracts/events/rental.proto" GrpcServices="None" />
+    <Protobuf Include="../../contracts/events/rider.proto" GrpcServices="None" />
+    <Content Include="../../services/risk-pricing/pricing-policy.json" Link="pricing-policy.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

@@ -62,6 +62,7 @@ namespace RiderManager.Services.PreSignedService
                 _context.PresignedUrls.Add(presignedUrl);
             }
 
+            _context.EventOutbox.Add(RiderEventEnvelope.Document(rider, uploadedFile.FileName));
             await _context.SaveChangesAsync();
         }
     }
