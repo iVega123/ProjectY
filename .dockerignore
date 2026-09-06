@@ -13,5 +13,17 @@
 !RiderManager/RiderManager/**
 !Shared/
 !Shared/**
+!contracts/
+!contracts/**
+!services/
+!services/risk-pricing/
+!services/risk-pricing/**
+!services/console/
+!services/console/**
+**/node_modules/
+**/.next/
+**/__pycache__/
+**/.pytest_cache/
+**/.venv/
 **/bin/
 **/obj/

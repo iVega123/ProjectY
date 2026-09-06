@@ -1,5 +1,6 @@
 import Config
 config :phoenix, :json_library, Jason
+config :phoenix, :filter_parameters, ["ticket"]
 
 config :projecty_telemetry, ProjectYTelemetry.Endpoint,
   adapter: Bandit.PhoenixAdapter,

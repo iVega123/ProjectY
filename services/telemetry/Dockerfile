@@ -13,6 +13,7 @@ ENV MIX_ENV=prod
 RUN mix deps.get --only prod && mix compile && mix release
 
 FROM debian:bookworm-slim AS final
+ENV LANG=C.UTF-8
 RUN apt-get update && apt-get install -y --no-install-recommends libstdc++6 openssl libncurses6 ca-certificates curl && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY --from=builder /workspace/_build/prod/rel/projecty_telemetry ./
