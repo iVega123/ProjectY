@@ -17,7 +17,9 @@ public sealed class RentalEventEnvelope
         var time = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         var message = new RentalEvent
         {
-            EventId = id, RentalId = rental._id!.Value.ToString(), RiderId = rental.UserId,
+            EventId = id,
+            RentalId = rental._id!.Value.ToString(),
+            RiderId = rental.UserId,
             MotorcycleId = rental.MotorcycleId,
             OccurredAtMs = time,
             PlanDays = (rental.PredictedEndDate - rental.StartDate).Days,

@@ -20,8 +20,11 @@ public sealed class RentalEventTests : IAsyncLifetime
         var repository = new RentalRepository(context);
         var rental = new Rental
         {
-            MotorcycleId = "immutable-moto-1", MotorcycleLicencePlate = "ABC1D23", UserId = "rider-1",
-            StartDate = DateTime.UtcNow, PredictedEndDate = DateTime.UtcNow.AddDays(7)
+            MotorcycleId = "immutable-moto-1",
+            MotorcycleLicencePlate = "ABC1D23",
+            UserId = "rider-1",
+            StartDate = DateTime.UtcNow,
+            PredictedEndDate = DateTime.UtcNow.AddDays(7)
         };
         await repository.CreateRentalAsync(rental);
         var saved = await repository.GetRentalByIdAsync(rental._id!.Value.ToString());
