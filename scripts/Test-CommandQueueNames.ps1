@@ -25,5 +25,5 @@ try {
     if ([IO.File]::ReadAllText($fixture) -ne $first) { throw 'Update is not idempotent' }
     Write-Host 'PASS: existing queues, credentials, bounded ACLs and idempotent upgrade'
 } finally {
-    if (Test-Path -LiteralPath $fixture) { Remove-Item -LiteralPath $fixture }
+    if (Test-Path -LiteralPath $fixture) { Remove-Item -LiteralPath $fixture -Force }
 }
