@@ -180,10 +180,10 @@ $rabbitMqPermissions = @(
     [ordered]@{ user = $values.RABBITMQ_ADMIN_USER; vhost = "projecty"; configure = ".*"; write = ".*"; read = ".*" },
     [ordered]@{ user = $values.RABBITMQ_ADMIN_USER; vhost = "projecty-rider"; configure = ".*"; write = ".*"; read = ".*" },
     [ordered]@{ user = $values.RABBITMQ_ADMIN_USER; vhost = "projecty-rental"; configure = ".*"; write = ".*"; read = ".*" },
-    [ordered]@{ user = $values.AUTH_GATE_RABBITMQ_USER; vhost = "projecty-rider"; configure = "^(rider_info_queue|image_stream_queue)$"; write = "^(amq\.default|rider_info_queue|image_stream_queue)$"; read = "^$" },
-    [ordered]@{ user = $values.RIDER_MANAGER_RABBITMQ_USER; vhost = "projecty-rider"; configure = "^(rider_info_queue(\.(retry\.[1-3]|redelivery|dead))?|image_stream_queue(\.(retry\.[1-3]|redelivery|dead))?|rider_info_poison_queue)$"; write = "^(amq\.default|rider_info_queue(\.(retry\.[1-3]|redelivery|dead))?|image_stream_queue(\.(retry\.[1-3]|redelivery|dead))?|rider_info_poison_queue)$"; read = "^(rider_info_queue(\.(retry\.[1-3]|redelivery|dead))?|image_stream_queue(\.(retry\.[1-3]|redelivery|dead))?|rider_info_poison_queue)$" },
-    [ordered]@{ user = $values.MOTO_HUB_RABBITMQ_USER; vhost = "projecty-rental"; configure = "^licence_update_queue$"; write = "^(amq\.default|licence_update_queue)$"; read = "^$" },
-    [ordered]@{ user = $values.RENTAL_OPERATIONS_RABBITMQ_USER; vhost = "projecty-rental"; configure = "^(licence_update_queue(\.(retry\.[1-3]|redelivery|dead))?|licence_update_poison_queue)$"; write = "^(amq\.default|licence_update_queue(\.(retry\.[1-3]|redelivery|dead))?|licence_update_poison_queue)$"; read = "^(licence_update_queue(\.(retry\.[1-3]|redelivery|dead))?|licence_update_poison_queue)$" },
+    [ordered]@{ user = $values.AUTH_GATE_RABBITMQ_USER; vhost = "projecty-rider"; configure = "^(cmd\.rider\.register|cmd\.rider\.store-document)$"; write = "^(amq\.default|cmd\.rider\.register|cmd\.rider\.store-document)$"; read = "^$" },
+    [ordered]@{ user = $values.RIDER_MANAGER_RABBITMQ_USER; vhost = "projecty-rider"; configure = "^(cmd\.rider\.register(\.(retry\.[1-3]|redelivery|dead))?|cmd\.rider\.store-document(\.(retry\.[1-3]|redelivery|dead))?|cmd\.rider\.dead)$"; write = "^(amq\.default|cmd\.rider\.register(\.(retry\.[1-3]|redelivery|dead))?|cmd\.rider\.store-document(\.(retry\.[1-3]|redelivery|dead))?|cmd\.rider\.dead)$"; read = "^(cmd\.rider\.register(\.(retry\.[1-3]|redelivery|dead))?|cmd\.rider\.store-document(\.(retry\.[1-3]|redelivery|dead))?|cmd\.rider\.dead)$" },
+    [ordered]@{ user = $values.MOTO_HUB_RABBITMQ_USER; vhost = "projecty-rental"; configure = "^cmd\.rental\.update-licence$"; write = "^(amq\.default|cmd\.rental\.update-licence)$"; read = "^$" },
+    [ordered]@{ user = $values.RENTAL_OPERATIONS_RABBITMQ_USER; vhost = "projecty-rental"; configure = "^(cmd\.rental\.update-licence(\.(retry\.[1-3]|redelivery|dead))?|cmd\.rental\.licence-update\.dead)$"; write = "^(amq\.default|cmd\.rental\.update-licence(\.(retry\.[1-3]|redelivery|dead))?|cmd\.rental\.licence-update\.dead)$"; read = "^(cmd\.rental\.update-licence(\.(retry\.[1-3]|redelivery|dead))?|cmd\.rental\.licence-update\.dead)$" },
     [ordered]@{ user = $values.RENTAL_CORE_RABBITMQ_USER; vhost = "projecty"; configure = ".*"; write = ".*"; read = ".*" },
     [ordered]@{ user = $values.MEDIA_GUARD_RABBITMQ_USER; vhost = "projecty"; configure = ".*"; write = ".*"; read = ".*" }
 )
@@ -201,9 +201,9 @@ $rabbitMqDefinitions = [ordered]@{
     global_parameters = @()
     policies = @()
     queues = @(
-        [ordered]@{ name = "rider_info_queue"; vhost = "projecty-rider"; durable = $true; auto_delete = $false; arguments = @{} },
-        [ordered]@{ name = "image_stream_queue"; vhost = "projecty-rider"; durable = $true; auto_delete = $false; arguments = @{} },
-        [ordered]@{ name = "licence_update_queue"; vhost = "projecty-rental"; durable = $true; auto_delete = $false; arguments = @{} }
+        [ordered]@{ name = "cmd.rider.register"; vhost = "projecty-rider"; durable = $true; auto_delete = $false; arguments = @{} },
+        [ordered]@{ name = "cmd.rider.store-document"; vhost = "projecty-rider"; durable = $true; auto_delete = $false; arguments = @{} },
+        [ordered]@{ name = "cmd.rental.update-licence"; vhost = "projecty-rental"; durable = $true; auto_delete = $false; arguments = @{} }
     )
     exchanges = @()
     bindings = @()

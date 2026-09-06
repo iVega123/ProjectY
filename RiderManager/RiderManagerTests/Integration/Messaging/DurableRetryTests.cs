@@ -37,8 +37,8 @@ public sealed class DurableRetryTests : IAsyncLifetime
     [Trait("Category", "Integration")]
     public async Task DelayedRetry_SurvivesBrokerRestart_QuarantinesPoison_AndDoesNotBlockGoodMessage()
     {
-        const string source = "rider_info_queue";
-        const string poison = "rider_info_poison_queue";
+        const string source = "cmd.rider.register";
+        const string poison = "cmd.rider.dead";
         var router = new BoundedRabbitMqRetryRouter();
         using (var connection = Connect())
         using (var channel = connection.CreateModel())

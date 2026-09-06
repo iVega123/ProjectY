@@ -13,6 +13,8 @@ export default function Console() {
   const [user,setUser] = useState('');
   const [rentals,setRentals] = useState<Rental[]>([]);
   const [selected,setSelected] = useState('');
+  const [cursor,setCursor] = useState('');
+  const [nextCursor,setNextCursor] = useState<string|null>(null);
   const [position,setPosition] = useState<Position|null>(null);
   const [connection,setConnection] = useState('Disconnected');
   const [presence,setPresence] = useState(0);
@@ -31,10 +33,11 @@ export default function Console() {
   const [now,setNow] = useState(0);
   const socket = useRef<WebSocket|null>(null);
   const requestId = useRef(10);
-  async function refresh() {
-    const data = await json('/api/session');
+  async function refresh(pageCursor = '') {
+    const data = await json('/api/session'+(pageCursor?'?cursor='+encodeURIComponent(pageCursor):''));
+    setCursor(pageCursor); setNextCursor(data.rentals.nextCursor);
     setUser(data.userId); setRentals(data.rentals.items);
-    setSelected(current => current || data.rentals.items.find((r:Rental) => !r.actualEndDate)?.rentalId || '');
+    setSelected(current => data.rentals.items.some((r:Rental)=>r.rentalId===current) ? current : data.rentals.items.find((r:Rental) => !r.actualEndDate)?.rentalId || '');
   }
   useEffect(() => {
     setNow(Date.now());
@@ -57,7 +60,7 @@ export default function Console() {
     async function connect() {
       try {
         setConnection('Connecting');
-        const auth = await json('/api/tracking?rentalId='+encodeURIComponent(selected));
+        const auth = await json('/api/tracking?rentalId='+encodeURIComponent(selected)+'&cursor='+encodeURIComponent(cursor));
         if(cancelled) return;
         const ws = new WebSocket(auth.socketUrl+'?vsn=2.0.0&ticket='+encodeURIComponent(auth.ticket));
         socket.current=ws;
@@ -82,7 +85,7 @@ export default function Console() {
     }
     connect();
     return () => {cancelled=true; clearTimeout(retry); clearInterval(heartbeat); socket.current?.close()};
-  },[selected,user]);
+  },[selected,user,cursor]);
   useEffect(() => {
     if(!trace) return;
     let active=true; let rounds=0;
@@ -145,6 +148,7 @@ export default function Console() {
       <section className="action-bar panel"><div><div className="eyebrow">CREATE A RENTAL</div><strong>Set a journey in motion</strong></div><label>Licence plate<input value={plate} onChange={e=>setPlate(e.target.value.toUpperCase())} placeholder="Your motorcycle plate" maxLength={7}/></label><label>Start date<input type="date" value={start} onChange={e=>setStart(e.target.value)}/></label><label>Plan<select value={days} onChange={e=>setDays(Number(e.target.value))}>{[7,15,30,45].map(n=><option key={n} value={n}>{n} days</option>)}</select></label><button disabled={!user||busy||!plate} onClick={()=>run([plate])}>{busy?'Sending…':'Start rental ↗'}</button></section>
       {tab!=='Load generator' && attempts.length>0 && <section className="panel"><Results attempts={attempts} select={a=>{setTrace({...a});setTab('System x-ray')}}/></section>}
       {rentals.length>0 && <section className="rental-list"><div className="section-heading"><h2>Your recent rentals</h2><span className="caption">{rentals.length} in the current page</span></div>{rentals.slice(0,5).map(r=><div className="rental-row" key={r.rentalId}><strong>{r.motocycleLicencePlate}</strong><span>{r.startDate.slice(0,10)} → {r.predictedEndDate.slice(0,10)}</span><span>{money(r.originalTotalCost)}</span><span className="tag">{r.actualEndDate?'CLOSED':'ACTIVE'}</span></div>)}</section>}
+      {user && <div className="load-actions"><button className="secondary" disabled={!cursor} onClick={()=>refresh().catch(e=>setError(String(e)))}>First rental page</button><button className="secondary" disabled={!nextCursor} onClick={()=>refresh(nextCursor!).catch(e=>setError(String(e)))}>Next rental page →</button></div>}
       <footer><span>PROJECT Y <b>POLYGLOT OPERATIONS</b></span><span>Live data · UTC timestamps</span>{user&&<button className="text" onClick={async()=>{await fetch('/api/session',{method:'DELETE'});setUser('');setRentals([]);setSelected('');setMetrics(null)}}>Sign out ↗</button>}</footer>
     </main></div>;
 }

@@ -53,18 +53,36 @@ source locations are in the
 | Active observability | Application OTLP exporters, OpenTelemetry Collector, Prometheus, Tempo, Loki, and Grafana |
 | Retired observability | The unauthenticated Elasticsearch, Logstash, and Kibana stack |
 | Modernization scaffold | A container topology under `deploy/` for the planned transactional core and fault injection |
-| Decision records | Eight records under [`docs/adr/`](docs/adr/README.md): 0000-0005 are the design trail, 0006-0007 are remediation decisions |
+| Polyglot services | Rust media-guard, Elixir live telemetry, asynchronous Python risk/pricing and Next.js operations console |
+| Decision records | The design and implementation trail is indexed under [`docs/adr/`](docs/adr/README.md) |
 
 The modernization compose file is a design scaffold: it references services
 that have not landed yet. The root compose file runs the audited services behind
 the Rust gateway together with the LGTM observability stack.
 
+### Operate the polyglot flow
+
+`tilt up -- --full` adds the four implemented services to the active stack.
+The console shows Phoenix positions, the real trace of a rental action, and
+bounded load batches beside queue depth, rate limits and p99. See the
+[runbook](docs/runbooks/polyglot-services.md) for startup, identity requirements
+and the isolated test profile. Runtime and datastore costs are recorded in
+[ADR 0022](docs/adr/0022-polyglot-workload-and-storage-costs.md).
+
+![Live rental tracking](docs/images/console-live-map.png)
+
+[Trace x-ray](docs/images/console-system-xray.png) ·
+[Load generator](docs/images/console-load-generator.png) ·
+[Tracking stopped](docs/images/console-tracking-frozen.png) ·
+[Measured API trace](docs/measurements/polyglot-api.json)
+
 ## Branches
 
 `main` carries every deployment variant as an overlay, so a fix lands once.
 Branches named `article/NN-*` are **frozen citations** cut when an article is
-published: they are never maintained and never accept pull requests. Target
-`main` for any change. The reasoning is in
+published: they are never maintained and never accept pull requests. Epic work
+uses `task/<issue>-*` → `epic/<issue>-*` → `main`, with validated task PRs first.
+The reasoning is in
 [ADR 0005](docs/adr/0005-repository-and-publication-strategy.md).
 
 ## Run locally

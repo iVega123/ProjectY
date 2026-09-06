@@ -18,6 +18,7 @@ RUN cargo build --release --locked --target x86_64-unknown-linux-musl
 FROM chef AS development
 COPY . .
 RUN cargo build --locked
+RUN mkdir -p /app && ln -s /workspace/target/debug/media-guard /app/media-guard
 ENTRYPOINT ["/workspace/target/debug/media-guard"]
 
 FROM gcr.io/distroless/static-debian13:nonroot AS final

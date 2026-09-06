@@ -423,6 +423,8 @@ services:
         condition: service_healthy
       rider-manager-migrations:
         condition: service_completed_successfully
+      media-guard:
+        condition: service_healthy
       rabbitmq:
         condition: service_healthy
       redis:
