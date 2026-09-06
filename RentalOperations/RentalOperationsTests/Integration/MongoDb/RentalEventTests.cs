@@ -23,8 +23,10 @@ public sealed class RentalEventTests : IAsyncLifetime
         var raw = context.Database.GetCollection<BsonDocument>("Rentals");
         var rental = new Rental
         {
-            MotorcycleLicencePlate = "OLD1234", UserId = "legacy-rider",
-            StartDate = DateTime.UtcNow.AddDays(-2), PredictedEndDate = DateTime.UtcNow.AddDays(5)
+            MotorcycleLicencePlate = "OLD1234",
+            UserId = "legacy-rider",
+            StartDate = DateTime.UtcNow.AddDays(-2),
+            PredictedEndDate = DateTime.UtcNow.AddDays(5)
         };
         var document = rental.ToBsonDocument();
         document.Remove("PendingEvents");
