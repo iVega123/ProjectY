@@ -41,7 +41,9 @@ public sealed class PresignedUrlServiceTests
         Assert.Equal("internal-rider-id", stored.RiderId);
 
         var (isExpired, upload) = await service.GetOrCreatePresignedUrlAsync("auth-user-id");
-        Assert.False(isExpired);
+        Assert.True(isExpired);
+        Assert.Null(stored.Url);
+        Assert.Equal(DateTime.UnixEpoch, stored.Expiry);
         Assert.NotNull(upload);
         Assert.Equal("auth-user-id", upload.UserId);
         Assert.Equal("cnh.png", upload.FileName);
