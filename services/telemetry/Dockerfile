@@ -1,6 +1,6 @@
-FROM elixir:1.18.4-otp-27 AS development
+FROM elixir:1.18.4-otp-27-alpine AS development
 WORKDIR /workspace
-RUN apt-get update && apt-get install -y --no-install-recommends cmake protobuf-compiler curl && rm -rf /var/lib/apt/lists/*
+RUN apk upgrade --no-cache && apk add --no-cache build-base cmake protobuf curl
 RUN mix local.hex --force && mix local.rebar --force
 COPY mix.exs mix.lock ./
 RUN mix deps.get
@@ -12,9 +12,9 @@ FROM development AS builder
 ENV MIX_ENV=prod
 RUN mix deps.get --only prod && mix compile && mix release
 
-FROM debian:bookworm-slim AS final
+FROM alpine:3.24 AS final
 ENV LANG=C.UTF-8
-RUN apt-get update && apt-get install -y --no-install-recommends libstdc++6 openssl libncurses6 ca-certificates curl && rm -rf /var/lib/apt/lists/*
+RUN apk upgrade --no-cache && apk add --no-cache libstdc++ openssl ncurses-libs ca-certificates curl
 WORKDIR /app
 COPY --from=builder /workspace/_build/prod/rel/projecty_telemetry ./
 USER 65532:65532
