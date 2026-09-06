@@ -119,7 +119,9 @@ namespace RentalOperations.Repository
                 filter &= Builders<Rental>.Filter.Ne(r => r.Status, RentalStatus.Completed);
                 update = update.Push(r => r.PendingEvents, RentalEventEnvelope.Create(rental, "rental.closed"));
             }
-            await _rentals.UpdateOneAsync(filter, update);
+            var result = await _rentals.UpdateOneAsync(filter, update);
+            if (result.MatchedCount == 0)
+                throw new RentalSettlementConflictException();
         }
 
         public async Task DeleteRentalAsync(string id)

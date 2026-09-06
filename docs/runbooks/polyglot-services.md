@@ -102,6 +102,12 @@ renames. New rentals continue to use their real motorcycle ID. Settlement update
 preserve concurrent outbox writes and acknowledgements. No SQL migration or
 manual database rewrite is needed; tracking becomes available after Kafka catches up.
 
+Concurrent settlements use the Mongo update's matched count: if another request
+has already completed the rental, the losing request returns HTTP 409 and does
+not release the motorcycle claim or return its unpersisted calculation. Reloading
+the rental or retrying settlement after completion returns the stored dates and
+costs; only the winning update enqueues `rental.closed`.
+
 Replacing or deleting a document may remove its object before a delayed
 `document.stored` event arrives. Only S3 `NoSuchKey` is consumed as failed
 verification; the inbox and output events commit normally and newer verification
