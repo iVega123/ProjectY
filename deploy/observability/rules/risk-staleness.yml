@@ -1,0 +1,10 @@
+groups:
+  - name: projecty-risk
+    rules:
+      - alert: ProjectYRiskProjectionStale
+        expr: projecty_risk_projection_oldest_score_age_seconds > 90000
+        for: 15m
+        labels: {severity: warning}
+        annotations:
+          summary: "Rental risk projection is older than the daily refresh window"
+          description: "Last scores remain in use; inspect the risk worker and Kafka delivery."

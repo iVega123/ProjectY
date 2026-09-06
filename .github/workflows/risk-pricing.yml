@@ -1,8 +1,6 @@
 name: Risk and pricing
 on:
-  pull_request:
-  push:
-    branches: [main, 'epic/**', 'task/**']
+  workflow_call:
 permissions: {contents: read}
 jobs:
   risk-pricing:

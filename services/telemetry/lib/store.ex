@@ -14,7 +14,8 @@ defmodule ProjectYTelemetry.Store do
   def apply_event(event, topic) do
     script = """
     local prior = tonumber(redis.call('GET', KEYS[1]) or '-1')
-    if tonumber(ARGV[1]) <= prior then return 0 end
+    if tonumber(ARGV[1]) < prior then return 0 end
+    if tonumber(ARGV[1]) == prior and ARGV[4] ~= 'rental.closed' then return 0 end
     redis.call('SET', KEYS[1], ARGV[1], 'EX', ARGV[3])
     if ARGV[4] == 'rental.closed' then redis.call('DEL', KEYS[2])
     else redis.call('SET', KEYS[2], ARGV[2], 'EX', ARGV[3]) end

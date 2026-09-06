@@ -25,6 +25,7 @@ jobs:
       matrix: ${{ steps.matrix.outputs.matrix }}
       has_dotnet_changes: ${{ steps.matrix.outputs.has_dotnet_changes }}
       has_rust_changes: ${{ steps.filter.outputs.api_gateway }}
+      has_polyglot_changes: ${{ steps.filter.outputs.polyglot }}
       has_observability_changes: ${{ steps.filter.outputs.observability }}
       image_matrix: ${{ steps.matrix.outputs.image_matrix }}
       has_image_changes: ${{ steps.matrix.outputs.has_image_changes }}
@@ -35,6 +36,7 @@ jobs:
       - name: Validate Compose models
         run: |
           docker compose --file docker-compose.yml config --quiet --no-interpolate
+          docker compose --file docker-compose.yml --file docker-compose.polyglot.yml config --quiet --no-interpolate
           docker compose --file deploy/overlays/selfhost/compose.yaml config --quiet --no-interpolate
 
       - name: Validate spanmetrics dashboard contract
@@ -45,13 +47,13 @@ jobs:
           grep --recursive --quiet "${metric_prefix}_calls_total" deploy/observability/grafana
           grep --recursive --quiet "${metric_prefix}_duration_milliseconds_bucket" deploy/observability/grafana
           grep --quiet --extended-regexp '^[[:space:]]+unit: ms$' deploy/observability/otel-collector.yaml
-          ! grep --recursive --quiet "traces_spanmetrics_" deploy/observability/grafana
+          if grep --recursive --quiet "traces_spanmetrics_" deploy/observability/grafana; then exit 1; fi
           grep --fixed-strings --quiet 'service_name=\"rental-operations\"' deploy/observability/grafana/dashboards/rental-creation-slo.json
           grep --fixed-strings --quiet 'span_name=~\"POST /?api/Rental/create\"' deploy/observability/grafana/dashboards/rental-creation-slo.json
           grep --fixed-strings --quiet 'http_response_status_code!~\"2..\"' deploy/observability/grafana/dashboards/rental-creation-slo.json
           grep --fixed-strings --quiet 'le=\"2000.0\"' deploy/observability/grafana/dashboards/rental-creation-slo.json
           test ! -e deploy/observability/grafana/dashboards/slo-aluguel.json
-          ! grep --recursive --quiet 'rental-core' deploy/observability
+          if grep --recursive --quiet 'rental-core' deploy/observability; then exit 1; fi
           grep --fixed-strings --quiet 'value: service_name' deploy/observability/grafana/provisioning/datasources/datasources.yaml
           grep --fixed-strings --quiet 'matcherRegex: trace_id' deploy/observability/grafana/provisioning/datasources/datasources.yaml
           grep --fixed-strings --quiet 'allow_structured_metadata: true' deploy/observability/loki.yaml
@@ -107,6 +109,8 @@ jobs:
               - 'NuGet.config'
             rental_operations:
               - 'RentalOperations/**'
+              - 'contracts/**'
+              - 'services/risk-pricing/pricing-policy.json'
               - 'Shared/**'
               - '.dockerignore'
               - '.github/workflows/ci.yml'
@@ -118,6 +122,7 @@ jobs:
               - 'NuGet.config'
             rider_manager:
               - 'RiderManager/**'
+              - 'contracts/**'
               - 'Shared/**'
               - '.dockerignore'
               - '.github/workflows/ci.yml'
@@ -138,6 +143,14 @@ jobs:
               - 'Tiltfile'
               - 'logstash/**'
               - '.github/workflows/ci.yml'
+            polyglot:
+              - 'services/media-guard/**'
+              - 'services/telemetry/**'
+              - 'services/risk-pricing/**'
+              - 'services/console/**'
+              - 'contracts/**'
+              - '.github/workflows/*.yml'
+              - '.dockerignore'
 
       - name: Build CI matrices
         id: matrix
@@ -148,6 +161,7 @@ jobs:
           RENTAL_OPERATIONS_CHANGED: ${{ steps.filter.outputs.rental_operations }}
           RIDER_MANAGER_CHANGED: ${{ steps.filter.outputs.rider_manager }}
           API_GATEWAY_CHANGED: ${{ steps.filter.outputs.api_gateway }}
+          POLYGLOT_CHANGED: ${{ steps.filter.outputs.polyglot }}
         run: |
           matrix='{"include":[]}'
           image_matrix='{"include":[]}'
@@ -192,10 +206,39 @@ jobs:
               <<< "$image_matrix")
           fi
 
-          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
-          echo "has_dotnet_changes=$(jq --raw-output '.include | length > 0' <<< "$matrix")" >> "$GITHUB_OUTPUT"
-          echo "image_matrix=$image_matrix" >> "$GITHUB_OUTPUT"
-          echo "has_image_changes=$(jq --raw-output '.include | length > 0' <<< "$image_matrix")" >> "$GITHUB_OUTPUT"
+          if [[ "$POLYGLOT_CHANGED" == "true" ]]; then
+            for service in media-guard telemetry risk-pricing console; do
+              context="services/$service"
+              if [[ "$service" == "risk-pricing" ]]; then context="."; fi
+              image_matrix=$(jq --compact-output --arg service "$service" --arg context "$context" \
+                '.include += [{service: $service, image: $service, context: $context, dockerfile: ("services/" + $service + "/Dockerfile"), repository: ("ghcr.io/ivega123/projecty/" + $service)}]' \
+                <<< "$image_matrix")
+            done
+          fi
+
+          {
+            echo "matrix=$matrix"
+            echo "has_dotnet_changes=$(jq --raw-output '.include | length > 0' <<< "$matrix")"
+            echo "image_matrix=$image_matrix"
+            echo "has_image_changes=$(jq --raw-output '.include | length > 0' <<< "$image_matrix")"
+          } >> "$GITHUB_OUTPUT"
+
+  media-tests:
+    needs: changes
+    if: needs.changes.outputs.has_polyglot_changes == 'true'
+    uses: ./.github/workflows/polyglot.yml
+  telemetry-tests:
+    needs: changes
+    if: needs.changes.outputs.has_polyglot_changes == 'true'
+    uses: ./.github/workflows/telemetry.yml
+  risk-tests:
+    needs: changes
+    if: needs.changes.outputs.has_polyglot_changes == 'true'
+    uses: ./.github/workflows/risk-pricing.yml
+  console-tests:
+    needs: changes
+    if: needs.changes.outputs.has_polyglot_changes == 'true'
+    uses: ./.github/workflows/console.yml
 
   observability:
     name: Observability stack
@@ -217,6 +260,7 @@ jobs:
             prom/prometheus:v3.14.0 \
             check rules \
               /observability/rules/outbox.yml \
+              /observability/rules/risk-staleness.yml \
               /observability/rules/rental-creation-slo.yml
           docker run --rm --entrypoint promtool \
             --volume "$PWD/deploy/observability:/observability:ro" \
@@ -590,6 +634,10 @@ jobs:
       - images
       - publish
       - secrets
+      - media-tests
+      - telemetry-tests
+      - risk-tests
+      - console-tests
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -603,6 +651,10 @@ jobs:
           IMAGES_RESULT: ${{ needs.images.result }}
           PUBLISH_RESULT: ${{ needs.publish.result }}
           SECRETS_RESULT: ${{ needs.secrets.result }}
+          MEDIA_RESULT: ${{ needs.media-tests.result }}
+          TELEMETRY_RESULT: ${{ needs.telemetry-tests.result }}
+          RISK_RESULT: ${{ needs.risk-tests.result }}
+          CONSOLE_RESULT: ${{ needs.console-tests.result }}
           EVENT_NAME: ${{ github.event_name }}
           REF: ${{ github.ref }}
           HAS_IMAGE_CHANGES: ${{ needs.changes.outputs.has_image_changes }}
@@ -614,6 +666,9 @@ jobs:
           [[ "$RUST_RESULT" == "success" || "$RUST_RESULT" == "skipped" ]]
           [[ "$IMAGES_RESULT" == "success" || "$IMAGES_RESULT" == "skipped" ]]
           [[ "$SECRETS_RESULT" == "success" ]]
+          for result in "$MEDIA_RESULT" "$TELEMETRY_RESULT" "$RISK_RESULT" "$CONSOLE_RESULT"; do
+            [[ "$result" == "success" || "$result" == "skipped" ]]
+          done
 
           if [[ "$EVENT_NAME" == "push" && "$REF" == "refs/heads/main" && "$HAS_IMAGE_CHANGES" == "true" ]]; then
             [[ "$PUBLISH_RESULT" == "success" ]]

@@ -1,6 +1,6 @@
 FROM elixir:1.18.4-otp-27 AS development
 WORKDIR /workspace
-RUN apt-get update && apt-get install -y --no-install-recommends cmake protobuf-compiler && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends cmake protobuf-compiler curl && rm -rf /var/lib/apt/lists/*
 RUN mix local.hex --force && mix local.rebar --force
 COPY mix.exs mix.lock ./
 RUN mix deps.get

@@ -13,25 +13,6 @@ scrape_configs:
     static_configs:
       - targets: ["otel-collector:8889"]
 
-  # Serviços que expõem /metrics diretamente.
-  - job_name: projecty-services
-    metrics_path: /metrics
-    static_configs:
-      - targets: ["api-gateway:8090"]
-        labels: { service: api-gateway, language: rust }
-      - targets: ["media-guard:8092"]
-        labels: { service: media-guard, language: rust }
-      - targets: ["risk-pricing:8093"]
-        labels: { service: risk-pricing, language: python }
-      - targets: ["telemetry:4000"]
-        labels: { service: telemetry, language: elixir }
-      - targets: ["auth-gate:8080"]
-        labels: { service: auth-gate, language: dotnet }
-      - targets: ["moto-hub:8100"]
-        labels: { service: moto-hub, language: dotnet }
-    # Um serviço fora do ar não deve derrubar o scrape dos outros.
-    honor_labels: true
-
   - job_name: infra
     static_configs:
       - targets: ["prometheus:9090"]
