@@ -1,0 +1,126 @@
+services:
+  console:
+    image: projecty/console:dev
+    build: {context: services/console}
+    networks: [projecty]
+    ports: ['127.0.0.1:3001:3001']
+    environment:
+      GATEWAY_URL: http://api-gateway:8090
+      CONSOLE_ORIGIN: http://localhost:3001
+      TELEMETRY_PUBLIC_URL: ws://localhost:4000/socket/websocket
+      TELEMETRY_TICKET_KEY: '${GATEWAY_IDENTITY_SIGNING_KEY:?Set local signing key}'
+      TEMPO_URL: http://tempo:3200
+      PROMETHEUS_URL: http://prometheus:9090
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://localhost:3001/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+  rental-operations:
+    environment:
+      Kafka__BootstrapServers: kafka:9092
+  rider-manager:
+    environment:
+      Kafka__BootstrapServers: kafka:9092
+  kafka-init:
+    image: apache/kafka:4.3.1
+    networks: [projecty]
+    volumes: [./deploy/kafka/topics.txt:/topics.txt:ro]
+    entrypoint: [/bin/bash, -c]
+    command:
+      - |
+        set -e
+        while read -r topic; do
+          [[ -z "$$topic" || "$$topic" == \#* ]] && continue
+          /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic "$$topic" --partitions 3 --replication-factor 1 --config retention.ms=604800000
+        done < <(tr -d '\r' < /topics.txt)
+    depends_on:
+      kafka: {condition: service_healthy}
+  risk-pricing:
+    image: projecty/risk-pricing:dev
+    build: {context: ., dockerfile: services/risk-pricing/Dockerfile}
+    networks: [projecty]
+    volumes: [risk-state:/data]
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      S3_ENDPOINT: http://minio:9000
+      S3_BUCKET: my-bucket
+      AWS_ACCESS_KEY_ID: '${MINIO_USER:?Set MINIO_USER}'
+      AWS_SECRET_ACCESS_KEY: '${MINIO_PASSWORD:?Set MINIO_PASSWORD}'
+      AWS_DEFAULT_REGION: us-east-1
+      OTEL_SERVICE_NAME: risk-pricing
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://localhost:8093/health/ready', timeout=2)"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+    depends_on:
+      kafka-init: {condition: service_completed_successfully}
+  kafka:
+    image: apache/kafka:4.3.1
+    networks: [projecty]
+    environment:
+      KAFKA_NODE_ID: "1"
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "1"
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: "1"
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: "1"
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      CLUSTER_ID: 5L6g3nShT-eMCtK--X86sw
+    volumes: [polyglot-kafka:/var/lib/kafka/data]
+    healthcheck:
+      test: [CMD-SHELL, /opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 >/dev/null 2>&1]
+      interval: 10s
+      timeout: 10s
+      retries: 20
+  cassandra:
+    image: cassandra:5.0
+    networks: [projecty]
+    environment:
+      MAX_HEAP_SIZE: 1G
+      HEAP_NEWSIZE: 128M
+    volumes: [polyglot-cassandra:/var/lib/cassandra, ./deploy/db/cassandra:/schema:ro]
+    healthcheck:
+      test: [CMD-SHELL, "cqlsh -e 'DESCRIBE KEYSPACES' >/dev/null 2>&1"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+  cassandra-init:
+    image: cassandra:5.0
+    networks: [projecty]
+    volumes: [./deploy/db/cassandra:/schema:ro]
+    entrypoint: [cqlsh, cassandra, -f, /schema/001_init.cql]
+    depends_on:
+      cassandra: {condition: service_healthy}
+  telemetry:
+    image: projecty/telemetry:dev
+    build: {context: services/telemetry}
+    networks: [projecty]
+    ports: ['127.0.0.1:4000:4000']
+    environment:
+      TELEMETRY_SECRET_KEY_BASE: '${GATEWAY_IDENTITY_SIGNING_KEY:?Set local signing key}'
+      TELEMETRY_TICKET_KEY: '${GATEWAY_IDENTITY_SIGNING_KEY:?Set local signing key}'
+      OTEL_SERVICE_NAME: telemetry
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+      OTEL_EXPORTER_OTLP_PROTOCOL: http_protobuf
+    healthcheck:
+      test: [CMD, curl, --fail, --silent, http://localhost:4000/health/ready]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+    depends_on:
+      cassandra-init: {condition: service_completed_successfully}
+      kafka-init: {condition: service_completed_successfully}
+      kafka: {condition: service_healthy}
+      redis: {condition: service_healthy}
+volumes:
+  risk-state:
+  polyglot-kafka:
+  polyglot-cassandra:

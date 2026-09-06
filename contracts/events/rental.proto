@@ -1,0 +1,16 @@
+syntax = "proto3";
+package project_y.events;
+
+// Kafka raw Protobuf payload, immutable motorcycle_id partition key.
+// Registry framing is owned by #132; field numbers must never be reused.
+message RentalEvent {
+  optional string event_id = 1;
+  optional string rental_id = 2;
+  optional string rider_id = 3;
+  optional string motorcycle_id = 4;
+  optional int64 occurred_at_ms = 5;
+  optional int32 plan_days = 6;
+  optional int64 started_at_ms = 7;
+  optional int64 predicted_end_at_ms = 8;
+  optional int64 ended_at_ms = 9;
+}

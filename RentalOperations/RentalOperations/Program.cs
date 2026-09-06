@@ -54,6 +54,8 @@ builder.Services
 builder.Services.AddSingleton<MongoDbContext>(sp =>
     new MongoDbContext(mongoDbSettings["ConnectionString"], mongoDbSettings["DatabaseName"]));
 builder.Services.AddHostedService<MongoRentalIndexInitializer>();
+builder.Services.AddHostedService<RentalOperations.Services.RentalKafkaRelay>();
+builder.Services.AddHostedService<RentalOperations.Services.PricingProjection>();
 builder.Services.AddSingleton(
     builder.Configuration.GetSection("Messaging:Inbox").Get<MongoInboxOptions>()
         ?? new MongoInboxOptions());

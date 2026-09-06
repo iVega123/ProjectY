@@ -39,6 +39,14 @@ bld/
 [Oo]bj/
 [Oo]ut/
 **/target/
+**/_build/
+**/deps/
+**/node_modules/
+**/.next/
+*.tsbuildinfo
+**/__pycache__/
+**/.venv/
+**/.pytest_cache/
 msbuild.log
 msbuild.err
 msbuild.wrn
@@ -51,3 +59,4 @@ msbuild.wrn
 
 # Generated benchmark summaries (published evidence lives in docs/measurements)
 load/results/
+docs/images/console-test-failure.png

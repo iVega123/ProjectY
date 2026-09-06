@@ -1,4 +1,4 @@
-﻿using RiderManager.DTOs;
+using RiderManager.DTOs;
 using RiderManager.Services.MinioStorageService;
 using RiderManager.Services.PreSignedService;
 using RiderManager.Services.RiderServices;
@@ -23,7 +23,7 @@ namespace RiderManager.Managers
         {
             if (riderDto.CNHImagePath != null)
             {
-                var filePath = await _minioFileStorageService.UploadFileAsync(riderDto.CNHImagePath);
+                var filePath = await _minioFileStorageService.UploadFileAsync(riderDto.CNHImagePath, riderDto.UserId);
                 var rider = await _riderService.AddRiderAsync(riderDto);
                 var link = await _minioFileStorageService.GetPresignedUrlAsync(filePath, rider.UserId);
                 await _preSignedUrlService.StorePresignedUrlAsync(link);
@@ -39,7 +39,7 @@ namespace RiderManager.Managers
         {
             if (riderDto.CNHImagePath != null)
             {
-                var filePath = await _minioFileStorageService.UploadFileAsync(riderDto.CNHImagePath);
+                var filePath = await _minioFileStorageService.UploadFileAsync(riderDto.CNHImagePath, riderDto.UserId);
                 await _riderService.UpdateRiderAsync(userId, riderDto);
                 var link = await _minioFileStorageService.GetPresignedUrlAsync(filePath, userId);
                 await _preSignedUrlService.StorePresignedUrlAsync(link);
@@ -52,14 +52,20 @@ namespace RiderManager.Managers
 
         public async Task DeleteRiderAsync(string userId)
         {
+            var (_, stored) = await _preSignedUrlService.GetOrCreatePresignedUrlAsync(userId);
+            if (stored is not null)
+                await _minioFileStorageService.DeleteFileAsync(stored.FileName);
             await _riderService.DeleteRiderAsync(userId);
         }
 
         public async Task UpdateRiderImageAsync(string userId, IFormFile cnhFile, string? objectName = null)
         {
-            var filePath = await _minioFileStorageService.UploadFileAsync(cnhFile, objectName);
+            var (_, previous) = await _preSignedUrlService.GetOrCreatePresignedUrlAsync(userId);
+            var filePath = await _minioFileStorageService.UploadFileAsync(cnhFile, userId, objectName);
             var link = await _minioFileStorageService.GetPresignedUrlAsync(filePath, userId);
             await _preSignedUrlService.StorePresignedUrlAsync(link);
+            if (previous is not null && previous.FileName != filePath)
+                await _minioFileStorageService.DeleteFileAsync(previous.FileName);
             return;
         }
 
@@ -75,19 +81,12 @@ namespace RiderManager.Managers
             var rider = await _riderService.GetRiderByUserIdAsync(userId);
 
             var (isExpired, uploadFile) = await _preSignedUrlService.GetOrCreatePresignedUrlAsync(userId);
-            if (!isExpired)
-            {
-                return await _riderService.GetRiderByUserIdAsync(userId);
-            }
-
             if (uploadFile != null)
             {
                 var link = await _minioFileStorageService.GetPresignedUrlAsync(uploadFile.FileName, userId);
-                await _preSignedUrlService.StorePresignedUrlAsync(link);
-                return await _riderService.GetRiderByUserIdAsync(userId);
+                rider.CNHUrl = link.FileUrl;
             }
-
-            return await _riderService.GetRiderByUserIdAsync(userId);
+            return rider;
 
         }
     }

@@ -44,8 +44,17 @@ if missing_local_files:
     ) % ', '.join(missing_local_files)
     fail(missing_files_message)
 
+config.define_bool('full', usage = 'Include live telemetry, async risk/pricing and the console')
+config.define_string_list('resources', args = True)
+settings = config.parse()
+config.set_enabled_resources(settings.get('resources', []))
+full = settings.get('full', False)
+compose_files = ['docker-compose.yml', 'docker-compose.chaos.yml']
+if full:
+    compose_files.append('docker-compose.polyglot.yml')
+
 docker_compose(
-    ['docker-compose.yml', 'docker-compose.chaos.yml'],
+    compose_files,
     env_file = '.env',
     project_name = 'projecty',
 )
@@ -83,10 +92,40 @@ configure_live_update(
     'cd /workspace && cargo fetch --locked',
     'cd /workspace && cargo build --locked',
 )
+configure_live_update(
+    'projecty/media-guard:dev',
+    'services/media-guard',
+    ['services/media-guard/Cargo.toml', 'services/media-guard/Cargo.lock'],
+    'cd /workspace && cargo fetch --locked',
+    'cd /workspace && cargo build --locked',
+)
 infra_resources = ['toxiproxy', 'postgres', 'redis', 'rabbitmq', 'mongodb', 'minio']
 observability_resources = ['tempo', 'loki', 'otel-collector', 'prometheus', 'grafana']
 setup_resources = ['auth-gate-migrations', 'rider-manager-migrations', 'moto-hub-migrations']
-service_resources = ['auth-gate', 'rider-manager', 'moto-hub', 'rental-operations']
+service_resources = ['auth-gate', 'rider-manager', 'moto-hub', 'rental-operations', 'media-guard']
+
+if full:
+    configure_live_update(
+        'projecty/telemetry:dev', 'services/telemetry',
+        ['services/telemetry/mix.exs', 'services/telemetry/mix.lock'],
+        'cd /workspace && mix deps.get', 'cd /workspace && mix compile',
+    )
+    configure_live_update(
+        'projecty/console:dev', 'services/console',
+        ['services/console/package.json', 'services/console/package-lock.json'],
+        'cd /workspace && npm ci',
+    )
+    docker_build(
+        'projecty/risk-pricing:dev', '.',
+        dockerfile = 'services/risk-pricing/Dockerfile', target = 'development',
+        live_update = [
+            fall_back_on(['services/risk-pricing/Dockerfile', 'services/risk-pricing/requirements.lock', 'contracts']),
+            sync('services/risk-pricing', '/workspace'), restart_container(),
+        ],
+    )
+    infra_resources += ['kafka', 'cassandra']
+    setup_resources += ['kafka-init', 'cassandra-init']
+    service_resources += ['telemetry', 'risk-pricing', 'console']
 
 for resource in infra_resources:
     dc_resource(resource, labels = ['infra'])
@@ -118,6 +157,8 @@ dc_resource(
 print('Tilt UI:  http://localhost:10350')
 print('Gateway:  http://localhost:8090')
 print('Grafana:  http://localhost:3000')
+if full:
+    print('Console:  http://localhost:3001')
 
 # Keep unavailable target-service drills visible and explicitly disabled.
 load('ext://uibutton', 'cmd_button')

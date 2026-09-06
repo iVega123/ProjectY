@@ -1,0 +1,21 @@
+name: Console
+on:
+  workflow_call:
+  pull_request:
+    paths: ['services/console/**', '.github/workflows/console.yml']
+  push:
+    branches: ['main', 'epic/**', 'task/**']
+    paths: ['services/console/**', '.github/workflows/console.yml']
+permissions: {contents: read}
+jobs:
+  console:
+    runs-on: ubuntu-latest
+    defaults:
+      run: {working-directory: services/console}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with: {node-version: '24', cache: npm, cache-dependency-path: services/console/package-lock.json}
+      - run: npm ci
+      - run: npm test
+      - run: npm run build

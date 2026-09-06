@@ -1,0 +1,11 @@
+name: Risk and pricing
+on:
+  workflow_call:
+permissions: {contents: read}
+jobs:
+  risk-pricing:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - run: docker build -t risk-test -f services/risk-pricing/Dockerfile .
+      - run: docker run --rm --entrypoint pytest risk-test -q -p no:cacheprovider

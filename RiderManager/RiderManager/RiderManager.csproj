@@ -10,6 +10,9 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="Confluent.Kafka" Version="2.15.0" />
+    <PackageReference Include="Grpc.Tools" Version="2.83.0" PrivateAssets="All" />
+    <PackageReference Include="Google.Protobuf" Version="3.33.0" />
     <PackageReference Include="AutoMapper" Version="16.2.0" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.4">
       <PrivateAssets>all</PrivateAssets>
@@ -48,4 +51,7 @@
   </ItemGroup>
 
   <ItemGroup><Compile Include="..\..\Shared\Messaging\BoundedRabbitMqRetryRouter.cs" Link="Shared\Messaging\BoundedRabbitMqRetryRouter.cs" /></ItemGroup>
+  <ItemGroup>
+    <Protobuf Include="../../contracts/events/rider.proto" GrpcServices="None" />
+  </ItemGroup>
 </Project>

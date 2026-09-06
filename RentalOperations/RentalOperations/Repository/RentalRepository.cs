@@ -23,6 +23,7 @@ namespace RentalOperations.Repository
         {
             try
             {
+                rental.PendingEvents.Add(RentalEventEnvelope.Create(rental, "rental.started"));
                 await _rentals.InsertOneAsync(rental);
             }
             catch (MongoWriteException exception)
@@ -104,7 +105,23 @@ namespace RentalOperations.Repository
 
         public async Task UpdateRentalAsync(Rental rental)
         {
-            await _rentals.ReplaceOneAsync(r => r._id == rental._id, rental);
+            // Patch settlement fields: replacing a stale snapshot can erase a
+            // concurrent backfill or restore envelopes acknowledged by the relay.
+            var update = Builders<Rental>.Update
+                .Set(r => r.EndDate, rental.EndDate)
+                .Set(r => r.FinalCost, rental.FinalCost)
+                .Set(r => r.AdditionalCostsOrSavings, rental.AdditionalCostsOrSavings)
+                .Set(r => r.StatusMessage, rental.StatusMessage)
+                .Set(r => r.Status, rental.Status);
+            var filter = Builders<Rental>.Filter.Eq(r => r._id, rental._id);
+            if (rental.Status == RentalStatus.Completed)
+            {
+                filter &= Builders<Rental>.Filter.Ne(r => r.Status, RentalStatus.Completed);
+                update = update.Push(r => r.PendingEvents, RentalEventEnvelope.Create(rental, "rental.closed"));
+            }
+            var result = await _rentals.UpdateOneAsync(filter, update);
+            if (result.MatchedCount == 0)
+                throw new RentalSettlementConflictException();
         }
 
         public async Task DeleteRentalAsync(string id)

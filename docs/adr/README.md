@@ -31,6 +31,16 @@ is what separates a decision from a preference.
 
 ## Reading order
 
+Implementation records for the original epic 10:
+
+| # | Decision | Answers |
+| --- | --- | --- |
+| [0018](0018-media-guard.md) | Rust sanitizes documents before object storage | Image trust boundary, metadata removal and URL lifetime |
+| [0019](0019-live-tracking.md) | Phoenix owns live tracking | Supervision, Presence, bounded Cassandra history and degradation |
+| [0020](0020-asynchronous-risk-pricing.md) | Python owns asynchronous OCR and pricing | Durable facts, conservative projections and single-worker cost |
+| [0021](0021-operations-console.md) | Next.js is the operations window | Real traces, live positions, bounded load and BFF authorization |
+| [0022](0022-polyglot-workload-and-storage-costs.md) | Each runtime and store earns its workload | Alternatives, operational costs, Rabbit commands and Kafka facts |
+
 Records 0000–0005 are the design trail and read in sequence. ADR 0008 belongs
 to that trail but was written later, after review showed the trust-boundary
 decision was implied everywhere and recorded nowhere; read it after 0001.

@@ -141,6 +141,31 @@ namespace RiderManager.Migrations
                     b.ToTable("Riders");
                 });
 
+            modelBuilder.Entity("RiderManager.Models.RiderEventEnvelope", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasColumnType("text");
+
+                    b.Property<byte[]>("Payload")
+                        .IsRequired()
+                        .HasColumnType("bytea");
+
+                    b.Property<string>("RiderId")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Topic")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("TraceParent")
+                        .HasColumnType("text");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("EventOutbox");
+                });
+
             modelBuilder.Entity("RiderManager.Models.PresignedUrl", b =>
                 {
                     b.HasOne("RiderManager.Models.Rider", "Rider")

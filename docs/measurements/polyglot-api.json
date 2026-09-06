@@ -1,0 +1,231 @@
+{
+  "measuredAt": "2026-09-06T15:33:03.775Z",
+  "action": {
+    "index": 0,
+    "plate": "KAA8412",
+    "status": 200,
+    "duration": 39.88703300000634,
+    "traceId": "180f29be46c44c8157c08614630f8796",
+    "detail": "Created with Success!"
+  },
+  "rentalId": "6a9d87a78357007aee869ba2",
+  "position": {
+    "latitude": -3.119,
+    "longitude": -60.021,
+    "recorded_at": 1788708777636
+  },
+  "services": [
+    "api-gateway",
+    "rental-operations",
+    "rider-manager",
+    "moto-hub",
+    "risk-pricing",
+    "telemetry"
+  ],
+  "spans": [
+    {
+      "id": "7smNWLUzR1g=",
+      "parentId": "aoF1tWEPcaI=",
+      "service": "api-gateway",
+      "name": "gateway.request",
+      "start": 1788708775437.2974,
+      "duration": 35.72864,
+      "error": false
+    },
+    {
+      "id": "fxmHD96dKzU=",
+      "parentId": "7smNWLUzR1g=",
+      "service": "api-gateway",
+      "name": "gateway.upstream",
+      "start": 1788708775444.7314,
+      "duration": 28.25856,
+      "error": false
+    },
+    {
+      "id": "8l9n5/LuAgE=",
+      "parentId": "fxmHD96dKzU=",
+      "service": "rental-operations",
+      "name": "POST api/Rental/create",
+      "start": 1788708775445.147,
+      "duration": 27.769344,
+      "error": false
+    },
+    {
+      "id": "uiQPbMKEnew=",
+      "parentId": "8l9n5/LuAgE=",
+      "service": "rental-operations",
+      "name": "find RentalOperationsDB.Rentals",
+      "start": 1788708775451.0632,
+      "duration": 1.686272,
+      "error": false
+    },
+    {
+      "id": "+2ho47OwvgI=",
+      "parentId": "uiQPbMKEnew=",
+      "service": "rental-operations",
+      "name": "find",
+      "start": 1788708775451.2048,
+      "duration": 1.486592,
+      "error": false
+    },
+    {
+      "id": "MpBI0m67T0Q=",
+      "parentId": "8l9n5/LuAgE=",
+      "service": "rental-operations",
+      "name": "GET",
+      "start": 1788708775453.2654,
+      "duration": 7.204096,
+      "error": false
+    },
+    {
+      "id": "HBeZhZMWCBE=",
+      "parentId": "MpBI0m67T0Q=",
+      "service": "rider-manager",
+      "name": "GET api/Riders/{userId}",
+      "start": 1788708775454.6199,
+      "duration": 5.730304,
+      "error": false
+    },
+    {
+      "id": "mtXot9RDrK4=",
+      "parentId": "HBeZhZMWCBE=",
+      "service": "rider-manager",
+      "name": "RiderManagerDB",
+      "start": 1788708775456.2478,
+      "duration": 1.864192,
+      "error": false
+    },
+    {
+      "id": "j3BEmgv34eg=",
+      "parentId": "HBeZhZMWCBE=",
+      "service": "rider-manager",
+      "name": "RiderManagerDB",
+      "start": 1788708775458.5032,
+      "duration": 1.42464,
+      "error": false
+    },
+    {
+      "id": "OMKz4SN8Dt0=",
+      "parentId": "8l9n5/LuAgE=",
+      "service": "rental-operations",
+      "name": "GET",
+      "start": 1788708775462.844,
+      "duration": 4.668416,
+      "error": false
+    },
+    {
+      "id": "vEC7P+/LBJc=",
+      "parentId": "OMKz4SN8Dt0=",
+      "service": "moto-hub",
+      "name": "GET api/Motorcycles/{licensePlate}",
+      "start": 1788708775463.8162,
+      "duration": 3.68768,
+      "error": false
+    },
+    {
+      "id": "FhaNAu4O3eI=",
+      "parentId": "vEC7P+/LBJc=",
+      "service": "moto-hub",
+      "name": "MotoHubDB",
+      "start": 1788708775465.2446,
+      "duration": 1.692928,
+      "error": false
+    },
+    {
+      "id": "hOWxT/ggacE=",
+      "parentId": "8l9n5/LuAgE=",
+      "service": "rental-operations",
+      "name": "insert RentalOperationsDB.MotorcycleClaims",
+      "start": 1788708775467.7715,
+      "duration": 1.033728,
+      "error": false
+    },
+    {
+      "id": "KKROqb9HcE4=",
+      "parentId": "hOWxT/ggacE=",
+      "service": "rental-operations",
+      "name": "insert",
+      "start": 1788708775467.9402,
+      "duration": 0.797184,
+      "error": false
+    },
+    {
+      "id": "hwRU7rmgu0E=",
+      "parentId": "8l9n5/LuAgE=",
+      "service": "rental-operations",
+      "name": "insert RentalOperationsDB.Rentals",
+      "start": 1788708775468.883,
+      "duration": 0.777472,
+      "error": false
+    },
+    {
+      "id": "ozGNS2W5rlQ=",
+      "parentId": "hwRU7rmgu0E=",
+      "service": "rental-operations",
+      "name": "insert",
+      "start": 1788708775468.9868,
+      "duration": 0.645376,
+      "error": false
+    },
+    {
+      "id": "dZ4wtfiUfBw=",
+      "parentId": "8l9n5/LuAgE=",
+      "service": "rental-operations",
+      "name": "publish rental.started",
+      "start": 1788708776502.5718,
+      "duration": 7.9552,
+      "error": false
+    },
+    {
+      "id": "ilGd2nIF4vw=",
+      "parentId": "dZ4wtfiUfBw=",
+      "service": "rental-operations",
+      "name": "update RentalOperationsDB.Rentals",
+      "start": 1788708776509.2297,
+      "duration": 1.275392,
+      "error": false
+    },
+    {
+      "id": "0EviuGeOWj8=",
+      "parentId": "ilGd2nIF4vw=",
+      "service": "rental-operations",
+      "name": "update",
+      "start": 1788708776509.4211,
+      "duration": 1.00224,
+      "error": false
+    },
+    {
+      "id": "BFZpdvRu2/8=",
+      "parentId": "dZ4wtfiUfBw=",
+      "service": "risk-pricing",
+      "name": "process rental.started",
+      "start": 1788708776509.6528,
+      "duration": 5.60896,
+      "error": false
+    },
+    {
+      "id": "D2gcu+Tu5xI=",
+      "parentId": "BFZpdvRu2/8=",
+      "service": "risk-pricing",
+      "name": "publish risk.scored",
+      "start": 1788708776515.47,
+      "duration": 1.516288,
+      "error": false
+    },
+    {
+      "id": "gC0P9aoYhH8=",
+      "parentId": "dZ4wtfiUfBw=",
+      "service": "telemetry",
+      "name": "kafka tracking event",
+      "start": 1788708777312.9924,
+      "duration": 3.292928,
+      "error": false
+    }
+  ],
+  "metrics": {
+    "p99": null,
+    "queue": 0,
+    "limited": 0,
+    "measuredAt": "2026-09-06T15:33:03.774Z"
+  }
+}

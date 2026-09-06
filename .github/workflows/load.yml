@@ -14,6 +14,7 @@ on:
       - 'scripts/Run-LoadTest.ps1'
       - 'scripts/Invoke-Chaos.ps1'
       - 'scripts/New-LocalSecrets.ps1'
+      - 'scripts/Update-CommandQueueNames.ps1'
       - '.github/workflows/load.yml'
   workflow_dispatch:
 permissions:

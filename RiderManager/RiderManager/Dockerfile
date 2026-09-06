@@ -7,6 +7,7 @@ RUN dotnet restore RiderManager/RiderManager/RiderManager.csproj
 FROM restore AS publish
 COPY RiderManager/RiderManager/ RiderManager/RiderManager/
 COPY Shared/ Shared/
+COPY contracts/ contracts/
 RUN dotnet publish RiderManager/RiderManager/RiderManager.csproj \
     --configuration Release \
     --output /app/publish \

@@ -87,6 +87,7 @@ builder.Services.AddSingleton<IRabbitMqService, RabbitMqService>();
 builder.Services.AddSingleton<IMessagingConsumerService, MessagingConsumerService>();
 builder.Services.AddSingleton<BoundedRabbitMqRetryRouter>();
 builder.Services.AddHostedService<ConsumerHostedService>();
+builder.Services.AddHostedService<RiderKafkaRelay>();
 builder.Services.AddScoped<IRiderInboxProcessor, RiderInboxProcessor>();
 builder.Services.AddScoped<RiderInboxMessageHandler>();
 builder.Services.AddSingleton(
@@ -95,6 +96,11 @@ builder.Services.AddSingleton(
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddHostedService<RiderInboxRetentionService>();
 builder.Services.AddScoped<IMinioFileStorageService, MinioFileStorageService>();
+builder.Services.AddHttpClient<IMediaGuardClient, MediaGuardClient>(client =>
+{
+    client.BaseAddress = new Uri(builder.Configuration["MediaGuard:Url"] ?? "http://media-guard:8092");
+    client.Timeout = TimeSpan.FromSeconds(15);
+});
 builder.Services.AddScoped<IPresignedUrlService, PresignedUrlService>();
 builder.Services.AddScoped<IRiderManager, RidersManager>();
 builder.Services.AddSwaggerGen(c =>

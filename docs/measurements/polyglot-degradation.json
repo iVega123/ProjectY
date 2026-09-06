@@ -1,0 +1,10 @@
+{
+  "measuredAt": "2026-09-06T14:45:50.794Z",
+  "stopped": [
+    "risk-pricing",
+    "telemetry"
+  ],
+  "rentalStatus": 200,
+  "rentalDurationMs": 21.390020999941044,
+  "listingStatus": 200
+}

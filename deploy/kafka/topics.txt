@@ -2,3 +2,8 @@
 rental.started
 rental.closed
 motorcycle.registered
+document.stored
+document.verified
+rider.verified
+risk.scored
+pricing.updated
