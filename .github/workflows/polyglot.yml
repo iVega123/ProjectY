@@ -1,0 +1,18 @@
+name: Polyglot services
+on:
+  pull_request:
+  push:
+    branches: [main, 'epic/**', 'task/**']
+permissions:
+  contents: read
+jobs:
+  media-guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - run: cargo fmt --manifest-path services/media-guard/Cargo.toml --check
+      - run: cargo clippy --manifest-path services/media-guard/Cargo.toml --locked --all-targets -- -D warnings
+      - run: cargo test --manifest-path services/media-guard/Cargo.toml --locked

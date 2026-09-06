@@ -64,7 +64,24 @@ namespace RiderManager.Controllers
             {
                 return Unauthorized("Token Invalid");
             }
-            await _riderManager.UpdateRiderImageAsync(userId, cnhFile);
+            try
+            {
+                await _riderManager.UpdateRiderImageAsync(userId, cnhFile);
+            }
+            catch (InvalidDataException)
+            {
+                return Problem(statusCode: 422, title: "Invalid image content or dimensions");
+            }
+            catch (HttpRequestException)
+            {
+                Response.Headers.RetryAfter = "5";
+                return Problem(statusCode: 503, title: "Image processing unavailable");
+            }
+            catch (TaskCanceledException)
+            {
+                Response.Headers.RetryAfter = "5";
+                return Problem(statusCode: 503, title: "Image processing unavailable");
+            }
             return Ok("CNH Photo updated");
         }
     }

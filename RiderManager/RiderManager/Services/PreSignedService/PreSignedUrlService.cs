@@ -27,13 +27,9 @@ namespace RiderManager.Services.PreSignedService
                     UserId = userId,
                     ExpiryDate = rider.CNHUrl.Expiry,
                     FileName = rider.CNHUrl.ObjectName,
-                    FileUrl = rider.CNHUrl.Url
+                    FileUrl = null
                 };
 
-                if (rider.CNHUrl.Expiry > DateTime.UtcNow)
-                {
-                    return (false, uploadFileEntity);
-                }
                 return (true, uploadFileEntity);
             }
             return (true, null);
@@ -47,8 +43,8 @@ namespace RiderManager.Services.PreSignedService
             if (rider.CNHUrl != null)
             {
                 rider.CNHUrl.ObjectName = uploadedFile.FileName;
-                rider.CNHUrl.Url = uploadedFile.FileUrl;
-                rider.CNHUrl.Expiry = uploadedFile.ExpiryDate;
+                rider.CNHUrl.Url = null;
+                rider.CNHUrl.Expiry = DateTime.UnixEpoch;
             }
             else
             {
@@ -56,8 +52,8 @@ namespace RiderManager.Services.PreSignedService
                 {
                     Id = Guid.NewGuid().ToString(),
                     ObjectName = uploadedFile.FileName,
-                    Url = uploadedFile.FileUrl,
-                    Expiry = uploadedFile.ExpiryDate,
+                    Url = null,
+                    Expiry = DateTime.UnixEpoch,
                     RiderId = rider.Id,
                     Rider = rider,
                 };
