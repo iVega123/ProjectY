@@ -140,6 +140,15 @@ namespace RentalOperations.Controllers
             {
                 return Forbid();
             }
+            catch (RentalSettlementConflictException ex)
+            {
+                return Conflict(new ProblemDetails
+                {
+                    Status = StatusCodes.Status409Conflict,
+                    Title = "Rental settlement conflict",
+                    Detail = ex.Message
+                });
+            }
             catch (Exception ex) when (DependencyFailure.IsUnavailable(ex))
             {
                 return Unavailable(ex);
