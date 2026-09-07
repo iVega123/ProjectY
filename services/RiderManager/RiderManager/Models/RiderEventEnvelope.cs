@@ -30,7 +30,7 @@ public sealed class RiderEventEnvelope
             }.ToByteArray()
         };
     }
-// rental-core decides whether a rider may rent from its local projection,
+    // rental-core decides whether a rider may rent from its local projection,
     // never from a call to this service. The entitlement rule therefore lives
     // with the owner of the fact: holding an A or AB licence is what "verified"
     // means, and rental-core reads the answer rather than recomputing it.
