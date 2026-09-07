@@ -4,6 +4,8 @@ using Confluent.Kafka;
 using MongoDB.Driver;
 using RentalOperations.Data;
 using RentalOperations.Model;
+using ProjectY.Shared.Messaging;
+using ProjectY.Events;
 
 namespace RentalOperations.Services;
 
@@ -15,6 +17,10 @@ public sealed class RentalKafkaRelay(MongoDbContext context, IConfiguration conf
     {
         var bootstrap = config["Kafka:BootstrapServers"];
         if (string.IsNullOrWhiteSpace(bootstrap)) return;
+        using var registryClient = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
+        var schemas = new RegisteredEventSchema(registryClient,
+            config["Kafka:SchemaRegistryUrl"] ?? throw new InvalidOperationException("Kafka schema registry URL is required."),
+            Path.Combine(AppContext.BaseDirectory, "event-contracts"));
         using var producer = new ProducerBuilder<string, byte[]>(new ProducerConfig
         {
             BootstrapServers = bootstrap,
@@ -39,6 +45,9 @@ public sealed class RentalKafkaRelay(MongoDbContext context, IConfiguration conf
                         span?.SetTag("messaging.system", "kafka");
                         span?.SetTag("messaging.destination.name", item.Topic);
                         var headers = new Headers();
+                        RegisteredEventSchema.ValidateKey(RentalEventEnvelope.PartitionKey(rental), RentalEvent.Parser.ParseFrom(item.Payload).MotorcycleId);
+                        var schemaId = await schemas.ResolveAsync(item.Topic, stoppingToken);
+                        headers.Add("schema-id", Encoding.UTF8.GetBytes(schemaId.ToString(System.Globalization.CultureInfo.InvariantCulture)));
                         if ((span?.Id ?? item.TraceParent) is { } trace)
                             headers.Add("traceparent", Encoding.UTF8.GetBytes(trace));
                         await producer.ProduceAsync(item.Topic, new Message<string, byte[]>

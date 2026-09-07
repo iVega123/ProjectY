@@ -72,6 +72,7 @@ namespace RentalOperations.Services
                 MotorcycleId = motorcycle.id,
                 MotorcycleLicencePlate = rentalDomain.MotocycleLicencePlate,
                 UserId = rentalDomain.UserId,
+                RiderName = rider.Name,
                 StartDate = rentalDomain.StartDate,
                 EndDate = rentalDomain.EndDate,
                 PredictedEndDate = rentalDomain.PredictedEndDate,

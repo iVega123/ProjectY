@@ -26,9 +26,12 @@ public sealed class RentalEventEnvelope
             MotorcycleId = PartitionKey(rental),
             OccurredAtMs = time,
             PlanDays = (rental.PredictedEndDate - rental.StartDate).Days,
+            AgreedTotalMinor = checked((long)decimal.Round(rental.InitCost * 100m, 0, MidpointRounding.ToEven)),
+            Currency = "BRL",
             StartedAtMs = new DateTimeOffset(rental.StartDate.ToUniversalTime()).ToUnixTimeMilliseconds(),
             PredictedEndAtMs = new DateTimeOffset(rental.PredictedEndDate.ToUniversalTime()).ToUnixTimeMilliseconds()
         };
+        if (rental.RiderName is { } riderName) message.RiderName = riderName;
         if (rental.EndDate is { } ended) message.EndedAtMs = new DateTimeOffset(ended.ToUniversalTime()).ToUnixTimeMilliseconds();
         return new() { Id = id, Topic = topic, Payload = message.ToByteArray(), TraceParent = Activity.Current?.Id };
     }

@@ -1,4 +1,24 @@
 services:
+  schema-registry:
+    image: quay.io/apicurio/apicurio-registry:3.3.2
+    networks: [projecty]
+    environment:
+      APICURIO_STORAGE_KIND: kafkasql
+      APICURIO_KAFKASQL_BOOTSTRAP_SERVERS: kafka:9092
+    healthcheck:
+      test: [CMD, curl, --fail, --silent, http://localhost:9000/health/ready]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    depends_on:
+      kafka: {condition: service_healthy}
+  schema-init:
+    image: node:24-alpine
+    networks: [projecty]
+    volumes: [./contracts:/contracts:ro]
+    command: [node, /contracts/register.mjs]
+    depends_on:
+      schema-registry: {condition: service_healthy}
   console:
     image: projecty/console:dev
     build: {context: services/console}
@@ -19,9 +39,15 @@ services:
   rental-operations:
     environment:
       Kafka__BootstrapServers: kafka:9092
+      Kafka__SchemaRegistryUrl: http://schema-registry:8080/apis/ccompat/v7
+    depends_on:
+      schema-init: {condition: service_completed_successfully}
   rider-manager:
     environment:
       Kafka__BootstrapServers: kafka:9092
+      Kafka__SchemaRegistryUrl: http://schema-registry:8080/apis/ccompat/v7
+    depends_on:
+      schema-init: {condition: service_completed_successfully}
   kafka-init:
     image: apache/kafka:4.3.1
     networks: [projecty]
@@ -43,6 +69,7 @@ services:
     volumes: [risk-state:/data]
     environment:
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      SCHEMA_REGISTRY_URL: http://schema-registry:8080/apis/ccompat/v7
       S3_ENDPOINT: http://minio:9000
       S3_BUCKET: my-bucket
       AWS_ACCESS_KEY_ID: '${MINIO_USER:?Set MINIO_USER}'
@@ -57,6 +84,7 @@ services:
       retries: 12
     depends_on:
       kafka-init: {condition: service_completed_successfully}
+      schema-init: {condition: service_completed_successfully}
   kafka:
     image: apache/kafka:4.3.1
     networks: [projecty]

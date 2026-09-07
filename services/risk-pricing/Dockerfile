@@ -12,6 +12,7 @@ RUN apk add --no-cache --virtual .build-deps build-base bash curl openssl-dev zl
     && rm -rf /tmp/librdkafka-2.15.0 /tmp/librdkafka.tar.gz \
     && apk del .build-deps
 COPY contracts/events /contracts
+COPY contracts /event-contracts
 RUN python -m grpc_tools.protoc -I/contracts --python_out=/workspace /contracts/rental.proto /contracts/rider.proto
 COPY services/risk-pricing/ ./
 RUN mkdir -p /data && chown 65532:65532 /data

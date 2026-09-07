@@ -143,8 +143,8 @@ if full:
             sync('services/risk-pricing', '/workspace'), restart_container(),
         ],
     )
-    infra_resources += ['kafka', 'cassandra']
-    setup_resources += ['kafka-init', 'cassandra-init']
+    infra_resources += ['kafka', 'cassandra', 'schema-registry']
+    setup_resources += ['kafka-init', 'cassandra-init', 'schema-init']
     service_resources += ['telemetry', 'risk-pricing', 'console']
 
 for resource in infra_resources:
