@@ -46,8 +46,8 @@ and verify that the snapshot exactly matches the model:
 
 ```bash
 dotnet tool restore
-dotnet ef migrations add <MigrationName> --project AuthGate/AuthGate/AuthGate.csproj --startup-project AuthGate/AuthGate/AuthGate.csproj --output-dir Migrations
-dotnet ef migrations has-pending-model-changes --project AuthGate/AuthGate/AuthGate.csproj --startup-project AuthGate/AuthGate/AuthGate.csproj
+dotnet ef migrations add <MigrationName> --project services/AuthGate/AuthGate/AuthGate.csproj --startup-project services/AuthGate/AuthGate/AuthGate.csproj --output-dir Migrations
+dotnet ef migrations has-pending-model-changes --project services/AuthGate/AuthGate/AuthGate.csproj --startup-project services/AuthGate/AuthGate/AuthGate.csproj
 ```
 
 Use the equivalent project path for MotoHub or RiderManager. Commit the
@@ -69,13 +69,13 @@ ready to deploy.
 4. Preview the rollback SQL and have it reviewed:
 
    ```bash
-   dotnet ef migrations script <CurrentMigration> <PreviousMigration> --project AuthGate/AuthGate/AuthGate.csproj --startup-project AuthGate/AuthGate/AuthGate.csproj
+   dotnet ef migrations script <CurrentMigration> <PreviousMigration> --project services/AuthGate/AuthGate/AuthGate.csproj --startup-project services/AuthGate/AuthGate/AuthGate.csproj
    ```
 
 5. Apply the reviewed rollback:
 
    ```bash
-   dotnet ef database update <PreviousMigration> --project AuthGate/AuthGate/AuthGate.csproj --startup-project AuthGate/AuthGate/AuthGate.csproj
+   dotnet ef database update <PreviousMigration> --project services/AuthGate/AuthGate/AuthGate.csproj --startup-project services/AuthGate/AuthGate/AuthGate.csproj
    ```
 
 6. Deploy the compatible application version and verify readiness.

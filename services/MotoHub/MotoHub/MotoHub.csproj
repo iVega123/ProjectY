@@ -6,7 +6,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <UserSecretsId>989b6433-41fd-4f8d-b301-26b9f15b6d49</UserSecretsId>
     <DockerDefaultTargetOS>Linux</DockerDefaultTargetOS>
-    <DockerfileContext>..\..</DockerfileContext>
+    <DockerfileContext>..\..\..</DockerfileContext>
   </PropertyGroup>
 
   <ItemGroup>
@@ -39,22 +39,22 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Compile Include="..\..\Shared\Health\ServiceHealthChecks.cs" Link="Shared\Health\ServiceHealthChecks.cs" />
-    <Compile Include="..\..\Shared\Hosting\SwaggerPolicy.cs" Link="Shared\Hosting\SwaggerPolicy.cs" />
-    <Compile Include="..\..\Shared\Hosting\DatabaseMigrationCommand.cs" Link="Shared\Hosting\DatabaseMigrationCommand.cs" />
-    <Compile Include="..\..\Shared\Messaging\IOutboxTransport.cs" Link="Shared\Messaging\IOutboxTransport.cs" />
-    <Compile Include="..\..\Shared\Messaging\IRabbitMqConnectionProvider.cs" Link="Shared\Messaging\IRabbitMqConnectionProvider.cs" />
-    <Compile Include="..\..\Shared\Messaging\OutboxMessage.cs" Link="Shared\Messaging\OutboxMessage.cs" />
-    <Compile Include="..\..\Shared\Messaging\OutboxMetricsEndpoint.cs" Link="Shared\Messaging\OutboxMetricsEndpoint.cs" />
-    <Compile Include="..\..\Shared\Messaging\OutboxModelBuilderExtensions.cs" Link="Shared\Messaging\OutboxModelBuilderExtensions.cs" />
-    <Compile Include="..\..\Shared\Messaging\OutboxRelay.cs" Link="Shared\Messaging\OutboxRelay.cs" />
-    <Compile Include="..\..\Shared\Messaging\OutboxRelayOptions.cs" Link="Shared\Messaging\OutboxRelayOptions.cs" />
-    <Compile Include="..\..\Shared\Messaging\RabbitMqOutboxTransport.cs" Link="Shared\Messaging\RabbitMqOutboxTransport.cs" />
-    <Compile Include="..\..\Shared\Observability\*.cs" Link="Shared\Observability\%(Filename)%(Extension)" />
-    <Compile Include="..\..\Shared\Idempotency\*.cs" Link="Shared\Idempotency\%(Filename)%(Extension)" />
-    <Compile Include="..\..\Shared\Security\*.cs" Link="Shared\Security\%(Filename)%(Extension)" />
-    <Compile Include="..\..\Shared\Pagination\*.cs" Link="Shared\Pagination\%(Filename)%(Extension)" />
-    <Compile Include="..\..\Shared\Validation\*.cs" Link="Shared\Validation\%(Filename)%(Extension)" />
+    <Compile Include="..\..\..\Shared\Health\ServiceHealthChecks.cs" Link="Shared\Health\ServiceHealthChecks.cs" />
+    <Compile Include="..\..\..\Shared\Hosting\SwaggerPolicy.cs" Link="Shared\Hosting\SwaggerPolicy.cs" />
+    <Compile Include="..\..\..\Shared\Hosting\DatabaseMigrationCommand.cs" Link="Shared\Hosting\DatabaseMigrationCommand.cs" />
+    <Compile Include="..\..\..\Shared\Messaging\IOutboxTransport.cs" Link="Shared\Messaging\IOutboxTransport.cs" />
+    <Compile Include="..\..\..\Shared\Messaging\IRabbitMqConnectionProvider.cs" Link="Shared\Messaging\IRabbitMqConnectionProvider.cs" />
+    <Compile Include="..\..\..\Shared\Messaging\OutboxMessage.cs" Link="Shared\Messaging\OutboxMessage.cs" />
+    <Compile Include="..\..\..\Shared\Messaging\OutboxMetricsEndpoint.cs" Link="Shared\Messaging\OutboxMetricsEndpoint.cs" />
+    <Compile Include="..\..\..\Shared\Messaging\OutboxModelBuilderExtensions.cs" Link="Shared\Messaging\OutboxModelBuilderExtensions.cs" />
+    <Compile Include="..\..\..\Shared\Messaging\OutboxRelay.cs" Link="Shared\Messaging\OutboxRelay.cs" />
+    <Compile Include="..\..\..\Shared\Messaging\OutboxRelayOptions.cs" Link="Shared\Messaging\OutboxRelayOptions.cs" />
+    <Compile Include="..\..\..\Shared\Messaging\RabbitMqOutboxTransport.cs" Link="Shared\Messaging\RabbitMqOutboxTransport.cs" />
+    <Compile Include="..\..\..\Shared\Observability\*.cs" Link="Shared\Observability\%(Filename)%(Extension)" />
+    <Compile Include="..\..\..\Shared\Idempotency\*.cs" Link="Shared\Idempotency\%(Filename)%(Extension)" />
+    <Compile Include="..\..\..\Shared\Security\*.cs" Link="Shared\Security\%(Filename)%(Extension)" />
+    <Compile Include="..\..\..\Shared\Pagination\*.cs" Link="Shared\Pagination\%(Filename)%(Extension)" />
+    <Compile Include="..\..\..\Shared\Validation\*.cs" Link="Shared\Validation\%(Filename)%(Extension)" />
   </ItemGroup>
 
 </Project>

@@ -85,6 +85,26 @@ def configure_live_update(image, context, manifests, install_command, build_comm
         live_update = update_steps,
     )
 
+def configure_dotnet_live_update(name, project):
+    source = 'services/' + project + '/' + project
+    docker_build(
+        'projecty/' + name + ':dev', '.',
+        dockerfile = source + '/Dockerfile', target = 'development',
+        live_update = [
+            fall_back_on([source + '/Dockerfile', source + '/' + project + '.csproj', 'services/risk-pricing/pricing-policy.json']),
+            sync(source, '/src/' + source),
+            sync('Shared', '/src/Shared'),
+            sync('contracts', '/src/contracts'),
+            run('dotnet publish /src/' + source + '/' + project + '.csproj --configuration Release --output /app/publish --no-restore /p:UseAppHost=false'),
+            restart_container(),
+        ],
+    )
+
+configure_dotnet_live_update('auth-gate', 'AuthGate')
+configure_dotnet_live_update('rider-manager', 'RiderManager')
+configure_dotnet_live_update('moto-hub', 'MotoHub')
+configure_dotnet_live_update('rental-operations', 'RentalOperations')
+
 configure_live_update(
     'projecty/api-gateway:dev',
     'services/api-gateway',

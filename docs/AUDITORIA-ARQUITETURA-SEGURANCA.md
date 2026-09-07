@@ -35,7 +35,7 @@ por controle de acesso nenhum:
 `POST /api/auth/register/admin` não tem `[Authorize]`, filtro, convite nem chave. Cria o papel
 `Admin` se não existir e devolve um administrador ativo.
 **Impacto:** controle administrativo completo dos quatro serviços a partir de uma requisição anônima.
-`AuthGate/AuthGate/Controllers/AuthController.cs:47-85`
+`services/AuthGate/AuthGate/Controllers/AuthController.cs:47-85`
 
 **Status: closed.** The public endpoint was removed and administrator bootstrap is now an explicit
 CLI operation backed by process environment variables. Closed by commit
@@ -46,7 +46,7 @@ O `AdminAuthorizationFilter` tenta claim de papel, chave de API e, por último, 
 `ValidateToken(token)` — que confere só a assinatura. Um Rider passa pelo terceiro caminho.
 Os filtros de MotoHub e RiderManager retornam `isAdmin` corretamente; esta cópia divergiu.
 **Impacto:** escalonamento de privilégio; qualquer Rider lê `GET /api/rental/user/{userId}` de terceiros.
-`RentalOperations/RentalOperations/Filters/AdminAuthorizationFilter.cs:38-46`
+`services/RentalOperations/RentalOperations/Filters/AdminAuthorizationFilter.cs:38-46`
 
 **Status: closed.** The authentication middleware now builds the validated principal before the MVC
 filter authorizes it. Only the `Admin` role is accepted; valid non-admin tokens receive `403`, while
@@ -83,7 +83,7 @@ opcional após a rotação e não faz parte desta task.
 `CalculateFinalCostAsync` busca por `rentalId` e nunca compara `rental.UserId` com o usuário
 autenticado; na linha 111 faz `response.UserId = userId` antes de gravar.
 **Impacto:** falha de controle de acesso somada a adulteração de dado financeiro.
-`RentalOperations/RentalOperations/Services/RentalService.cs:76-116`
+`services/RentalOperations/RentalOperations/Services/RentalService.cs:76-116`
 
 **Status: closed.** `CalculateFinalCostAsync` agora compara o proprietário persistido com o
 `NameIdentifier` autenticado antes de qualquer retorno ou cálculo, e não sobrescreve mais o
@@ -115,22 +115,22 @@ isolados com permissões específicas. Fechado pelo commit
   Identity dos outros.
 - **A3 — `ASPNETCORE_ENVIRONMENT=Development` nos quatro contêineres.** Página de exceção
   detalhada e Swagger públicos. O AuthGate chama `UseSwagger()` uma segunda vez fora do
-  `if (IsDevelopment)`. `AuthGate/AuthGate/Program.cs:94-101`
+  `if (IsDevelopment)`. `services/AuthGate/AuthGate/Program.cs:94-101`
 - **A4 — Não existe TLS.** O README promete 8181/8001/8101/8201; nenhum certificado é
   configurado, `ASPNETCORE_URLS` é só HTTP e `UseHttpsRedirection()` vira inofensivo sem
   porta HTTPS conhecida. As chamadas entre serviços são `http://` puro.
 - **A5 — Upload de CNH validado só por extensão, com `Content-Type` do cliente.** Nunca se
   verificam os bytes iniciais, e `contentType = file.ContentType` é gravado como metadado no
   MinIO e devolvido pela URL pré-assinada → XSS armazenado.
-  `RiderManager/.../MinioFileStorageService.cs:33-49`
+  `services/RiderManager/.../MinioFileStorageService.cs:33-49`
 - **A6 — URL pré-assinada de 24 h para documento de identidade, persistida no banco** e
   devolvida na listagem de entregadores, sem revogação.
-  `RiderManager/.../MinioFileStorageService.cs:72-90`
+  `services/RiderManager/.../MinioFileStorageService.cs:72-90`
 - **A7 — Sem revogação de token; o logout não desliga nada.** `SignOutAsync()` limpa um cookie
   que este fluxo não usa; o JWT segue válido por 1 h. Sem `jti`, versão de credencial ou
-  refresh token. `AuthGate/.../AuthController.cs:206-219`
+  refresh token. `services/AuthGate/.../AuthController.cs:206-219`
 - **A8 — Login sem limite de tentativas.** `lockoutOnFailure: false` e nenhum `AddRateLimiter`
-  em nenhum `Program.cs`. `AuthGate/.../AuthController.cs:167`
+  em nenhum `Program.cs`. `services/AuthGate/.../AuthController.cs:167`
 - **A9 — Exceções internas devolvidas ao cliente.** `BadRequest(ex.Message)` nos cinco
   endpoints do `RentalController`; `ex.Message` concatenado no `MotorcycleService`; as
   exceções dos clientes HTTP carregam o corpo da resposta do serviço interno chamado.
@@ -196,7 +196,7 @@ isolados com permissões específicas. Fechado pelo commit
   `GetByLicensePlate` e `GetRiderByUserId` ficaram sem o atributo, sem motivo aparente.
 - **B3 — `role.Contains("Admin")` sobre valor possivelmente nulo** em `UpdateRiderCNH` → 500.
   `FirstOrDefault` também olha só o primeiro papel, e `Contains` compara por substring.
-  `RiderManager/.../RiderController.cs:57-64`
+  `services/RiderManager/.../RiderController.cs:57-64`
 - **B4 — A esteira de CI não roda.** Os fluxos estão em `<Serviço>/.github/workflows/`; o
   GitHub só lê `.github/workflows/` na raiz, e não existe `.github` na raiz do ProjectY. Não
   há SAST, análise de dependências vulneráveis nem varredura de imagem; o gitleaks nunca é

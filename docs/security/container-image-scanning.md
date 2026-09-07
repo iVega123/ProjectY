@@ -12,10 +12,10 @@ This makes the Dockerfiles self-contained for Visual Studio and command-line bui
 without sending `.git/` or local secrets. The equivalent standalone commands are:
 
 ```bash
-docker build -f AuthGate/AuthGate/Dockerfile -t projecty/auth-gate .
-docker build -f MotoHub/MotoHub/Dockerfile -t projecty/moto-hub .
-docker build -f RentalOperations/RentalOperations/Dockerfile -t projecty/rental-operations .
-docker build -f RiderManager/RiderManager/Dockerfile -t projecty/rider-manager .
+docker build -f services/AuthGate/AuthGate/Dockerfile -t projecty/auth-gate .
+docker build -f services/MotoHub/MotoHub/Dockerfile -t projecty/moto-hub .
+docker build -f services/RentalOperations/RentalOperations/Dockerfile -t projecty/rental-operations .
+docker build -f services/RiderManager/RiderManager/Dockerfile -t projecty/rider-manager .
 ```
 
 Local Linux/amd64 measurements after the chiseled-runtime rewrite:

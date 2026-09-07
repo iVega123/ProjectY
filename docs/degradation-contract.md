@@ -28,6 +28,6 @@ Read-only preflight failures explicitly release the owned idempotency claim, so 
 Reproduce the current failure contracts:
 
 ```sh
-dotnet test RentalOperations/RentalOperationsTests/RentalOperationsTests.csproj --filter FullyQualifiedName~DependencyFailureTests
+dotnet test services/RentalOperations/RentalOperationsTests/RentalOperationsTests.csproj --filter FullyQualifiedName~DependencyFailureTests
 cargo test --manifest-path services/api-gateway/Cargo.toml --locked
 ```

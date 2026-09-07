@@ -346,7 +346,7 @@ services:
     image: projecty/auth-gate:dev
     build:
       context: .
-      dockerfile: AuthGate/AuthGate/Dockerfile
+      dockerfile: services/AuthGate/AuthGate/Dockerfile
     command: ["--migrate=true"]
     networks:
       - projecty
@@ -359,7 +359,7 @@ services:
     image: projecty/auth-gate:dev
     build:
       context: .
-      dockerfile: AuthGate/AuthGate/Dockerfile
+      dockerfile: services/AuthGate/AuthGate/Dockerfile
     container_name: auth-gate
     ports:
       - "8080:8080"
@@ -389,7 +389,7 @@ services:
     image: projecty/rider-manager:dev
     build:
       context: .
-      dockerfile: RiderManager/RiderManager/Dockerfile
+      dockerfile: services/RiderManager/RiderManager/Dockerfile
     command: ["--migrate=true"]
     networks:
       - projecty
@@ -402,7 +402,7 @@ services:
     image: projecty/rider-manager:dev
     build:
       context: .
-      dockerfile: RiderManager/RiderManager/Dockerfile
+      dockerfile: services/RiderManager/RiderManager/Dockerfile
     container_name: rider-manager
     ports:
       - "8000:8000"
@@ -434,7 +434,7 @@ services:
     image: projecty/moto-hub:dev
     build:
       context: .
-      dockerfile: MotoHub/MotoHub/Dockerfile
+      dockerfile: services/MotoHub/MotoHub/Dockerfile
     command: ["--migrate=true"]
     networks:
       - projecty
@@ -447,7 +447,7 @@ services:
     image: projecty/moto-hub:dev
     build:
       context: .
-      dockerfile: MotoHub/MotoHub/Dockerfile
+      dockerfile: services/MotoHub/MotoHub/Dockerfile
     container_name: moto-hub
     ports:
       - "8100:8100"
@@ -474,9 +474,10 @@ services:
         condition: service_healthy
   
   rental-operations:
+    image: projecty/rental-operations:dev
     build:
       context: .
-      dockerfile: RentalOperations/RentalOperations/Dockerfile
+      dockerfile: services/RentalOperations/RentalOperations/Dockerfile
     container_name: rental-operations
     ports:
       - "8200:8200"
@@ -485,7 +486,7 @@ services:
       - projecty
     environment:
       <<: *otel-environment
-      OTEL_SERVICE_NAME: rental-operations
+      OTEL_SERVICE_NAME: rental-core
       ASPNETCORE_ENVIRONMENT: Production
       Swagger__Enabled: "${SWAGGER_ENABLED:-false}"
       ASPNETCORE_URLS: http://+:8200

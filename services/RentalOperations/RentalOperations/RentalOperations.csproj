@@ -6,7 +6,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <UserSecretsId>13eefecb-1b21-4346-8676-bd8620044da4</UserSecretsId>
     <DockerDefaultTargetOS>Linux</DockerDefaultTargetOS>
-    <DockerfileContext>..\..</DockerfileContext>
+    <DockerfileContext>..\..\..</DockerfileContext>
   </PropertyGroup>
 
   <ItemGroup>
@@ -33,19 +33,19 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Compile Include="..\..\Shared\Health\ServiceHealthChecks.cs" Link="Shared\Health\ServiceHealthChecks.cs" />
-    <Compile Include="..\..\Shared\Hosting\SwaggerPolicy.cs" Link="Shared\Hosting\SwaggerPolicy.cs" />
-    <Compile Include="..\..\Shared\Observability\*.cs" Link="Shared\Observability\%(Filename)%(Extension)" />
-    <Compile Include="..\..\Shared\Idempotency\*.cs" Link="Shared\Idempotency\%(Filename)%(Extension)" />
-    <Compile Include="..\..\Shared\Security\*.cs" Link="Shared\Security\%(Filename)%(Extension)" />
-    <Compile Include="..\..\Shared\Pagination\*.cs" Link="Shared\Pagination\%(Filename)%(Extension)" />
-    <Compile Include="..\..\Shared\Validation\VehicleAttributes.cs" Link="Shared\Validation\VehicleAttributes.cs" />
+    <Compile Include="..\..\..\Shared\Health\ServiceHealthChecks.cs" Link="Shared\Health\ServiceHealthChecks.cs" />
+    <Compile Include="..\..\..\Shared\Hosting\SwaggerPolicy.cs" Link="Shared\Hosting\SwaggerPolicy.cs" />
+    <Compile Include="..\..\..\Shared\Observability\*.cs" Link="Shared\Observability\%(Filename)%(Extension)" />
+    <Compile Include="..\..\..\Shared\Idempotency\*.cs" Link="Shared\Idempotency\%(Filename)%(Extension)" />
+    <Compile Include="..\..\..\Shared\Security\*.cs" Link="Shared\Security\%(Filename)%(Extension)" />
+    <Compile Include="..\..\..\Shared\Pagination\*.cs" Link="Shared\Pagination\%(Filename)%(Extension)" />
+    <Compile Include="..\..\..\Shared\Validation\VehicleAttributes.cs" Link="Shared\Validation\VehicleAttributes.cs" />
   </ItemGroup>
 
-  <ItemGroup><Compile Include="..\..\Shared\Messaging\BoundedRabbitMqRetryRouter.cs" Link="Shared\Messaging\BoundedRabbitMqRetryRouter.cs" /></ItemGroup>
+  <ItemGroup><Compile Include="..\..\..\Shared\Messaging\BoundedRabbitMqRetryRouter.cs" Link="Shared\Messaging\BoundedRabbitMqRetryRouter.cs" /></ItemGroup>
   <ItemGroup>
-    <Protobuf Include="../../contracts/events/rental.proto" GrpcServices="None" />
-    <Protobuf Include="../../contracts/events/rider.proto" GrpcServices="None" />
-    <Content Include="../../services/risk-pricing/pricing-policy.json" Link="pricing-policy.json" CopyToOutputDirectory="PreserveNewest" />
+    <Protobuf Include="../../../contracts/events/rental.proto" GrpcServices="None" />
+    <Protobuf Include="../../../contracts/events/rider.proto" GrpcServices="None" />
+    <Content Include="../../risk-pricing/pricing-policy.json" Link="pricing-policy.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>
