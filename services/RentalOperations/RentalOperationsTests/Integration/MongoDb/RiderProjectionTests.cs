@@ -1,4 +1,5 @@
 using Google.Protobuf;
+using MongoDB.Bson;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Configuration;
 using MongoDB.Driver;
@@ -120,5 +121,30 @@ public sealed class RiderProjectionTests : IAsyncLifetime
         Assert.True(view!.Verified);
         Assert.Equal("Ada Lovelace", view.Name);
         Assert.Null(await new MongoRiderProjectionStore(_context).GetAsync("absent", CancellationToken.None));
+    }
+
+    // The benchmark stack seeds its rider straight into Postgres, so nothing ever
+    // reaches the projection through Kafka and load/fixtures/reset-rentals.js writes
+    // the row directly. That fixture and this model have to keep agreeing: a renamed
+    // field or a double where a long belongs would only surface as a load gate that
+    // warms up against "awaiting processing".
+    [Fact]
+    [Trait("Category", "Integration")]
+    public async Task LoadFixtureDocumentShapeStaysReadable()
+    {
+        await _context.Database.GetCollection<BsonDocument>(MongoRiderProjectionStore.CollectionName)
+            .InsertOneAsync(new BsonDocument
+            {
+                { "_id", "load-rider" },
+                { "Verified", true },
+                { "VerifiedAtMs", new BsonInt64(1) },
+                { "Name", "Load rider" }
+            });
+
+        var view = await new MongoRiderProjectionStore(_context).GetAsync("load-rider", CancellationToken.None);
+
+        Assert.NotNull(view);
+        Assert.True(view!.Verified);
+        Assert.Equal("Load rider", view.Name);
     }
 }
