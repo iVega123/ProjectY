@@ -3,8 +3,17 @@
 This guide starts the original four-service system that was reviewed in the
 [architecture and security audit](AUDITORIA-ARQUITETURA-SEGURANCA.md), with the
 Rust gateway in front and the LGTM observability stack running as the first
-strangler-migration components. The remaining topology under `deploy/` is still
-a design scaffold for services that have not been implemented yet.
+strangler-migration components. All four .NET projects now live under `services/`.
+`deploy/base/compose.yaml` imports the same application model as the root
+entrypoint; the self-hosted overlay selects the gateway's production image.
+There is no second, unimplemented application topology. PostgreSQL and MongoDB
+remain in use until the verified rental data migration in #135.
+
+`tilt up` enables live updates for the .NET services, gateway and media service.
+`tilt up -- --full` adds the existing telemetry, risk-pricing and console services.
+The rental application's OTel resource is `rental-core`; its Compose/DNS name
+remains `rental-operations` until consolidation. The SLO rules and dashboards
+use the OTel name, while dependency routing uses the DNS name.
 
 ## Safety warning
 

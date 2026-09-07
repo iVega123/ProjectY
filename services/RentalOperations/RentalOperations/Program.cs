@@ -23,7 +23,7 @@ var builder = WebApplication.CreateBuilder(args);
 
 var serviceName = builder.Configuration["OTEL_SERVICE_NAME"]
     ?? builder.Configuration["ApplicationName"]
-    ?? "rental-operations";
+    ?? "rental-core";
 
 builder.Services.AddProjectYTelemetry(
     builder.Configuration,

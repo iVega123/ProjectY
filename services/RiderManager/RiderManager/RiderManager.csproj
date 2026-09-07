@@ -6,7 +6,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <UserSecretsId>6c506916-5e52-4447-ade1-8bb27ba378f4</UserSecretsId>
     <DockerDefaultTargetOS>Linux</DockerDefaultTargetOS>
-    <DockerfileContext>..\..</DockerfileContext>
+    <DockerfileContext>..\..\..</DockerfileContext>
   </PropertyGroup>
 
   <ItemGroup>
@@ -39,19 +39,19 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Compile Include="..\..\Shared\Health\ServiceHealthChecks.cs" Link="Shared\Health\ServiceHealthChecks.cs" />
-    <Compile Include="..\..\Shared\Hosting\SwaggerPolicy.cs" Link="Shared\Hosting\SwaggerPolicy.cs" />
-    <Compile Include="..\..\Shared\Hosting\DatabaseMigrationCommand.cs" Link="Shared\Hosting\DatabaseMigrationCommand.cs" />
-    <Compile Include="..\..\Shared\Messaging\QueueMessageAuthenticator.cs" Link="Shared\Messaging\QueueMessageAuthenticator.cs" />
-    <Compile Include="..\..\Shared\Observability\*.cs" Link="Shared\Observability\%(Filename)%(Extension)" />
-    <Compile Include="..\..\Shared\Idempotency\*.cs" Link="Shared\Idempotency\%(Filename)%(Extension)" />
-    <Compile Include="..\..\Shared\Security\*.cs" Link="Shared\Security\%(Filename)%(Extension)" />
-    <Compile Include="..\..\Shared\Pagination\*.cs" Link="Shared\Pagination\%(Filename)%(Extension)" />
-    <Compile Include="..\..\Shared\Validation\*.cs" Link="Shared\Validation\%(Filename)%(Extension)" />
+    <Compile Include="..\..\..\Shared\Health\ServiceHealthChecks.cs" Link="Shared\Health\ServiceHealthChecks.cs" />
+    <Compile Include="..\..\..\Shared\Hosting\SwaggerPolicy.cs" Link="Shared\Hosting\SwaggerPolicy.cs" />
+    <Compile Include="..\..\..\Shared\Hosting\DatabaseMigrationCommand.cs" Link="Shared\Hosting\DatabaseMigrationCommand.cs" />
+    <Compile Include="..\..\..\Shared\Messaging\QueueMessageAuthenticator.cs" Link="Shared\Messaging\QueueMessageAuthenticator.cs" />
+    <Compile Include="..\..\..\Shared\Observability\*.cs" Link="Shared\Observability\%(Filename)%(Extension)" />
+    <Compile Include="..\..\..\Shared\Idempotency\*.cs" Link="Shared\Idempotency\%(Filename)%(Extension)" />
+    <Compile Include="..\..\..\Shared\Security\*.cs" Link="Shared\Security\%(Filename)%(Extension)" />
+    <Compile Include="..\..\..\Shared\Pagination\*.cs" Link="Shared\Pagination\%(Filename)%(Extension)" />
+    <Compile Include="..\..\..\Shared\Validation\*.cs" Link="Shared\Validation\%(Filename)%(Extension)" />
   </ItemGroup>
 
-  <ItemGroup><Compile Include="..\..\Shared\Messaging\BoundedRabbitMqRetryRouter.cs" Link="Shared\Messaging\BoundedRabbitMqRetryRouter.cs" /></ItemGroup>
+  <ItemGroup><Compile Include="..\..\..\Shared\Messaging\BoundedRabbitMqRetryRouter.cs" Link="Shared\Messaging\BoundedRabbitMqRetryRouter.cs" /></ItemGroup>
   <ItemGroup>
-    <Protobuf Include="../../contracts/events/rider.proto" GrpcServices="None" />
+    <Protobuf Include="../../../contracts/events/rider.proto" GrpcServices="None" />
   </ItemGroup>
 </Project>

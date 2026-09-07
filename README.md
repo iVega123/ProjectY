@@ -48,17 +48,18 @@ source locations are in the
 
 | Area | Current state |
 |---|---|
-| Audited baseline | Four ASP.NET Core services: `AuthGate`, `MotoHub`, `RiderManager`, and `RentalOperations` |
+| Audited baseline | Four ASP.NET Core services under `services/`: `AuthGate`, `MotoHub`, `RiderManager`, and `RentalOperations` |
 | Data and messaging | PostgreSQL, MongoDB, RabbitMQ, and MinIO in the original local stack |
 | Active observability | Application OTLP exporters, OpenTelemetry Collector, Prometheus, Tempo, Loki, and Grafana |
 | Retired observability | The unauthenticated Elasticsearch, Logstash, and Kibana stack |
-| Modernization scaffold | A container topology under `deploy/` for the planned transactional core and fault injection |
+| Platform integration | Root and `deploy/base` entrypoints share the real application topology; Tilt live updates all four .NET services |
 | Polyglot services | Rust media-guard, Elixir live telemetry, asynchronous Python risk/pricing and Next.js operations console |
 | Decision records | The design and implementation trail is indexed under [`docs/adr/`](docs/adr/README.md) |
 
-The modernization compose file is a design scaffold: it references services
-that have not landed yet. The root compose file runs the audited services behind
-the Rust gateway together with the LGTM observability stack.
+The platform entrypoint imports the root Compose model, which builds the
+existing services behind the Rust gateway with the LGTM observability stack.
+The rental OTel resource is `rental-core`. PostgreSQL and MongoDB remain until
+the verified data migration; no nonexistent application is declared.
 
 ### Operate the polyglot flow
 

@@ -1,18 +1,22 @@
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS restore
 WORKDIR /src
 
-COPY RiderManager/RiderManager/RiderManager.csproj RiderManager/RiderManager/
-RUN dotnet restore RiderManager/RiderManager/RiderManager.csproj
+COPY services/RiderManager/RiderManager/RiderManager.csproj services/RiderManager/RiderManager/
+RUN dotnet restore services/RiderManager/RiderManager/RiderManager.csproj
 
 FROM restore AS publish
-COPY RiderManager/RiderManager/ RiderManager/RiderManager/
+COPY services/RiderManager/RiderManager/ services/RiderManager/RiderManager/
 COPY Shared/ Shared/
 COPY contracts/ contracts/
-RUN dotnet publish RiderManager/RiderManager/RiderManager.csproj \
+RUN dotnet publish services/RiderManager/RiderManager/RiderManager.csproj \
     --configuration Release \
     --output /app/publish \
     --no-restore \
     /p:UseAppHost=false
+
+FROM publish AS development
+WORKDIR /app/publish
+ENTRYPOINT ["dotnet", "RiderManager.dll"]
 
 FROM mcr.microsoft.com/dotnet/aspnet:10.0-noble-chiseled-extra AS final
 WORKDIR /app
