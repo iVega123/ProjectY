@@ -3,6 +3,7 @@
   "rental.closed": {"schema": "rental.proto", "key": "motorcycle_id"},
   "rider.registered": {"schema": "rider.proto", "key": "rider_id"},
   "rider.verified": {"schema": "rider.proto", "key": "rider_id"},
+  "rider.verified.v2": {"schema": "rider_v2.proto", "key": "rider_id"},
   "document.stored": {"schema": "rider.proto", "key": "rider_id"},
   "document.verified": {"schema": "rider.proto", "key": "rider_id"},
   "risk.scored": {"schema": "rider.proto", "key": "rider_id"},

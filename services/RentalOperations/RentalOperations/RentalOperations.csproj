@@ -49,6 +49,7 @@
     <Content Include="../../../contracts/topics.json" Link="event-contracts/topics.json" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="../../../contracts/events/*.proto" Link="event-contracts/events/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
     <Protobuf Include="../../../contracts/events/rider.proto" GrpcServices="None" />
+    <Protobuf Include="../../../contracts/events/rider_v2.proto" GrpcServices="None" />
     <Content Include="../../risk-pricing/pricing-policy.json" Link="pricing-policy.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

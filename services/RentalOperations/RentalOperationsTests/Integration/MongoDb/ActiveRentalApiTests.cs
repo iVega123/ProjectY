@@ -12,6 +12,7 @@ using RentalOperations.Data;
 using RentalOperations.DTOs;
 using RentalOperations.Model;
 using RentalOperations.Repository;
+using RentalOperations.Services;
 using ProjectY.Shared.Pagination;
 using System.Net;
 using System.Net.Http.Json;
@@ -427,7 +428,7 @@ internal sealed class MongoRentalApiFactory : WebApplicationFactory<Program>
             services.RemoveAll<IHostedService>();
             services.RemoveAll<MongoDbContext>();
             services.RemoveAll<IRentalRepository>();
-            services.RemoveAll<IRiderManagerService>();
+            services.RemoveAll<IRiderProjectionStore>();
             services.RemoveAll<IMotorcycleService>();
 
             services.AddSingleton(new MongoDbContext(_connectionString, _databaseName));
@@ -436,7 +437,7 @@ internal sealed class MongoRentalApiFactory : WebApplicationFactory<Program>
             services.AddScoped<IRentalRepository>(provider => new SynchronizingRentalRepository(
                 provider.GetRequiredService<RentalRepository>(),
                 provider.GetRequiredService<ConcurrentCreateGate>()));
-            services.AddSingleton<IRiderManagerService, StubRiderManagerService>();
+            services.AddSingleton<IRiderProjectionStore, StubRiderProjectionStore>();
             services.AddSingleton<IMotorcycleService>(MotorcycleService);
             services.AddHostedService<MongoRentalIndexInitializer>();
         });
@@ -522,14 +523,10 @@ internal sealed class SynchronizingRentalRepository : IRentalRepository
         _repository.ReleaseRentalClaimAsync(licencePlate, rentalId);
 }
 
-internal sealed class StubRiderManagerService : IRiderManagerService
+internal sealed class StubRiderProjectionStore : IRiderProjectionStore
 {
-    public Task<Rider> GetRiderByIdAsync(string riderId) => Task.FromResult(new Rider
-    {
-        Id = riderId,
-        UserId = riderId,
-        CNHType = "A"
-    });
+    public Task<RiderView?> GetAsync(string riderId, CancellationToken token) =>
+        Task.FromResult<RiderView?>(new RiderView(riderId, true, 1, "Stub Rider"));
 }
 
 internal sealed class StubMotorcycleService : IMotorcycleService

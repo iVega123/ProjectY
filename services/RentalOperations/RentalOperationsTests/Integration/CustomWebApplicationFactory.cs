@@ -37,6 +37,11 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>
             services.AddSingleton<InMemoryRentalRepository>();
             services.AddSingleton<IRentalRepository>(provider =>
                 provider.GetRequiredService<InMemoryRentalRepository>());
+            // These tests exercise the authorization pipeline, not the projection.
+            // The real store would pull MongoDbContext into a graph this factory
+            // deliberately keeps in memory.
+            services.RemoveAll<IRiderProjectionStore>();
+            services.AddSingleton<IRiderProjectionStore>(new AlwaysVerifiedRiderProjection());
         });
     }
 
@@ -54,4 +59,10 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>
         return client;
     }
 
+}
+
+internal sealed class AlwaysVerifiedRiderProjection : IRiderProjectionStore
+{
+    public Task<RiderView?> GetAsync(string riderId, CancellationToken token) =>
+        Task.FromResult<RiderView?>(new RiderView(riderId, true, 1, "Ada Lovelace"));
 }
