@@ -1,0 +1,11 @@
+{
+  "rental.started": {"schema": "rental.proto", "key": "motorcycle_id"},
+  "rental.closed": {"schema": "rental.proto", "key": "motorcycle_id"},
+  "rider.registered": {"schema": "rider.proto", "key": "rider_id"},
+  "rider.verified": {"schema": "rider.proto", "key": "rider_id"},
+  "document.stored": {"schema": "rider.proto", "key": "rider_id"},
+  "document.verified": {"schema": "rider.proto", "key": "rider_id"},
+  "risk.scored": {"schema": "rider.proto", "key": "rider_id"},
+  "pricing.updated": {"schema": "rider.proto", "key": "currency"},
+  "invoice.issued": {"schema": "invoice.proto", "key": "rental_id"}
+}

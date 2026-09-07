@@ -23,6 +23,11 @@ defmodule ProjectYTelemetry.TrackingTest do
     assert RentalEvent.decode(<<>>).occurred_at_ms == nil
     event = %RentalEvent{rental_id: "r1", rider_id: "u1", occurred_at_ms: 0}
     assert RentalEvent.decode(RentalEvent.encode(event)).occurred_at_ms == 0
+    # Golden emitted by the .NET v1 producer; fields 10-12 are unknown to this v0 decoder.
+    golden = Base.decode16!("0A016512017222016D50005A0342524C6203416461")
+
+    assert %RentalEvent{event_id: "e", rental_id: "r", motorcycle_id: "m"} =
+             RentalEvent.decode(golden)
   end
 
   test "socket rejects unsigned tickets" do

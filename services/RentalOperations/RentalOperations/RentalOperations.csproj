@@ -45,6 +45,9 @@
   <ItemGroup><Compile Include="..\..\..\Shared\Messaging\BoundedRabbitMqRetryRouter.cs" Link="Shared\Messaging\BoundedRabbitMqRetryRouter.cs" /></ItemGroup>
   <ItemGroup>
     <Protobuf Include="../../../contracts/events/rental.proto" GrpcServices="None" />
+    <Compile Include="../../../Shared/Messaging/RegisteredEventSchema.cs" Link="Shared/Messaging/RegisteredEventSchema.cs" />
+    <Content Include="../../../contracts/topics.json" Link="event-contracts/topics.json" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="../../../contracts/events/*.proto" Link="event-contracts/events/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
     <Protobuf Include="../../../contracts/events/rider.proto" GrpcServices="None" />
     <Content Include="../../risk-pricing/pricing-policy.json" Link="pricing-policy.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>

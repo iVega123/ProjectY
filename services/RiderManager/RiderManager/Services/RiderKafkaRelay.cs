@@ -4,6 +4,8 @@ using RiderManager.Data;
 using System.Diagnostics;
 using System.Text;
 using ProjectY.Shared.Observability;
+using ProjectY.Shared.Messaging;
+using ProjectY.Events;
 
 namespace RiderManager.Services;
 
@@ -13,6 +15,10 @@ public sealed class RiderKafkaRelay(IServiceScopeFactory scopes, IConfiguration 
     protected override async Task ExecuteAsync(CancellationToken token)
     {
         if (string.IsNullOrWhiteSpace(config["Kafka:BootstrapServers"])) return;
+        using var registryClient = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
+        var schemas = new RegisteredEventSchema(registryClient,
+            config["Kafka:SchemaRegistryUrl"] ?? throw new InvalidOperationException("Kafka schema registry URL is required."),
+            Path.Combine(AppContext.BaseDirectory, "event-contracts"));
         using var producer = new ProducerBuilder<string, byte[]>(new ProducerConfig
         { BootstrapServers = config["Kafka:BootstrapServers"], EnableIdempotence = true, Acks = Acks.All, MessageTimeoutMs = 5000 }).Build();
         while (!token.IsCancellationRequested)
@@ -27,6 +33,9 @@ public sealed class RiderKafkaRelay(IServiceScopeFactory scopes, IConfiguration 
                     using var span = Traces.StartActivity("publish document.stored", ActivityKind.Producer, parent);
                     span?.SetTag("messaging.system", "kafka");
                     var headers = new Headers();
+                    RegisteredEventSchema.ValidateKey(item.RiderId, RiderEvent.Parser.ParseFrom(item.Payload).RiderId);
+                    var schemaId = await schemas.ResolveAsync(item.Topic, token);
+                    headers.Add("schema-id", Encoding.UTF8.GetBytes(schemaId.ToString(System.Globalization.CultureInfo.InvariantCulture)));
                     if ((span?.Id ?? item.TraceParent) is { } trace) headers.Add("traceparent", Encoding.UTF8.GetBytes(trace));
                     await producer.ProduceAsync(item.Topic, new Message<string, byte[]> { Key = item.RiderId, Value = item.Payload, Headers = headers }, token);
                     db.EventOutbox.Remove(item);

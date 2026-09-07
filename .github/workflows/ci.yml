@@ -18,6 +18,33 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  event-contracts:
+    name: Event contracts / FULL Protobuf
+    runs-on: ubuntu-latest
+    services:
+      registry:
+        image: quay.io/apicurio/apicurio-registry:3.3.2
+        ports: ['18081:8080']
+        options: >-
+          --health-cmd "curl --fail --silent http://localhost:9000/health/ready"
+          --health-interval 5s --health-timeout 3s --health-retries 30
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Validate conventions and registry compatibility
+        env:
+          CONTRACT_BASE_REF: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          if [[ -z "$CONTRACT_BASE_REF" || "$CONTRACT_BASE_REF" =~ ^0+$ ]]; then
+            export CONTRACT_BASE_REF=HEAD^
+          fi
+          node --test contracts/check.test.mjs
+          node contracts/check.mjs
+
   changes:
     name: Detect changed services
     runs-on: ubuntu-latest
@@ -634,6 +661,7 @@ jobs:
   required:
     name: Required
     needs:
+      - event-contracts
       - changes
       - observability
       - dotnet
@@ -652,6 +680,7 @@ jobs:
       - name: Verify CI result
         env:
           CHANGES_RESULT: ${{ needs.changes.result }}
+          CONTRACTS_RESULT: ${{ needs.event-contracts.result }}
           OBSERVABILITY_RESULT: ${{ needs.observability.result }}
           DOTNET_RESULT: ${{ needs.dotnet.result }}
           NO_CHANGES_RESULT: ${{ needs.no_relevant_changes.result }}
@@ -669,6 +698,7 @@ jobs:
         shell: bash
         run: |
           [[ "$CHANGES_RESULT" == "success" ]]
+          [[ "$CONTRACTS_RESULT" == "success" ]]
           [[ "$OBSERVABILITY_RESULT" == "success" || "$OBSERVABILITY_RESULT" == "skipped" ]]
           [[ "$DOTNET_RESULT" == "success" || "$NO_CHANGES_RESULT" == "success" ]]
           [[ "$RUST_RESULT" == "success" || "$RUST_RESULT" == "skipped" ]]

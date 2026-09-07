@@ -1,4 +1,5 @@
 import io
+import json
 import logging
 import os
 import time
@@ -14,6 +15,7 @@ from rental_pb2 import RentalEvent
 from rider_pb2 import RiderEvent
 from state import State
 from policy import verify_number
+from schema_registry import RegisteredSchemas
 
 log = logging.getLogger("risk-pricing")
 tracer = trace.get_tracer("risk-pricing")
@@ -48,6 +50,7 @@ def run(stop, health):
     consumer = Consumer({"bootstrap.servers":bootstrap, "group.id":"risk-pricing-v1",
                          "enable.auto.commit":False, "auto.offset.reset":"earliest"})
     producer = Producer({"bootstrap.servers":bootstrap, "enable.idempotence":True, "message.timeout.ms":5000})
+    schemas = RegisteredSchemas(os.environ['SCHEMA_REGISTRY_URL'])
     consumer.subscribe(["document.stored", "rider.verified", "rental.started", "rental.closed"])
     last_periodic = 0
     try:
@@ -66,6 +69,11 @@ def run(stop, health):
                             attributes={"messaging.system":"kafka", "messaging.destination.name":topic}):
                         carrier = {}
                         propagate.inject(carrier)
+                        outbox_event = RiderEvent.FromString(payload)
+                        event_key = json.loads(outbox_event.pricing_json)['currency'] if topic == 'pricing.updated' else outbox_event.rider_id
+                        if not event_key or key != event_key:
+                            raise ValueError('Kafka key must match the immutable event identifier')
+                        carrier['schema-id'] = str(schemas.resolve(topic))
                         producer.produce(topic, key=key, value=payload, headers=list(carrier.items()),
                                          on_delivery=lambda error, _msg, result=delivered: result.set_result(error))
                         if producer.flush(6) or not delivered.done() or delivered.result():

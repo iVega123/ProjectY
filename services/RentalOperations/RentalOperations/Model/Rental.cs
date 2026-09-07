@@ -7,6 +7,7 @@ namespace RentalOperations.Model
     public class Rental
     {
         public string MotorcycleId { get; set; } = string.Empty;
+        public string? RiderName { get; set; }
         public List<RentalEventEnvelope> PendingEvents { get; set; } = [];
         [BsonId]
         [BsonRepresentation(BsonType.ObjectId)]
