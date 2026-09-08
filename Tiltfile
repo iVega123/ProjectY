@@ -102,8 +102,7 @@ def configure_dotnet_live_update(name, project):
 
 configure_dotnet_live_update('auth-gate', 'AuthGate')
 configure_dotnet_live_update('rider-manager', 'RiderManager')
-configure_dotnet_live_update('moto-hub', 'MotoHub')
-configure_dotnet_live_update('rental-operations', 'RentalOperations')
+configure_dotnet_live_update('rental-core', 'rental-core/RentalCore')
 
 configure_live_update(
     'projecty/api-gateway:dev',
@@ -121,8 +120,8 @@ configure_live_update(
 )
 infra_resources = ['toxiproxy', 'postgres', 'redis', 'rabbitmq', 'mongodb', 'minio']
 observability_resources = ['tempo', 'loki', 'otel-collector', 'prometheus', 'grafana']
-setup_resources = ['auth-gate-migrations', 'rider-manager-migrations', 'moto-hub-migrations']
-service_resources = ['auth-gate', 'rider-manager', 'moto-hub', 'rental-operations', 'media-guard']
+setup_resources = ['auth-gate-migrations', 'rider-manager-migrations', 'rental-core-migrations']
+service_resources = ['auth-gate', 'rider-manager', 'rental-core', 'media-guard']
 
 if full:
     configure_live_update(

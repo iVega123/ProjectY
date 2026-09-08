@@ -12,7 +12,7 @@ namespace RentalOperationsTests.Integration;
 public class CustomWebApplicationFactory : WebApplicationFactory<Program>
 {
     public const string GatewayIdentityKey = "test-only-gateway-identity-key-32-bytes";
-    public const string GatewayIdentityAudience = "projecty.rental-operations";
+    public const string GatewayIdentityAudience = "projecty.rental-core";
 
     public InMemoryRentalRepository Repository =>
         Services.GetRequiredService<InMemoryRentalRepository>();

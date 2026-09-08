@@ -78,7 +78,7 @@ requires; temporary compiler dependencies are removed after installation.
   Tesseract on a generated PNG as well as restart/idempotency tests.
   In the isolated running worker, `python smoke_document.py` additionally proves
   the real media-guard → MinIO → Kafka → OCR path and removes its own test objects.
-* .NET: `dotnet test services/RentalOperations/RentalOperations.sln` and
+* .NET: `dotnet test services/rental-core/RentalCore.sln` and
   `dotnet test services/RiderManager/RiderManager.sln` use isolated Testcontainers.
 * Console: `npm ci`, `npm test`, `npm run build` in services/console.
 

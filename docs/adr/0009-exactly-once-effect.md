@@ -241,8 +241,7 @@ only where the test must deterministically stop or observe a publish.
 Run the proof suite from the repository root:
 
 ```powershell
-dotnet test services/RentalOperations/RentalOperationsTests/RentalOperationsTests.csproj --filter "Category=Integration&Guarantee~ADR-0009"
-dotnet test services/MotoHub/MotoHubTests/MotoHubTests.csproj --filter "Category=Integration&Guarantee~ADR-0009"
+dotnet test services/rental-core/RentalCoreTests/RentalCoreTests.csproj --filter "Category=Integration&Guarantee~ADR-0009"
 dotnet test services/RiderManager/RiderManagerTests/RiderManagerTests.csproj --filter "Category=Integration&Guarantee~ADR-0009"
 ```
 
