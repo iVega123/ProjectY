@@ -4,7 +4,7 @@ namespace RentalOperations.Domain
 {
     public class RentalDomain
     {
-        public string MotocycleLicencePlate { get; private set; } = string.Empty;
+        public Guid MotorcycleId { get; private set; }
         public string UserId { get; private set; } = string.Empty;
         public DateTime StartDate { get; private set; }
         public DateTime? EndDate { get; private set; }
@@ -16,10 +16,14 @@ namespace RentalOperations.Domain
         public static RentalDomain Create(RentalCreateDto dto, string userId)
         {
             ValidateDates(dto.StartDate, dto.PredictedEndDate);
+            if (dto.MotorcycleId == Guid.Empty)
+            {
+                throw new ArgumentException("A motorcycle id is required.");
+            }
 
             var domain = new RentalDomain
             {
-                MotocycleLicencePlate = dto.MotocycleLicencePlate,
+                MotorcycleId = dto.MotorcycleId,
                 UserId = userId,
                 StartDate = dto.StartDate,
                 EndDate = null,

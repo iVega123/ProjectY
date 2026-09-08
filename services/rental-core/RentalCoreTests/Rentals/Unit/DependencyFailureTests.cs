@@ -107,7 +107,7 @@ public sealed class DependencyFailureTests
 
     private static RentalCreateDto Request() => new()
     {
-        MotocycleLicencePlate = "ABC1D23",
+        MotorcycleId = Guid.NewGuid(),
         StartDate = DateTime.UtcNow.AddDays(1),
         PredictedEndDate = DateTime.UtcNow.AddDays(8)
     };

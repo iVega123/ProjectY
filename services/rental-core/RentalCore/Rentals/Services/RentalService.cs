@@ -29,10 +29,16 @@ namespace RentalOperations.Services
             _riders = riders;
         }
 
+        /// <summary>
+        /// Quantos aluguéis um lote pode pedir de uma vez.
+        ///
+        /// Um lote sem teto é uma consulta arbitrária escrita pelo cliente, e o
+        /// #138 mede a tela por número de chamadas, não por tamanho de resposta.
+        /// </summary>
+        public const int MaxBatchSize = 100;
+
         public async Task CreateRentalAsync(RentalCreateDto createDto, string userId)
         {
-            createDto.MotocycleLicencePlate = BrazilianLicensePlateAttribute.Normalize(
-                createDto.MotocycleLicencePlate);
             if (createDto.StartDate.AddDays(1) >= createDto.PredictedEndDate)
             {
                 throw new InvalidOperationException("The Rent time must at least one day");
@@ -52,36 +58,31 @@ namespace RentalOperations.Services
             }
 
             var motorcycle = await BeforeWriteAsync(
-                () => _motorcycleService.GetMotorcycleByIdAsync(createDto.MotocycleLicencePlate));
+                () => _motorcycleService.GetMotorcycleByIdAsync(createDto.MotorcycleId));
             if (motorcycle == null)
             {
                 throw new ArgumentException("Motorcycle does not exist.");
             }
             if (motorcycle.retiredAtUtc is not null)
             {
-                throw new MotorcycleRetiredException(createDto.MotocycleLicencePlate);
-            }
-            if (!Guid.TryParse(motorcycle.id, out var motorcycleId))
-            {
-                throw new ArgumentException("Motorcycle does not exist.");
+                throw new MotorcycleRetiredException(createDto.MotorcycleId);
             }
 
             // Uma sobreposição futura não é a mesma coisa que uma dupla reserva
             // agora, e o índice único parcial só recusa a segunda. Esta checagem
             // cobre a agenda; a corrida continua sendo decidida no INSERT.
             if (await BeforeWriteAsync(() => _repository.HasOverlappingRentalAsync(
-                motorcycleId,
+                createDto.MotorcycleId,
                 createDto.StartDate,
                 createDto.PredictedEndDate)))
             {
-                throw new ActiveRentalConflictException(createDto.MotocycleLicencePlate);
+                throw new ActiveRentalConflictException(createDto.MotorcycleId);
             }
 
             var rentalDomain = RentalDomain.Create(createDto, userId);
             var rental = new Rental
             {
-                MotorcycleId = motorcycleId,
-                MotorcycleLicencePlate = rentalDomain.MotocycleLicencePlate,
+                MotorcycleId = rentalDomain.MotorcycleId,
                 UserId = rentalDomain.UserId,
                 RiderName = rider.Name,
                 StartDate = rentalDomain.StartDate,
@@ -157,10 +158,30 @@ namespace RentalOperations.Services
                 page.NextCursor);
         }
 
-        public async Task<bool> IsMotorcycleCurrentlyRentedAsync(string licencePlate)
+        /// <summary>
+        /// A leitura em lote do #138.
+        ///
+        /// Um id que não pertence a quem pediu não vira 403: vira ausência. O
+        /// lote devolve o que o chamador pode ver, e "existe, mas não é seu"
+        /// seria mais do que ele precisa saber -- transformaria o endpoint num
+        /// oráculo de existência para quem quisesse varrer ids.
+        /// </summary>
+        public async Task<IReadOnlyList<ResponseRentalDTO>> GetRentalsByIdsAsync(
+            IReadOnlyCollection<Guid> ids,
+            string userId,
+            bool isAdmin)
         {
-            return await _repository.IsMotorcycleCurrentlyRentedAsync(
-                BrazilianLicensePlateAttribute.Normalize(licencePlate));
+            var rentals = await _repository.GetRentalsByIdsAsync(ids);
+            var visible = isAdmin
+                ? rentals
+                : rentals.Where(rental => string.Equals(rental.UserId, userId, StringComparison.Ordinal))
+                         .ToList();
+            return _mapper.Map<IReadOnlyList<ResponseRentalDTO>>(visible);
+        }
+
+        public async Task<bool> IsMotorcycleCurrentlyRentedAsync(Guid motorcycleId)
+        {
+            return await _repository.IsMotorcycleCurrentlyRentedAsync(motorcycleId);
         }
 
         private static async Task<T> BeforeWriteAsync<T>(Func<Task<T>> read)

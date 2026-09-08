@@ -19,9 +19,9 @@ namespace RentalOperations.CrossCutting.Services
     public sealed class MotorcycleService(MotoHub.Services.IMotorcycleService motorcycles)
         : IMotorcycleService
     {
-        public async Task<Motorcycle?> GetMotorcycleByIdAsync(string licensePlate)
+        public async Task<Motorcycle?> GetMotorcycleByIdAsync(Guid id)
         {
-            var found = await motorcycles.GetMotorcycleByLicensePlateAsync(licensePlate);
+            var found = await motorcycles.GetMotorcycleByIdAsync(id);
             return found is null
                 ? null
                 : new Motorcycle

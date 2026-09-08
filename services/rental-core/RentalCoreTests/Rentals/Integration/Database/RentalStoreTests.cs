@@ -227,6 +227,34 @@ public sealed class RentalStoreTests(RentalCoreDatabase database)
         Assert.Equal("JOI0N02", reread!.MotorcycleLicencePlate);
     }
 
+    [Fact]
+    [Trait("Category", "Integration")]
+    public async Task BatchRead_ReturnsTheRequestedRentalsAndIgnoresUnknownIds()
+    {
+        await database.ResetAsync();
+        await using var dataSource = NpgsqlDataSource.Create(database.ConnectionString);
+        var repository = new SqlRentalRepository(dataSource);
+        var wanted = new List<Guid>();
+        for (var index = 0; index < 3; index++)
+        {
+            var motorcycleId = await database.AddMotorcycleAsync($"BAT{index:D4}");
+            var rental = await repository.CreateRentalAsync(NewRental(motorcycleId, "rider-batch"));
+            wanted.Add(rental.Id);
+        }
+
+        var other = await database.AddMotorcycleAsync("BAT9999");
+        await repository.CreateRentalAsync(NewRental(other, "rider-batch"));
+
+        // Um id que não existe não é erro: some da resposta. Quem pediu compara o
+        // que recebeu com o que pediu, e o banco não precisa opinar sobre a
+        // diferença -- que é o que permite ao BFF pedir um lote sem antes
+        // perguntar quais ids ainda existem.
+        var found = await repository.GetRentalsByIdsAsync([.. wanted, Guid.NewGuid()]);
+
+        Assert.Equal(3, found.Count);
+        Assert.Equal(wanted.OrderBy(id => id), found.Select(rental => rental.Id).OrderBy(id => id));
+    }
+
     private static Rental NewRental(Guid motorcycleId, string riderId)
     {
         var start = DateTime.UtcNow.Date.AddDays(1);

@@ -54,16 +54,14 @@ fn rider_admin_route(method: &Method, path: &str) -> bool {
     !id.is_empty() && !id.contains('/') && (method == Method::GET || method == Method::DELETE)
 }
 
+// A aposentadoria e a reserva de renomeação eram rotas de um protocolo entre
+// dois bancos, e saíram com ele em #135. O portão continuaria concedendo Admin a
+// caminhos que ninguém serve -- um contrato falso, que se lê como promessa.
 fn rental_admin_route(method: &Method, path: &str) -> bool {
-    (method == Method::GET
+    method == Method::GET
         && path
             .strip_prefix("/api/rental/user/")
-            .is_some_and(|id| !id.is_empty() && !id.contains('/')))
-        || (method == Method::POST
-            && (path
-                .strip_prefix("/api/rental/motorcycle-retirements/")
-                .is_some_and(|plate| !plate.is_empty() && !plate.contains('/'))
-                || path == "/api/rental/motorcycle-renames/reservations"))
+            .is_some_and(|id| !id.is_empty() && !id.contains('/'))
 }
 
 #[cfg(test)]
@@ -94,11 +92,19 @@ mod tests {
         );
         assert_eq!(
             access_for(
-                &Method::POST,
-                "/api/rental/motorcycle-retirements/ABC1234",
+                &Method::GET,
+                "/api/rental/user/rider-1",
                 UpstreamName::RentalOperations
             ),
             Access::Admin
+        );
+        assert_eq!(
+            access_for(
+                &Method::GET,
+                "/api/rental/batch",
+                UpstreamName::RentalOperations
+            ),
+            Access::Authenticated
         );
         assert_eq!(
             access_for(
