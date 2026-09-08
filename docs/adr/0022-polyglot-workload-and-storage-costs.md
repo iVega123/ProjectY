@@ -56,6 +56,10 @@ MongoDB remains the most replaceable active store: PostgreSQL JSONB could own
 the rental documents and projections without another database process. Keeping
 it here accepts a separate backup and operational surface until #130; this epic
 does not claim MongoDB is required for the workload.
+
+**Update (#135).** MongoDB left the stack. rental-core's rentals, outbox, inbox
+and projections are one CockroachDB database, so the store table above records
+the topology at the time of this decision, not the current one.
 Registry governance is #132, and additional identity/billing/BFF services
 #136–#138 are outside the original epic scope.
 

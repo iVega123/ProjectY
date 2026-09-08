@@ -110,13 +110,18 @@ and must be independently idempotent.
 <a id="mongo-inbox-convergence"></a>
 ## Rental inbox convergence
 
-RentalOperations atomically leases an inbox document and suppresses a completed
-message, but its handler effect and inbox completion are not a general MongoDB
-multi-document transaction. A crash can therefore happen after the effect and
-before completion. Redelivery is safe only where the handler itself is
-idempotent, such as setting every matching rental from an old plate to a new
-plate. The test proves convergence for that operation; it does not generalize
-the PostgreSQL transactional-inbox promise to arbitrary MongoDB effects.
+rental-core claims an `inbox` row for a `(message_id, consumer)` pair and
+suppresses a completed message, but the handler runs between the claim and the
+completion rather than inside one transaction with them. A crash can therefore
+happen after the effect and before completion. Redelivery is safe only where
+the handler itself is idempotent, such as the rider projection's newest-wins
+upsert. The test proves convergence for that operation; it does not generalize
+the PostgreSQL transactional-inbox promise — where effect and inbox commit
+together — to every inbox handler.
+
+Until #135 this was a MongoDB inbox document, and the idempotent handler was
+the licence-plate rewrite. Both are gone: a rental references `motorcycle_id`,
+so there is no copied plate left to rewrite.
 
 <a id="http-idempotency"></a>
 ## HTTP idempotency
@@ -166,7 +171,7 @@ deduplication protects domain effects from duplicate delivery.
 
 ### Clock skew
 
-Outbox and Mongo inbox leases use application-node UTC timestamps. A fast owner
+Outbox and rental inbox leases use application-node UTC timestamps. A fast owner
 clock can hold a claim longer than intended; a fast contender can reclaim it
 early. Claim tokens prevent a former owner from marking a row complete after it
 loses ownership, but they cannot retract an external publish already made.
@@ -182,7 +187,7 @@ The primary database is the authority. A writer that cannot reach it cannot
 claim a rental and fails. If a commit succeeded but its acknowledgement was
 lost, the client sees an ambiguous result; retrying cannot create a second
 active rental because the unique index still arbitrates the write. During a
-database topology event, this guarantee assumes MongoDB itself does not
+database topology event, this guarantee assumes the database itself does not
 acknowledge conflicting writes outside its configured consistency model.
 
 ### Process crash by phase
@@ -193,14 +198,14 @@ acknowledge conflicting writes outside its configured consistency model.
 | After commit, before publish | Domain state exists; pending outbox row publishes after recovery |
 | After broker accept, before `PublishedAtUtc` | Message may be published again; inbox suppresses the duplicate effect |
 | During PostgreSQL inbox handler | Inbox and relational effect roll back together |
-| After Mongo effect, before inbox completion | Redelivery occurs; only an idempotent handler is safe |
+| After an inbox handler effect, before inbox completion | Redelivery occurs; only an idempotent handler is safe |
 | After HTTP effect, before response persistence | Redis retains `unknown`; the same key never executes again during retention |
 
 ## What is deliberately not promised
 
 - **Not exactly-once delivery.** RabbitMQ may redeliver and the relay may
   republish.
-- **Not one transaction across Redis, PostgreSQL, MongoDB, MinIO, and
+- **Not one transaction across Redis, PostgreSQL, CockroachDB, MinIO, and
   RabbitMQ.** Each guarantee ends at its named authority.
 - **Not exactly-once execution.** Handlers and middleware can run more than
   once; the durable effect is what is deduplicated.
@@ -209,8 +214,9 @@ acknowledge conflicting writes outside its configured consistency model.
 - **Not causal ordering for MotoHub licence updates.** Those events do not yet
   carry a durable monotonic aggregate sequence; relay tie-breakers are not a
   substitute for one.
-- **Not arbitrary MongoDB effect safety.** The current Mongo inbox requires an
-  idempotent effect after a crash window.
+- **Not arbitrary inbox effect safety.** The rental inbox claims a row rather
+  than committing with its handler, so it requires an idempotent effect after a
+  crash window.
 - **Not permanent deduplication.** HTTP and inbox records expire.
 - **Not protection for requests without `Idempotency-Key`.** Those requests
   intentionally bypass Redis.
@@ -257,9 +263,9 @@ dotnet test services/RiderManager/RiderManagerTests/RiderManagerTests.csproj --f
 ## Alternatives considered
 
 - **Distributed transactions across every dependency.** RabbitMQ, Redis,
-  PostgreSQL, MongoDB, and object storage do not share a practical transaction
-  coordinator here. The operational cost would still not remove ambiguous
-  network outcomes.
+  PostgreSQL, CockroachDB, and object storage do not share a practical
+  transaction coordinator here. The operational cost would still not remove
+  ambiguous network outcomes.
 - **Broker deduplication as the only defense.** It does not cover republish
   after an ambiguous confirm, consumer crashes, or domain-specific identities.
 - **An application mutex around rental creation.** It protects one process,
@@ -272,9 +278,10 @@ dotnet test services/RiderManager/RiderManagerTests/RiderManagerTests.csproj --f
 ## What was explicitly rejected
 
 The project does not use the phrase "exactly-once delivery." It does not hide
-the MongoDB crash window behind the stronger PostgreSQL inbox guarantee, and it
-does not claim that an HTTP idempotency record commits atomically with a domain
-database. Precision is preferred over a broader but false guarantee.
+the rental inbox's crash window behind the stronger PostgreSQL
+transactional-inbox guarantee, and it does not claim that an HTTP idempotency
+record commits atomically with a domain database. Precision is preferred over a
+broader but false guarantee.
 
 ## Consequences
 
@@ -285,9 +292,9 @@ database. Precision is preferred over a broader but false guarantee.
   tuning details.
 - Relay backlog, expired leases, inbox conflicts, and unknown HTTP outcomes
   need operational visibility.
-- The integration suite is slower because it starts real PostgreSQL, MongoDB,
-  and Redis containers; that cost is accepted because mocks cannot prove these
-  database races.
+- The integration suite is slower because it starts real PostgreSQL and Redis
+  containers; that cost is accepted because mocks cannot prove these database
+  races.
 
 ## Follow-up
 
