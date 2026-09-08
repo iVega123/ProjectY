@@ -101,8 +101,7 @@ jobs:
         run: |
           for project in \
             services/AuthGate/AuthGate/AuthGate.csproj \
-            services/MotoHub/MotoHub/MotoHub.csproj \
-            services/RentalOperations/RentalOperations/RentalOperations.csproj \
+            services/rental-core/RentalCore/RentalCore.csproj \
             services/RiderManager/RiderManager/RiderManager.csproj; do
             grep --quiet 'OpenTelemetry.Exporter.OpenTelemetryProtocol' "$project"
             grep --quiet 'Serilog.Sinks.OpenTelemetry' "$project"
@@ -131,19 +130,8 @@ jobs:
               - 'Directory.Build.*'
               - 'Directory.Packages.props'
               - 'NuGet.config'
-            moto_hub:
-              - 'services/MotoHub/**'
-              - 'Shared/**'
-              - '.dockerignore'
-              - '.github/workflows/ci.yml'
-              - '.grype.yaml'
-              - '.trivyignore.yaml'
-              - 'global.json'
-              - 'Directory.Build.*'
-              - 'Directory.Packages.props'
-              - 'NuGet.config'
-            rental_operations:
-              - 'services/RentalOperations/**'
+            rental_core:
+              - 'services/rental-core/**'
               - 'contracts/**'
               - 'services/risk-pricing/pricing-policy.json'
               - 'Shared/**'
@@ -192,8 +180,7 @@ jobs:
         shell: bash
         env:
           AUTH_GATE_CHANGED: ${{ steps.filter.outputs.auth_gate }}
-          MOTO_HUB_CHANGED: ${{ steps.filter.outputs.moto_hub }}
-          RENTAL_OPERATIONS_CHANGED: ${{ steps.filter.outputs.rental_operations }}
+          RENTAL_CORE_CHANGED: ${{ steps.filter.outputs.rental_core }}
           RIDER_MANAGER_CHANGED: ${{ steps.filter.outputs.rider_manager }}
           API_GATEWAY_CHANGED: ${{ steps.filter.outputs.api_gateway }}
           POLYGLOT_CHANGED: ${{ steps.filter.outputs.polyglot }}
@@ -226,11 +213,8 @@ jobs:
           if [[ "$AUTH_GATE_CHANGED" == "true" ]]; then
             add_service "AuthGate" "services/AuthGate/AuthGate.sln" "auth-gate" "." "services/AuthGate/AuthGate/Dockerfile" "ghcr.io/ivega123/projecty/auth-gate"
           fi
-          if [[ "$MOTO_HUB_CHANGED" == "true" ]]; then
-            add_service "MotoHub" "services/MotoHub/MotoHub.sln" "moto-hub" "." "services/MotoHub/MotoHub/Dockerfile" "ghcr.io/ivega123/projecty/moto-hub"
-          fi
-          if [[ "$RENTAL_OPERATIONS_CHANGED" == "true" ]]; then
-            add_service "RentalOperations" "services/RentalOperations/RentalOperations.sln" "rental-operations" "." "services/RentalOperations/RentalOperations/Dockerfile" "ghcr.io/ivega123/projecty/rental-operations"
+          if [[ "$RENTAL_CORE_CHANGED" == "true" ]]; then
+            add_service "RentalCore" "services/rental-core/RentalCore.sln" "rental-core" "." "services/rental-core/RentalCore/Dockerfile" "ghcr.io/ivega123/projecty/rental-core"
           fi
           if [[ "$RIDER_MANAGER_CHANGED" == "true" ]]; then
             add_service "RiderManager" "services/RiderManager/RiderManager.sln" "rider-manager" "." "services/RiderManager/RiderManager/Dockerfile" "ghcr.io/ivega123/projecty/rider-manager"

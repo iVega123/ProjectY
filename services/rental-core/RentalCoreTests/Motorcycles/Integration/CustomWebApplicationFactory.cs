@@ -18,7 +18,7 @@ namespace MotoHubTests.Integration
     public class CustomWebApplicationFactory<TStartup> : WebApplicationFactory<TStartup> where TStartup : class
     {
         public const string GatewayIdentityKey = "test-only-gateway-identity-key-32-bytes";
-        public const string GatewayIdentityAudience = "projecty.moto-hub";
+        public const string GatewayIdentityAudience = "projecty.rental-core";
 
         protected override void ConfigureWebHost(IWebHostBuilder builder)
         {

@@ -10,7 +10,5 @@ services:
     restart: unless-stopped
   rider-manager:
     restart: unless-stopped
-  moto-hub:
-    restart: unless-stopped
-  rental-operations:
+  rental-core:
     restart: unless-stopped

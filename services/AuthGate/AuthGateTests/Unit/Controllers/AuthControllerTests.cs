@@ -74,7 +74,7 @@ namespace AuthGateTests.Unit.Controllers
             mockConfig.Setup(c => c["Jwt:Audiences:AuthGate"]).Returns("projecty.auth-gate");
             mockConfig.Setup(c => c["Jwt:SigningKeys:AuthGate"])
                 .Returns("test-only-auth-gate-key-with-32-bytes");
-            mockConfig.Setup(c => c["Jwt:Audiences:MotoHub"]).Returns("projecty.moto-hub");
+            mockConfig.Setup(c => c["Jwt:Audiences:MotoHub"]).Returns("projecty.rental-core");
             mockConfig.Setup(c => c["Jwt:SigningKeys:MotoHub"])
                 .Returns("test-only-moto-hub-signing-key-0001");
 

@@ -2,12 +2,12 @@ import http from "k6/http";
 import crypto from "k6/crypto";
 import { check, sleep } from "k6";
 
-const BASE_URL = __ENV.BASE_URL || "http://rental-operations:8200";
+const BASE_URL = __ENV.BASE_URL || "http://rental-core:8200";
 const PATH = "/api/Rental/create";
 const SIGNING_KEY = __ENV.GATEWAY_IDENTITY_SIGNING_KEY;
 const KEY_ID = __ENV.GATEWAY_IDENTITY_SIGNING_KEY_ID || "local-v1";
 const SUBJECT = __ENV.SLO_DRILL_SUBJECT || "slo-drill-rider";
-const AUDIENCE = "projecty.rental-operations";
+const AUDIENCE = "projecty.rental-core";
 const VUS = Number.parseInt(__ENV.VUS || "5", 10);
 const DURATION = __ENV.DURATION || "6m";
 

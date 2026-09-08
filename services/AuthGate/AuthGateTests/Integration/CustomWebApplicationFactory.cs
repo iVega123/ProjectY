@@ -84,7 +84,7 @@ namespace AuthGateTests.Integration
                     {"Jwt:Issuer", "projecty.auth-gate"},
                     {"Jwt:Audiences:AuthGate", "projecty.auth-gate"},
                     {"Jwt:SigningKeys:AuthGate", "test-only-auth-gate-key-with-32-bytes"},
-                    {"Jwt:Audiences:MotoHub", "projecty.moto-hub"},
+                    {"Jwt:Audiences:MotoHub", "projecty.rental-core"},
                     {"Jwt:SigningKeys:MotoHub", "test-only-moto-hub-signing-key-0001"},
                     {"Messaging:SigningKey", "test-only-queue-signing-key-with-32-bytes"},
                     {"RabbitMQ:HostName", "unused"},

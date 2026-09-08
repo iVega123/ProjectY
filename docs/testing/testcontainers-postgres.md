@@ -17,7 +17,7 @@ reuse the same concurrent-write pattern against the production repository.
 Docker must be running. From the repository root:
 
 ```bash
-dotnet test services/RentalOperations/RentalOperations.sln --configuration Release
+dotnet test services/rental-core/RentalCore.sln --configuration Release
 ```
 
 The xUnit collection fixture starts PostgreSQL once and shares it across every test

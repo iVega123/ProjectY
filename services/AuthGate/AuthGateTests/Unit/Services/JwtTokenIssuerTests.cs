@@ -11,8 +11,8 @@ namespace AuthGateTests.Unit.Services;
 public class JwtTokenIssuerTests
 {
     private const string Issuer = "projecty.auth-gate";
-    private const string MotoHubAudience = "projecty.moto-hub";
-    private const string RentalAudience = "projecty.rental-operations";
+    private const string MotoHubAudience = "projecty.rental-core";
+    private const string RentalAudience = "projecty.rental-core";
     private const string MotoHubKey = "test-only-moto-hub-signing-key-0001";
     private const string RentalKey = "test-only-rental-signing-key-000002";
 

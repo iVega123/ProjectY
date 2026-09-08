@@ -11,7 +11,7 @@ try {
         $names = @($config.services.PSObject.Properties.Name | Sort-Object)
         if ($null -eq $expected) { $expected = $names }
         if (Compare-Object $expected $names) { throw "Application topology differs: $model" }
-        foreach ($name in @('auth-gate', 'rider-manager', 'moto-hub', 'rental-operations', 'api-gateway', 'media-guard')) {
+        foreach ($name in @('auth-gate', 'rider-manager', 'rental-core', 'api-gateway', 'media-guard')) {
             $service = $config.services.$name
             if (-not $service.build) { throw "Missing build: $model / $name" }
             $dockerfile = Join-Path $service.build.context $service.build.dockerfile
@@ -20,7 +20,7 @@ try {
                 throw "Missing collector wiring: $model / $name"
             }
         }
-        if ($config.services.'rental-operations'.environment.OTEL_SERVICE_NAME -ne 'rental-core') {
+        if ($config.services.'rental-core'.environment.OTEL_SERVICE_NAME -ne 'rental-core') {
             throw "Rental SLO resource mismatch: $model"
         }
     }

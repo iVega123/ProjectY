@@ -58,7 +58,7 @@ services:
       toxiproxy:
         condition: service_healthy
 
-  moto-hub-migrations:
+  rental-core-migrations:
     environment:
       ConnectionStrings__Postgresql: "Host=toxiproxy;Port=5432;Database=${MOTO_HUB_POSTGRES_DB};Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD}"
       Redis__ConnectionString: toxiproxy:6379
@@ -67,17 +67,11 @@ services:
       toxiproxy:
         condition: service_healthy
 
-  moto-hub:
+  # One service now, so both of its stores cross the proxy: the Postgres the
+  # motorcycles live in and the Mongo the rentals still do.
+  rental-core:
     environment:
       ConnectionStrings__Postgresql: "Host=toxiproxy;Port=5432;Database=${MOTO_HUB_POSTGRES_DB};Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD}"
-      Redis__ConnectionString: toxiproxy:6379
-      RabbitMQ__HostName: toxiproxy
-    depends_on:
-      toxiproxy:
-        condition: service_healthy
-
-  rental-operations:
-    environment:
       MongoDbSettings__ConnectionString: "mongodb://${MONGO_USER}:${MONGO_PASSWORD}@toxiproxy:27017/?directConnection=true"
       Redis__ConnectionString: toxiproxy:6379
       RabbitMQ__HostName: toxiproxy

@@ -3,9 +3,8 @@ on:
   pull_request:
     paths:
       - 'services/AuthGate/**'
-      - 'services/MotoHub/**'
       - 'services/RiderManager/**'
-      - 'services/RentalOperations/**'
+      - 'services/rental-core/**'
       - 'Shared/**'
       - 'services/api-gateway/**'
       - 'docker-compose*.yml'

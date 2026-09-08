@@ -33,7 +33,7 @@ Reproduce:
 
 ```sh
 dotnet test services/RiderManager/RiderManagerTests/RiderManagerTests.csproj --filter FullyQualifiedName~InboxProcessorTests
-dotnet test services/MotoHub/MotoHubTests/MotoHubTests.csproj --filter FullyQualifiedName~PublisherChannelSoakTests
+dotnet test services/rental-core/RentalCoreTests/RentalCoreTests.csproj --filter FullyQualifiedName~PublisherChannelSoakTests
 ```
 
 These are integration proofs of shared state and channel lifetime. They do not
