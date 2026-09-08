@@ -1,205 +1,142 @@
-using MongoDB.Bson;
+using ProjectY.Shared.Pagination;
 using RentalOperations.Domain;
 using RentalOperations.Model;
 using RentalOperations.Repository;
-using ProjectY.Shared.Pagination;
-using System.Collections.Concurrent;
 
 namespace RentalOperationsTests.Integration;
 
+/// <summary>
+/// O armazenamento fora do caminho, para os testes que são sobre outra coisa.
+///
+/// A pipeline de autorização não deveria precisar de um banco de pé para ser
+/// exercitada, e as garantias de armazenamento têm os seus próprios testes,
+/// contra o schema real, em Rentals/Integration/Database. Este substituto
+/// existe só para que o processo suba.
+/// </summary>
 public sealed class InMemoryRentalRepository : IRentalRepository
 {
-    private readonly ConcurrentDictionary<ObjectId, Rental> _rentals = new();
-    private readonly ConcurrentDictionary<
-        string,
-        (MotorcycleClaimKind Kind, string? RentalId, string? SourceLicencePlate)> _claims = new();
-
-    public InMemoryRentalRepository()
-    {
-        SeedRental(new Rental
-        {
-            MotorcycleLicencePlate = "DEFAULT-PLATE",
-            UserId = "another-user",
-            StartDate = DateTime.UtcNow.Date,
-            PredictedEndDate = DateTime.UtcNow.Date.AddDays(7),
-            InitCost = 210m
-        });
-    }
+    private readonly List<Rental> _rentals = [];
+    private readonly Lock _gate = new();
 
     public Rental SeedRental(Rental rental)
     {
-        var stored = Clone(rental);
-        var id = stored._id ?? ObjectId.GenerateNewId();
-        stored._id = id;
-        _rentals[id] = stored;
-        return Clone(stored);
+        lock (_gate)
+        {
+            if (rental.Id == Guid.Empty)
+            {
+                rental.Id = Guid.NewGuid();
+            }
+
+            _rentals.RemoveAll(existing => existing.Id == rental.Id);
+            _rentals.Add(rental);
+            return rental;
+        }
     }
 
     public Rental? FindRental(string id)
     {
-        var objectId = ObjectId.Parse(id);
-        return _rentals.TryGetValue(objectId, out var rental) ? Clone(rental) : null;
+        lock (_gate)
+        {
+            return Guid.TryParse(id, out var rentalId)
+                ? _rentals.FirstOrDefault(rental => rental.Id == rentalId)
+                : null;
+        }
     }
 
-    public Task<Rental> CreateRentalAsync(Rental rental) =>
-        Task.FromResult(SeedRental(rental));
+    public Task<Rental> CreateRentalAsync(Rental rental, CancellationToken token = default)
+    {
+        lock (_gate)
+        {
+            if (rental.Id == Guid.Empty)
+            {
+                rental.Id = Guid.NewGuid();
+            }
 
-    public Task<Rental> GetRentalByIdAsync(string id) =>
-        Task.FromResult(FindRental(id)!);
+            if (_rentals.Any(existing =>
+                    existing.MotorcycleId == rental.MotorcycleId &&
+                    existing.Status == RentalStatus.Active))
+            {
+                throw new ActiveRentalConflictException(rental.MotorcycleLicencePlate);
+            }
+
+            _rentals.Add(rental);
+            return Task.FromResult(rental);
+        }
+    }
+
+    public Task<Rental?> GetRentalByIdAsync(string id, CancellationToken token = default)
+    {
+        lock (_gate)
+        {
+            return Task.FromResult(Guid.TryParse(id, out var rentalId)
+                ? _rentals.FirstOrDefault(rental => rental.Id == rentalId)
+                : null);
+        }
+    }
 
     public Task<CursorPage<Rental>> GetRentalsByUserId(
         string userId,
         string? cursor,
-        int? pageSize)
+        int? pageSize,
+        CancellationToken token = default)
     {
-        var normalizedPageSize = CursorPagination.NormalizePageSize(pageSize);
-        var after = CursorPagination.Decode(cursor);
-        var rentals = _rentals.Values
-            .Where(rental => rental.UserId == userId)
-            .Where(rental => after is null || rental._id > ObjectId.Parse(after))
-            .OrderBy(rental => rental._id)
-            .Take(normalizedPageSize + 1)
-            .Select(Clone)
-            .ToList();
-        return Task.FromResult(CursorPagination.CreatePage(
-            rentals,
-            normalizedPageSize,
-            rental => rental._id!.Value.ToString()));
+        lock (_gate)
+        {
+            var size = CursorPagination.NormalizePageSize(pageSize);
+            var after = CursorPagination.Decode(cursor);
+            var ordered = _rentals
+                .Where(rental => rental.UserId == userId)
+                .OrderBy(rental => rental.Id.ToString(), StringComparer.Ordinal)
+                .Where(rental => after is null ||
+                    string.CompareOrdinal(rental.Id.ToString(), after) > 0)
+                .Take(size + 1)
+                .ToList();
+            return Task.FromResult(CursorPagination.CreatePage(
+                ordered, size, rental => rental.Id.ToString()));
+        }
     }
 
     public Task<bool> HasOverlappingRentalAsync(
-        string licencePlate,
+        Guid motorcycleId,
         DateTime startDate,
-        DateTime endDate) =>
-        Task.FromResult(_rentals.Values.Any(rental =>
-            rental.MotorcycleLicencePlate == licencePlate &&
-            rental.Status is not RentalStatus.Cancelled and not RentalStatus.Quarantined &&
-            rental.StartDate < endDate &&
-            (rental.EndDate ?? rental.PredictedEndDate) > startDate));
-
-    public Task<bool> IsMotorcycleCurrentlyRentedAsync(string licencePlate)
+        DateTime endDate,
+        CancellationToken token = default)
     {
-        var now = DateTime.UtcNow;
-        return Task.FromResult(_rentals.Values.Any(rental =>
-            rental.MotorcycleLicencePlate == licencePlate &&
-            rental.Status == RentalStatus.Active &&
-            rental.StartDate <= now &&
-            rental.PredictedEndDate >= now));
-    }
-
-    public Task UpdateRentalAsync(Rental rental)
-    {
-        var id = rental._id ?? throw new InvalidOperationException("Rental ID is required.");
-        _rentals[id] = Clone(rental);
-        return Task.CompletedTask;
-    }
-
-    public Task UpdateLicensePlateForAllRentalsAsync(string oldLicensePlate, string newLicensePlate)
-    {
-        foreach (var entry in _rentals.ToArray())
+        lock (_gate)
         {
-            if (entry.Value.MotorcycleLicencePlate != oldLicensePlate)
+            return Task.FromResult(_rentals
+                .Where(rental => rental.MotorcycleId == motorcycleId)
+                .Any(rental => RentalPeriod.Overlaps(rental, startDate, endDate)));
+        }
+    }
+
+    public Task<bool> IsMotorcycleCurrentlyRentedAsync(
+        string licencePlate,
+        CancellationToken token = default)
+    {
+        lock (_gate)
+        {
+            var now = DateTime.UtcNow;
+            return Task.FromResult(_rentals.Any(rental =>
+                rental.MotorcycleLicencePlate == licencePlate &&
+                rental.Status == RentalStatus.Active &&
+                rental.StartDate <= now &&
+                rental.PredictedEndDate >= now));
+        }
+    }
+
+    public Task UpdateRentalAsync(Rental rental, CancellationToken token = default)
+    {
+        lock (_gate)
+        {
+            var index = _rentals.FindIndex(candidate => candidate.Id == rental.Id);
+            if (index < 0)
             {
-                continue;
+                throw new RentalSettlementConflictException();
             }
 
-            var updated = Clone(entry.Value);
-            updated.MotorcycleLicencePlate = newLicensePlate;
-            _rentals[entry.Key] = updated;
+            _rentals[index] = rental;
+            return Task.CompletedTask;
         }
-
-        if (_claims.TryGetValue(oldLicensePlate, out var sourceClaim) &&
-            sourceClaim.Kind == MotorcycleClaimKind.ActiveRental)
-        {
-            _claims[newLicensePlate] = (
-                MotorcycleClaimKind.ActiveRental,
-                sourceClaim.RentalId,
-                oldLicensePlate);
-            _claims.TryRemove(oldLicensePlate, out _);
-        }
-        else if (_claims.TryGetValue(newLicensePlate, out var reservation) &&
-                 reservation.Kind == MotorcycleClaimKind.RenameReservation &&
-                 reservation.SourceLicencePlate == oldLicensePlate)
-        {
-            _claims.TryRemove(newLicensePlate, out _);
-        }
-
-        return Task.CompletedTask;
     }
-
-    public Task<bool> TryReserveLicensePlateRenameAsync(
-        string oldLicensePlate,
-        string newLicensePlate)
-    {
-        if (_claims.TryAdd(
-                newLicensePlate,
-                (MotorcycleClaimKind.RenameReservation, null, oldLicensePlate)))
-        {
-            return Task.FromResult(true);
-        }
-
-        var existing = _claims[newLicensePlate];
-        return Task.FromResult(
-            existing.Kind == MotorcycleClaimKind.RenameReservation &&
-            existing.SourceLicencePlate == oldLicensePlate);
-    }
-
-    public Task DeleteRentalAsync(string id)
-    {
-        _rentals.TryRemove(ObjectId.Parse(id), out _);
-        return Task.CompletedTask;
-    }
-
-    public Task<MotorcycleClaimResult> TryClaimRentalAsync(string licencePlate, string rentalId)
-    {
-        if (_claims.TryAdd(licencePlate, (MotorcycleClaimKind.ActiveRental, rentalId, null)))
-        {
-            return Task.FromResult(MotorcycleClaimResult.Acquired);
-        }
-
-        var existing = _claims[licencePlate];
-        return Task.FromResult(existing.Kind == MotorcycleClaimKind.Retired
-            ? MotorcycleClaimResult.Retired
-            : existing.RentalId == rentalId
-                ? MotorcycleClaimResult.Acquired
-                : MotorcycleClaimResult.ActiveRental);
-    }
-
-    public Task<MotorcycleClaimResult> TryClaimRetirementAsync(string licencePlate)
-    {
-        if (_claims.TryAdd(licencePlate, (MotorcycleClaimKind.Retired, null, null)))
-        {
-            return Task.FromResult(MotorcycleClaimResult.Acquired);
-        }
-
-        return Task.FromResult(_claims[licencePlate].Kind == MotorcycleClaimKind.Retired
-            ? MotorcycleClaimResult.Retired
-            : MotorcycleClaimResult.ActiveRental);
-    }
-
-    public Task ReleaseRentalClaimAsync(string licencePlate, string rentalId)
-    {
-        _claims.TryRemove(
-            new KeyValuePair<
-                string,
-                (MotorcycleClaimKind Kind, string? RentalId, string? SourceLicencePlate)>(
-                licencePlate,
-                (MotorcycleClaimKind.ActiveRental, rentalId, null)));
-        return Task.CompletedTask;
-    }
-
-    private static Rental Clone(Rental rental) => new()
-    {
-        _id = rental._id,
-        MotorcycleLicencePlate = rental.MotorcycleLicencePlate,
-        UserId = rental.UserId,
-        StartDate = rental.StartDate,
-        EndDate = rental.EndDate,
-        PredictedEndDate = rental.PredictedEndDate,
-        InitCost = rental.InitCost,
-        FinalCost = rental.FinalCost,
-        AdditionalCostsOrSavings = rental.AdditionalCostsOrSavings,
-        StatusMessage = rental.StatusMessage,
-        Status = rental.Status
-    };
 }

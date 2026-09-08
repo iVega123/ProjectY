@@ -3,33 +3,25 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Moq;
 using MotoHub.Configurations;
-using MotoHub.CrossCutting;
 using MotoHub.Data;
 using MotoHub.Models;
 using MotoHub.Repositories;
 using MotoHub.Services;
 using MotoHub.Services.RabbitMQ;
 using ProjectY.Shared.Messaging;
-using Testcontainers.PostgreSql;
+using RentalCoreTests.Integration;
 
 namespace MotoHubTests.Integration.PostgreSql;
 
-public sealed class OutboxRelayTests : IAsyncLifetime
+[Collection(RentalCoreDatabaseCollection.Name)]
+public sealed class OutboxRelayTests(RentalCoreDatabase database)
 {
-    private readonly PostgreSqlContainer _database = new PostgreSqlBuilder("postgres:17.11-alpine3.24")
-        .WithDatabase("moto_hub_outbox")
-        .WithUsername("projecty")
-        .Build();
-
-    public Task InitializeAsync() => _database.StartAsync();
-
-    public Task DisposeAsync() => _database.DisposeAsync().AsTask();
-
     [Fact]
     [Trait("Category", "Integration")]
     [Trait("Guarantee", "ADR-0009#transactional-outbox")]
     public async Task CommittedSequencedMessages_SurviveRelayRestartAndDrainAfterBrokerRecovery()
     {
+        await database.ResetAsync();
         var transport = new RecoverableOutboxTransport { IsAvailable = false };
 
         await using (var firstProcess = CreateRelayProvider(transport))
@@ -37,10 +29,9 @@ public sealed class OutboxRelayTests : IAsyncLifetime
             await using (var scope = firstProcess.CreateAsyncScope())
             {
                 var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-                await context.Database.MigrateAsync();
                 context.Motorcycles.Add(new Motorcycle
                 {
-                    Id = "motorcycle-1",
+                    Id = MotorcycleId,
                     LicensePlate = "OUT-0001",
                     Model = "Outbox proof",
                     Year = 2026,
@@ -85,12 +76,11 @@ public sealed class OutboxRelayTests : IAsyncLifetime
     [Trait("Guarantee", "ADR-0009#transactional-outbox")]
     public async Task DomainMutationAndOutboxInsert_RollBackTogetherWhenSaveFails()
     {
+        await database.ResetAsync();
         await using (var seed = CreateContext())
         {
-            await seed.Database.MigrateAsync();
             seed.Motorcycles.Add(new Motorcycle
             {
-                Id = "motorcycle-atomic",
                 LicensePlate = "ATM-0001",
                 Model = "Atomic outbox proof",
                 Year = 2026,
@@ -111,16 +101,11 @@ public sealed class OutboxRelayTests : IAsyncLifetime
                     Password = "unused",
                     LicenceUpdateQueueName = new string('q', 201)
                 });
-            var rentalOperations = new Mock<IRentalOperationService>();
-            rentalOperations.Setup(service => service.TryReserveMotorcycleRenameAsync(
-                    "ATM-0001",
-                    "ATM-0002"))
-                .ReturnsAsync(true);
             var service = new MotorcycleService(
                 new MotorcycleRepository(context),
                 Mock.Of<IMapper>(),
                 publisher,
-                rentalOperations.Object);
+                Mock.Of<IMotorcycleRetirement>());
 
             await Assert.ThrowsAsync<DbUpdateException>(() =>
                 service.UpdateMotorcycleAsync("ATM-0001", "ATM-0002"));
@@ -138,13 +123,13 @@ public sealed class OutboxRelayTests : IAsyncLifetime
     [Trait("Guarantee", "ADR-0009#leased-outbox-relay")]
     public async Task ConcurrentRelays_ClaimOnlyOneHeadMessagePerAggregate()
     {
+        await database.ResetAsync();
         var transport = new BlockingOutboxTransport();
         await using var provider = CreateRelayProvider(transport, batchSize: 1);
 
         await using (var scope = provider.CreateAsyncScope())
         {
             var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-            await context.Database.MigrateAsync();
             context.OutboxMessages.AddRange(
                 Message(sequence: 0, eventType: "motorcycle.first.v1"),
                 Message(sequence: 1, eventType: "motorcycle.second.v1"));
@@ -167,6 +152,8 @@ public sealed class OutboxRelayTests : IAsyncLifetime
             transport.PublishedEventTypes);
     }
 
+    private static readonly Guid MotorcycleId = Guid.Parse("11111111-1111-1111-1111-111111111111");
+
     private static OutboxMessage Message(long sequence, string eventType) => new()
     {
         AggregateType = "motorcycle",
@@ -179,7 +166,7 @@ public sealed class OutboxRelayTests : IAsyncLifetime
 
     private ApplicationDbContext CreateContext()
         => new(new DbContextOptionsBuilder<ApplicationDbContext>()
-            .UseNpgsql(_database.GetConnectionString())
+            .UseNpgsql(database.ConnectionString)
             .Options);
 
     private ServiceProvider CreateRelayProvider(IOutboxTransport transport, int batchSize = 100)
@@ -187,11 +174,11 @@ public sealed class OutboxRelayTests : IAsyncLifetime
         var services = new ServiceCollection();
         services.AddLogging();
         services.AddDbContext<ApplicationDbContext>(options =>
-            options.UseNpgsql(_database.GetConnectionString()));
+            options.UseNpgsql(database.ConnectionString));
         services.AddSingleton(transport);
         services.AddSingleton(new OutboxRelayOptions
         {
-            ServiceName = "moto-hub-test",
+            ServiceName = "rental-core-test",
             HostName = "unused",
             VirtualHost = "unused",
             UserName = "unused",

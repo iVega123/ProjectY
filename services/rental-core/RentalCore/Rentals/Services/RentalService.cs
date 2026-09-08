@@ -1,4 +1,4 @@
-﻿using AutoMapper;
+using AutoMapper;
 using RentalOperations.CrossCutting.Services;
 using RentalOperations.Domain;
 using RentalOperations.DTOs;
@@ -38,14 +38,6 @@ namespace RentalOperations.Services
                 throw new InvalidOperationException("The Rent time must at least one day");
             }
 
-            if (await BeforeWriteAsync(() => _repository.HasOverlappingRentalAsync(
-                createDto.MotocycleLicencePlate,
-                createDto.StartDate,
-                createDto.PredictedEndDate)))
-            {
-                throw new ActiveRentalConflictException(createDto.MotocycleLicencePlate);
-            }
-
             // Read locally, never over the network. Calling identity here would put
             // the fat event back on the request path it exists to remove, so this is
             // asserted by a test rather than left to reviewer discipline.
@@ -59,7 +51,8 @@ namespace RentalOperations.Services
                 throw new ArgumentException("Rider does not have the correct license type.");
             }
 
-            var motorcycle = await BeforeWriteAsync(() => _motorcycleService.GetMotorcycleByIdAsync(createDto.MotocycleLicencePlate));
+            var motorcycle = await BeforeWriteAsync(
+                () => _motorcycleService.GetMotorcycleByIdAsync(createDto.MotocycleLicencePlate));
             if (motorcycle == null)
             {
                 throw new ArgumentException("Motorcycle does not exist.");
@@ -68,11 +61,26 @@ namespace RentalOperations.Services
             {
                 throw new MotorcycleRetiredException(createDto.MotocycleLicencePlate);
             }
+            if (!Guid.TryParse(motorcycle.id, out var motorcycleId))
+            {
+                throw new ArgumentException("Motorcycle does not exist.");
+            }
+
+            // Uma sobreposição futura não é a mesma coisa que uma dupla reserva
+            // agora, e o índice único parcial só recusa a segunda. Esta checagem
+            // cobre a agenda; a corrida continua sendo decidida no INSERT.
+            if (await BeforeWriteAsync(() => _repository.HasOverlappingRentalAsync(
+                motorcycleId,
+                createDto.StartDate,
+                createDto.PredictedEndDate)))
+            {
+                throw new ActiveRentalConflictException(createDto.MotocycleLicencePlate);
+            }
 
             var rentalDomain = RentalDomain.Create(createDto, userId);
             var rental = new Rental
             {
-                MotorcycleId = motorcycle.id,
+                MotorcycleId = motorcycleId,
                 MotorcycleLicencePlate = rentalDomain.MotocycleLicencePlate,
                 UserId = rentalDomain.UserId,
                 RiderName = rider.Name,
@@ -82,22 +90,9 @@ namespace RentalOperations.Services
                 InitCost = rentalDomain.TotalCost
             };
 
-            var rentalId = rental._id!.Value.ToString();
-            var claimResult = await _repository.TryClaimRentalAsync(
-                rental.MotorcycleLicencePlate,
-                rentalId);
-            if (claimResult == MotorcycleClaimResult.Retired)
-            {
-                throw new MotorcycleRetiredException(rental.MotorcycleLicencePlate);
-            }
-            if (claimResult == MotorcycleClaimResult.ActiveRental)
-            {
-                throw new ActiveRentalConflictException(rental.MotorcycleLicencePlate);
-            }
-
-            // The claim is deliberately retained if MongoDB reports an ambiguous
-            // insert failure. Startup reconciliation can repair a stale claim; releasing
-            // it here could let retirement win after the rental was actually committed.
+            // Sem reserva prévia e sem nada a soltar depois: o aluguel e o evento
+            // que o anuncia entram na mesma transação, e quem recusa a segunda
+            // tentativa simultânea é o índice único parcial.
             await _repository.CreateRentalAsync(rental);
         }
 
@@ -113,9 +108,6 @@ namespace RentalOperations.Services
 
             if (rental.Status == RentalStatus.Completed)
             {
-                await _repository.ReleaseRentalClaimAsync(
-                    rental.MotorcycleLicencePlate,
-                    rental._id!.Value.ToString());
                 return _mapper.Map<ResponseRentalDTO>(rental);
             }
 
@@ -151,9 +143,6 @@ namespace RentalOperations.Services
             rental.StatusMessage = response.StatusMessage;
             rental.Status = RentalStatus.Completed;
             await _repository.UpdateRentalAsync(rental);
-            await _repository.ReleaseRentalClaimAsync(
-                rental.MotorcycleLicencePlate,
-                rental._id!.Value.ToString());
             return response;
         }
 
@@ -168,31 +157,10 @@ namespace RentalOperations.Services
                 page.NextCursor);
         }
 
-        public async Task UpdateMotorcycleLicensePlateAsync(string oldLicensePlate, string newLicensePlate)
-        {
-            await _repository.UpdateLicensePlateForAllRentalsAsync(
-                BrazilianLicensePlateAttribute.Normalize(oldLicensePlate),
-                BrazilianLicensePlateAttribute.Normalize(newLicensePlate));
-        }
-
-        public Task<bool> TryReserveLicensePlateRenameAsync(
-            string oldLicensePlate,
-            string newLicensePlate) =>
-            _repository.TryReserveLicensePlateRenameAsync(
-                BrazilianLicensePlateAttribute.Normalize(oldLicensePlate),
-                BrazilianLicensePlateAttribute.Normalize(newLicensePlate));
-
         public async Task<bool> IsMotorcycleCurrentlyRentedAsync(string licencePlate)
         {
             return await _repository.IsMotorcycleCurrentlyRentedAsync(
                 BrazilianLicensePlateAttribute.Normalize(licencePlate));
-        }
-
-        public async Task<bool> TryRetireMotorcycleAsync(string licencePlate)
-        {
-            var result = await _repository.TryClaimRetirementAsync(
-                BrazilianLicensePlateAttribute.Normalize(licencePlate));
-            return result is MotorcycleClaimResult.Acquired or MotorcycleClaimResult.Retired;
         }
 
         private static async Task<T> BeforeWriteAsync<T>(Func<Task<T>> read)

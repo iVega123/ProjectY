@@ -75,13 +75,14 @@ public class AdminAuthorizationPipelineTests : IClassFixture<CustomWebApplicatio
     {
         var original = _factory.Repository.SeedRental(new Rental
         {
+            MotorcycleId = Guid.NewGuid(),
             MotorcycleLicencePlate = "OWNER-001",
             UserId = "rider-a",
             StartDate = DateTime.UtcNow.Date,
             PredictedEndDate = DateTime.UtcNow.Date.AddDays(7),
             InitCost = 210m
         });
-        var rentalId = original._id!.Value.ToString();
+        var rentalId = original.Id.ToString();
         using var client = CreateClient("Rider", "rider-b");
         var actualEndDate = Uri.EscapeDataString(original.PredictedEndDate.ToString("O"));
 
@@ -104,6 +105,7 @@ public class AdminAuthorizationPipelineTests : IClassFixture<CustomWebApplicatio
     {
         var original = _factory.Repository.SeedRental(new Rental
         {
+            MotorcycleId = Guid.NewGuid(),
             MotorcycleLicencePlate = "OWNER-002",
             UserId = "rider-a",
             StartDate = DateTime.UtcNow.Date.AddDays(-7),
@@ -113,7 +115,7 @@ public class AdminAuthorizationPipelineTests : IClassFixture<CustomWebApplicatio
             FinalCost = 210m,
             StatusMessage = "Already finalized."
         });
-        var rentalId = original._id!.Value.ToString();
+        var rentalId = original.Id.ToString();
         using var client = CreateClient("Rider", "rider-b");
         var actualEndDate = Uri.EscapeDataString(original.EndDate!.Value.ToString("O"));
 
@@ -129,13 +131,14 @@ public class AdminAuthorizationPipelineTests : IClassFixture<CustomWebApplicatio
     {
         var original = _factory.Repository.SeedRental(new Rental
         {
+            MotorcycleId = Guid.NewGuid(),
             MotorcycleLicencePlate = "OWNER-003",
             UserId = "rider-a",
             StartDate = DateTime.UtcNow.Date,
             PredictedEndDate = DateTime.UtcNow.Date.AddDays(7),
             InitCost = 210m
         });
-        var rentalId = original._id!.Value.ToString();
+        var rentalId = original.Id.ToString();
         using var client = CreateClient("Rider", original.UserId);
         var actualEndDate = Uri.EscapeDataString(original.PredictedEndDate.ToString("O"));
 

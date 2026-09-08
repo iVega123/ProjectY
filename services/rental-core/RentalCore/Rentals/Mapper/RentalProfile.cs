@@ -8,12 +8,8 @@ namespace RentalOperations.Mapper
     {
         public RentalProfile()
         {
-            CreateMap<RentalCreateDto, Rental>()
-                .ForMember(dest => dest._id, opt => opt.Ignore())
-                .ForMember(dest => dest.InitCost, opt => opt.Ignore());
-
             CreateMap<Rental, ResponseRentalDTO>()
-            .ForMember(dest => dest.RentalId, opt => opt.MapFrom(src => src._id))
+            .ForMember(dest => dest.RentalId, opt => opt.MapFrom(src => src.Id))
             .ForMember(dest => dest.MotocycleLicencePlate, opt => opt.MapFrom(src => src.MotorcycleLicencePlate))
             .ForMember(dest => dest.StartDate, opt => opt.MapFrom(src => src.StartDate))
             .ForMember(dest => dest.PredictedEndDate, opt => opt.MapFrom(src => src.PredictedEndDate))

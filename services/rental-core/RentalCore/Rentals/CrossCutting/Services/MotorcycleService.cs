@@ -1,47 +1,38 @@
-using System.Text.Json;
 using RentalOperations.CrossCutting.Model;
 
 namespace RentalOperations.CrossCutting.Services
 {
-    public class MotorcycleService : IMotorcycleService
+    /// <summary>
+    /// A metade de aluguéis perguntando à metade de motos -- por chamada de
+    /// método.
+    ///
+    /// Isto era um HttpClient apontando para o próprio processo: os dois
+    /// serviços viraram um em #134, mas continuaram conversando pela rede
+    /// porque colapsar a chamada era um passo separado. É este passo. O que
+    /// desaparece junto é tudo que existia por causa da rede -- o timeout de um
+    /// segundo, a propagação de identidade para si mesmo, e a tradução de
+    /// falhas HTTP em exceções que ninguém sabia interpretar.
+    ///
+    /// A interface fica. Ela é a costura entre os dois domínios, e continuará
+    /// sendo quando um deles sair de novo.
+    /// </summary>
+    public sealed class MotorcycleService(MotoHub.Services.IMotorcycleService motorcycles)
+        : IMotorcycleService
     {
-        private readonly HttpClient _httpClient;
-        public MotorcycleService(IHttpClientFactory httpClientFactory)
+        public async Task<Motorcycle?> GetMotorcycleByIdAsync(string licensePlate)
         {
-            _httpClient = httpClientFactory.CreateClient("moto-hub");
-        }
-
-        public async Task<Motorcycle> GetMotorcycleByIdAsync(string licensePlate)
-        {
-            try
-            {
-                using var response = await _httpClient.GetAsync($"api/Motorcycles/{licensePlate}");
-                if (!response.IsSuccessStatusCode)
+            var found = await motorcycles.GetMotorcycleByLicensePlateAsync(licensePlate);
+            return found is null
+                ? null
+                : new Motorcycle
                 {
-                    var errorContent = await response.Content.ReadAsStringAsync();
-                    throw new HttpRequestException($"Request failed with status {response.StatusCode}: {errorContent}", null, response.StatusCode);
-                }
-
-                string responseBody = await response.Content.ReadAsStringAsync();
-                return JsonSerializer.Deserialize<Motorcycle>(responseBody);
-            }
-            catch (HttpRequestException e)
-            {
-                throw new Exception($"Unable to obtain motorcycle data: {e.Message}", e);
-            }
-        }
-
-        public async Task EnsureHistoricalReferencesAsync(IEnumerable<string> licensePlates)
-        {
-            using var response = await _httpClient.PostAsJsonAsync(
-                "api/Motorcycles/historical-references",
-                new { LicensePlates = licensePlates });
-            if (!response.IsSuccessStatusCode)
-            {
-                var errorContent = await response.Content.ReadAsStringAsync();
-                throw new HttpRequestException(
-                    $"Historical motorcycle reconciliation failed with status {response.StatusCode}: {errorContent}");
-            }
+                    id = found.Id ?? string.Empty,
+                    year = found.Year,
+                    model = found.Model ?? string.Empty,
+                    licensePlate = found.LicensePlate,
+                    retiredAtUtc = found.RetiredAtUtc,
+                    retirementReason = found.RetirementReason
+                };
         }
     }
 }

@@ -58,7 +58,7 @@ public sealed class RegisteredEventSchemaTests
         var rental = new Rental
         {
             MotorcycleLicencePlate = "ABC1D23",
-            MotorcycleId = "immutable-id",
+            MotorcycleId = new Guid("22222222-2222-2222-2222-222222222222"),
             UserId = "rider",
             RiderName = "Original name",
             InitCost = 210.25m,

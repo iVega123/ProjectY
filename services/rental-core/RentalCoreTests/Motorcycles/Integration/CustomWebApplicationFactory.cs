@@ -7,7 +7,6 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Moq;
-using MotoHub.CrossCutting;
 using MotoHub.Data;
 using ProjectY.Shared.Security;
 using RabbitMQ.Client;
@@ -20,34 +19,26 @@ namespace MotoHubTests.Integration
         public const string GatewayIdentityKey = "test-only-gateway-identity-key-32-bytes";
         public const string GatewayIdentityAudience = "projecty.rental-core";
 
+        // Nada aqui abre conexão: o contexto vai para memória e a aposentadoria
+        // é substituída. A string existe só para o processo subir.
+        private const string UnusedConnectionString = "Host=unused;Database=unused;Username=unused";
+
         protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
             builder.UseSetting("GatewayIdentity:SigningKey", GatewayIdentityKey);
             builder.UseSetting("GatewayIdentity:SigningKeyId", "test-v1");
-            builder.UseSetting("RentalOperationsSettings:BaseUrl", "http://unused/");
+            builder.UseSetting("ConnectionStrings:Postgresql", UnusedConnectionString);
             builder.ConfigureServices(services =>
             {
                 services.RemoveAll<IHostedService>();
 
-                var serviceDescriptor = services.FirstOrDefault(descriptor =>
-                descriptor.ServiceType == typeof(IRentalOperationService));
-
-                if (serviceDescriptor != null)
-                {
-                    services.Remove(serviceDescriptor);
-                }
-
-                var mockService = new Mock<IRentalOperationService>();
-                mockService.Setup(service => service.GetRentalsByMotorcycleLicencePlateAsync("mock"))
-                           .ReturnsAsync(true);
-                mockService.Setup(service => service.TryRetireMotorcycleAsync(It.IsAny<string>()))
-                    .ReturnsAsync(true);
-                mockService.Setup(service => service.TryReserveMotorcycleRenameAsync(
-                        It.IsAny<string>(),
-                        It.IsAny<string>()))
-                    .ReturnsAsync(true);
-
-                services.AddSingleton<IRentalOperationService>(mockService.Object);
+                // A aposentadoria é a única coisa aqui que fala SQL cru, e este
+                // host roda sobre o provider em memória. As duas garantias que
+                // ela carrega -- a corrida de retirada e a recusa com aluguel
+                // ativo -- têm teste próprio contra o banco de verdade, em
+                // Motorcycles/Integration/PostgreSql/MotorcycleRetirementTests.
+                services.RemoveAll<MotoHub.Services.IMotorcycleRetirement>();
+                services.AddSingleton<MotoHub.Services.IMotorcycleRetirement, AcceptingRetirement>();
 
                 var modelMock = new Mock<IModel>();
                 modelMock.Setup(m => m.BasicPublish(
@@ -85,7 +76,7 @@ namespace MotoHubTests.Integration
                 {
                     {"GatewayIdentity:SigningKey", GatewayIdentityKey},
                     {"GatewayIdentity:SigningKeyId", "test-v1"},
-                    {"RentalOperationsSettings:BaseUrl", "http://unused/"},
+                    {"ConnectionStrings:Postgresql", UnusedConnectionString},
                     {"RabbitMQ:HostName", "unused"},
                     {"RabbitMQ:VirtualHost", "unused"},
                     {"RabbitMQ:UserName", "unused"},
@@ -103,6 +94,13 @@ namespace MotoHubTests.Integration
             var client = CreateDefaultClient(new TestGatewayIdentityMarkerHandler());
             client.BaseAddress = new Uri("https://localhost");
             return client;
+        }
+
+        private sealed class AcceptingRetirement : MotoHub.Services.IMotorcycleRetirement
+        {
+            public Task<MotoHub.Services.MotorcycleRetirementResult> RetireAsync(
+                Guid motorcycleId, DateTime retiredAtUtc, string reason, CancellationToken token = default) =>
+                Task.FromResult(MotoHub.Services.MotorcycleRetirementResult.Retired);
         }
 
         private sealed class TestGatewayIdentityMarkerHandler : DelegatingHandler

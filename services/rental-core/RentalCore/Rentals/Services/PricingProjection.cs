@@ -3,9 +3,9 @@ using System.Diagnostics.Metrics;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Confluent.Kafka;
-using MongoDB.Driver;
+using Npgsql;
+using NpgsqlTypes;
 using ProjectY.Events;
-using RentalOperations.Data;
 
 namespace RentalOperations.Services;
 
@@ -50,26 +50,18 @@ public static class LocalPricing
     }
 }
 
-public sealed class PricingProjection(MongoDbContext db, IConfiguration config, ILogger<PricingProjection> log) : BackgroundService
+public sealed class PricingProjection(NpgsqlDataSource database, IConfiguration config, ILogger<PricingProjection> log) : BackgroundService
 {
-    public sealed class Snapshot
-    {
-        public string Id { get; set; } = string.Empty;
-        public byte[] Payload { get; set; } = [];
-        public long At { get; set; }
-        public string Topic { get; set; } = string.Empty;
-    }
     protected override async Task ExecuteAsync(CancellationToken token)
     {
         var bootstrap = config["Kafka:BootstrapServers"];
         if (string.IsNullOrWhiteSpace(bootstrap)) return;
-        var collection = db.Database.GetCollection<Snapshot>("RiskPricingProjection");
         using var consumer = new ConsumerBuilder<string, byte[]>(new ConsumerConfig
         { BootstrapServers = bootstrap, GroupId = "rental-pricing-v1-" + Environment.MachineName, EnableAutoCommit = false, AutoOffsetReset = AutoOffsetReset.Earliest }).Build();
         // Rehydrate before consumption. Request handling retains the packaged conservative table meanwhile.
         while (!token.IsCancellationRequested)
         {
-            try { foreach (var row in await collection.Find(FilterDefinition<Snapshot>.Empty).ToListAsync(token)) Apply(row.Topic, RiderEvent.Parser.ParseFrom(row.Payload)); break; }
+            try { foreach (var (topic, payload) in await RehydrateAsync(token)) Apply(topic, RiderEvent.Parser.ParseFrom(payload)); break; }
             catch (Exception error) { log.LogWarning(error, "Pricing rehydration delayed"); await Task.Delay(2000, token); }
         }
         consumer.Subscribe(["risk.scored", "pricing.updated"]);
@@ -84,13 +76,8 @@ public sealed class PricingProjection(MongoDbContext db, IConfiguration config, 
                     if (message is null) continue;
                     var value = RiderEvent.Parser.ParseFrom(message.Message.Value);
                     var id = message.Topic == "pricing.updated" ? "pricing" : "rider:" + value.RiderId;
-                    var previous = await collection.Find(r => r.Id == id).FirstOrDefaultAsync(token);
-                    if (previous is null || value.OccurredAtMs >= previous.At)
-                    {
-                        await collection.ReplaceOneAsync(r => r.Id == id && r.At <= value.OccurredAtMs, new Snapshot { Id = id, At = value.OccurredAtMs, Payload = message.Message.Value, Topic = message.Topic }, new ReplaceOptions { IsUpsert = true }, token);
-                    }
                     // Read the persisted winner, including when another replica advanced it.
-                    var winner = await collection.Find(r => r.Id == id).FirstAsync(token);
+                    var winner = await StoreAsync(id, message.Topic, message.Message.Value, value.OccurredAtMs, token);
                     Apply(winner.Topic, RiderEvent.Parser.ParseFrom(winner.Payload));
                     consumer.Commit(message);
                 }
@@ -104,6 +91,47 @@ public sealed class PricingProjection(MongoDbContext db, IConfiguration config, 
         }
         finally { consumer.Close(); }
     }
+
+    private async Task<List<(string Topic, byte[] Payload)>> RehydrateAsync(CancellationToken token)
+    {
+        var snapshots = new List<(string, byte[])>();
+        await using var connection = await database.OpenConnectionAsync(token);
+        await using var command = new NpgsqlCommand("SELECT topic, payload FROM projection_snapshots", connection);
+        await using var reader = await command.ExecuteReaderAsync(token);
+        while (await reader.ReadAsync(token)) snapshots.Add((reader.GetString(0), (byte[])reader[1]));
+        return snapshots;
+    }
+
+    // The newest fact wins by its own timestamp: the WHERE keeps a replayed older
+    // event from rolling the table back, and the SELECT that follows reads whatever
+    // actually stands -- which may be a value another replica wrote first.
+    private async Task<(string Topic, byte[] Payload)> StoreAsync(
+        string id, string topic, byte[] payload, long at, CancellationToken token)
+    {
+        await using var connection = await database.OpenConnectionAsync(token);
+        await using (var upsert = new NpgsqlCommand("""
+            INSERT INTO projection_snapshots (id, topic, payload, at_ms)
+            VALUES (@id, @topic, @payload, @at)
+            ON CONFLICT (id) DO UPDATE
+               SET topic = EXCLUDED.topic, payload = EXCLUDED.payload, at_ms = EXCLUDED.at_ms
+             WHERE projection_snapshots.at_ms <= EXCLUDED.at_ms
+            """, connection))
+        {
+            upsert.Parameters.AddWithValue("id", id);
+            upsert.Parameters.AddWithValue("topic", topic);
+            upsert.Parameters.Add(new NpgsqlParameter("payload", NpgsqlDbType.Bytea) { Value = payload });
+            upsert.Parameters.AddWithValue("at", at);
+            await upsert.ExecuteNonQueryAsync(token);
+        }
+
+        await using var winner = new NpgsqlCommand(
+            "SELECT topic, payload FROM projection_snapshots WHERE id = @id", connection);
+        winner.Parameters.AddWithValue("id", id);
+        await using var reader = await winner.ExecuteReaderAsync(token);
+        if (!await reader.ReadAsync(token)) throw new InvalidDataException("The projection snapshot vanished.");
+        return (reader.GetString(0), (byte[])reader[1]);
+    }
+
     private static void Apply(string topic, RiderEvent value)
     {
         if (!value.HasOccurredAtMs || (topic == "risk.scored" && !value.HasRiskScore))

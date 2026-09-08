@@ -14,13 +14,10 @@ try {
         foreach ($key in @('Redis__ConnectionString','RabbitMQ__HostName')) {
             if ($environment.$key -notmatch '^toxiproxy(:|$)') { throw "$service bypasses proxy: $key" }
         }
-        # rental-core holds both stores until the rentals finish leaving Mongo,
-        # so both have to cross the proxy for the drill to mean anything.
-        $dbKeys = if ($service -eq 'rental-core') {
-            @('ConnectionStrings__Postgresql', 'MongoDbSettings__ConnectionString')
-        } else { @('ConnectionStrings__Postgresql') }
-        foreach ($dbKey in $dbKeys) {
-            if ($environment.$dbKey -notmatch 'toxiproxy') { throw "$service bypasses its database proxy: $dbKey" }
+        # Um banco por serviço agora, inclusive no rental-core. Enquanto eram
+        # dois, um ensaio de latência atingia metade do serviço de cada vez.
+        if ($environment.ConnectionStrings__Postgresql -notmatch 'toxiproxy') {
+            throw "$service bypasses its database proxy: ConnectionStrings__Postgresql"
         }
         if ($model.services.$service.depends_on.toxiproxy.condition -ne 'service_healthy') { throw "$service is not health-gated." }
     }

@@ -15,8 +15,8 @@ namespace MotoHubTests.Unit.Repositories
             // Arrange
             var motorcycles = new List<Motorcycle>
             {
-                new Motorcycle { Id = "motorcycle-0001", LicensePlate = "ABC123", Model = "Honda", Year = 2020 },
-                new Motorcycle { Id = "motorcycle-0002", LicensePlate = "DEF456", Model = "Yamaha", Year = 2021 }
+                new Motorcycle { Id = new Guid("00000000-0000-0000-0000-000000000001"), LicensePlate = "ABC123", Model = "Honda", Year = 2020 },
+                new Motorcycle { Id = new Guid("00000000-0000-0000-0000-000000000002"), LicensePlate = "DEF456", Model = "Yamaha", Year = 2021 }
             };
 
             var mockContext = new Mock<IApplicationDbContext>();
@@ -40,12 +40,12 @@ namespace MotoHubTests.Unit.Repositories
         [Fact]
         public void GetById_ReturnsCorrectMotorcycle()
         {
-            var id = Guid.NewGuid().ToString();
+            var id = Guid.NewGuid();
             // Arrange
             var data = new List<Motorcycle>
         {
             new Motorcycle { Id = id, LicensePlate = "ABC123", Model = "Honda", Year = 2020 },
-            new Motorcycle { Id = Guid.NewGuid().ToString(), LicensePlate = "DEF456", Model = "Yamaha", Year = 2021 }
+            new Motorcycle { Id = Guid.NewGuid(), LicensePlate = "DEF456", Model = "Yamaha", Year = 2021 }
         }.AsQueryable();
 
             var mockSet = new Mock<DbSet<Motorcycle>>();
@@ -53,7 +53,7 @@ namespace MotoHubTests.Unit.Repositories
             mockSet.As<IQueryable<Motorcycle>>().Setup(m => m.Expression).Returns(data.Expression);
             mockSet.As<IQueryable<Motorcycle>>().Setup(m => m.ElementType).Returns(data.ElementType);
             mockSet.As<IQueryable<Motorcycle>>().Setup(m => m.GetEnumerator()).Returns(data.GetEnumerator());
-            mockSet.Setup(m => m.Find(It.IsAny<object[]>())).Returns<object[]>(ids => data.FirstOrDefault(d => d.Id == (string)ids[0]));
+            mockSet.Setup(m => m.Find(It.IsAny<object[]>())).Returns<object[]>(ids => data.FirstOrDefault(d => d.Id == (Guid)ids[0]));
 
             var mockContext = new Mock<IApplicationDbContext>();
             mockContext.Setup(c => c.Motorcycles).Returns(mockSet.Object);
@@ -74,7 +74,7 @@ namespace MotoHubTests.Unit.Repositories
         public void Add_AddsNewMotorcycle()
         {
             // Arrange
-            var motorcycleToAdd = new Motorcycle { Id = Guid.NewGuid().ToString(), LicensePlate = "GHI789", Model = "Suzuki", Year = 2022 };
+            var motorcycleToAdd = new Motorcycle { Id = Guid.NewGuid(), LicensePlate = "GHI789", Model = "Suzuki", Year = 2022 };
 
             var mockContext = new Mock<IApplicationDbContext>();
             var mockDbSet = new Mock<DbSet<Motorcycle>>();
@@ -97,8 +97,8 @@ namespace MotoHubTests.Unit.Repositories
             // Arrange
             var motorcycles = new List<Motorcycle>
             {
-                new Motorcycle { Id = Guid.NewGuid().ToString(), LicensePlate = "ABC123", Model = "Honda", Year = 2020 },
-                new Motorcycle { Id = Guid.NewGuid().ToString(), LicensePlate = "DEF456", Model = "Yamaha", Year = 2021 }
+                new Motorcycle { Id = Guid.NewGuid(), LicensePlate = "ABC123", Model = "Honda", Year = 2020 },
+                new Motorcycle { Id = Guid.NewGuid(), LicensePlate = "DEF456", Model = "Yamaha", Year = 2021 }
             };
 
             var mockContext = new Mock<IApplicationDbContext>();
@@ -119,8 +119,8 @@ namespace MotoHubTests.Unit.Repositories
             // Arrange
             var motorcycles = new List<Motorcycle>
             {
-                new Motorcycle { Id = Guid.NewGuid().ToString(), LicensePlate = "ABC123", Model = "Honda", Year = 2020 },
-                new Motorcycle { Id = Guid.NewGuid().ToString(), LicensePlate = "DEF456", Model = "Yamaha", Year = 2021 }
+                new Motorcycle { Id = Guid.NewGuid(), LicensePlate = "ABC123", Model = "Honda", Year = 2020 },
+                new Motorcycle { Id = Guid.NewGuid(), LicensePlate = "DEF456", Model = "Yamaha", Year = 2021 }
             };
 
             var mockContext = new Mock<IApplicationDbContext>();
@@ -141,8 +141,8 @@ namespace MotoHubTests.Unit.Repositories
             // Arrange
             var motorcycles = new List<Motorcycle>
             {
-                new Motorcycle { Id = Guid.NewGuid().ToString(), LicensePlate = "ABC123", Model = "Honda", Year = 2020 },
-                new Motorcycle { Id = Guid.NewGuid().ToString(), LicensePlate = "DEF456", Model = "Yamaha", Year = 2021 }
+                new Motorcycle { Id = Guid.NewGuid(), LicensePlate = "ABC123", Model = "Honda", Year = 2020 },
+                new Motorcycle { Id = Guid.NewGuid(), LicensePlate = "DEF456", Model = "Yamaha", Year = 2021 }
             };
 
             var mockContext = new Mock<IApplicationDbContext>();
@@ -164,8 +164,8 @@ namespace MotoHubTests.Unit.Repositories
             // Arrange
             var motorcycles = new List<Motorcycle>
             {
-                new Motorcycle { Id = Guid.NewGuid().ToString(), LicensePlate = "ABC123", Model = "Honda", Year = 2020 },
-                new Motorcycle { Id = Guid.NewGuid().ToString(), LicensePlate = "DEF456", Model = "Yamaha", Year = 2021 }
+                new Motorcycle { Id = Guid.NewGuid(), LicensePlate = "ABC123", Model = "Honda", Year = 2020 },
+                new Motorcycle { Id = Guid.NewGuid(), LicensePlate = "DEF456", Model = "Yamaha", Year = 2021 }
             };
 
             var mockContext = new Mock<IApplicationDbContext>();
@@ -174,7 +174,7 @@ namespace MotoHubTests.Unit.Repositories
             var repository = new MotorcycleRepository(mockContext.Object);
 
             // Act
-            var result = repository.GetById(Guid.NewGuid().ToString());
+            var result = repository.GetById(Guid.NewGuid());
 
             // Assert
             Assert.Null(result);

@@ -23,10 +23,9 @@ public sealed class RiderProjectionTests
     private static Mock<IRentalRepository> ReadyRepository()
     {
         var repository = new Mock<IRentalRepository>();
-        repository.Setup(r => r.HasOverlappingRentalAsync(It.IsAny<string>(), It.IsAny<DateTime>(), It.IsAny<DateTime>()))
+        repository.Setup(r => r.HasOverlappingRentalAsync(
+                It.IsAny<Guid>(), It.IsAny<DateTime>(), It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(false);
-        repository.Setup(r => r.TryClaimRentalAsync(It.IsAny<string>(), It.IsAny<string>()))
-            .ReturnsAsync(MotorcycleClaimResult.Acquired);
         return repository;
     }
 

@@ -35,11 +35,10 @@ x-rental-core-environment: &rental-core-environment
   ASPNETCORE_ENVIRONMENT: Production
   Swagger__Enabled: "${SWAGGER_ENABLED:-false}"
   ASPNETCORE_URLS: http://+:8200
-  ConnectionStrings__Postgresql: "Host=postgres;Port=5432;Database=${MOTO_HUB_POSTGRES_DB:?Set MOTO_HUB_POSTGRES_DB in .env};Username=${POSTGRES_USER:?Set POSTGRES_USER in .env};Password=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}"
-  # Empty disables the dual write, so a stack without the target engine still runs.
-  ConnectionStrings__TargetSchema: "Host=cockroachdb;Port=26257;Database=projecty;Username=root;SSL Mode=Disable"
-  MongoDbSettings__ConnectionString: "mongodb://${MONGO_USER:?Set MONGO_USER in .env}:${MONGO_PASSWORD:?Set MONGO_PASSWORD in .env}@mongodb:27017"
-  MongoDbSettings__DatabaseName: "${MONGO_DB:?Set MONGO_DB in .env}"
+  # Um banco para o serviço inteiro. Motos, aluguéis, outbox e inbox moram
+  # aqui, e é isso que faz criar um aluguel e anunciá-lo caberem numa
+  # transação. O schema vem de deploy/db/sql, aplicado pelo cockroach-init.
+  ConnectionStrings__Postgresql: "Host=cockroachdb;Port=26257;Database=projecty;Username=root;SSL Mode=Disable"
   RabbitMQ__UserName: "${RENTAL_OPERATIONS_RABBITMQ_USER:?Set RENTAL_OPERATIONS_RABBITMQ_USER in .env}"
   RabbitMQ__Password: "${RENTAL_OPERATIONS_RABBITMQ_PASSWORD:?Set RENTAL_OPERATIONS_RABBITMQ_PASSWORD in .env}"
   Redis__ConnectionString: "redis:6379"
@@ -270,8 +269,10 @@ services:
         set -e
         cockroach sql --insecure --host=cockroachdb:26257 \
           --file=/sql/000_bootstrap.cockroach.sql
-        cockroach sql --insecure --host=cockroachdb:26257 --database=projecty \
-          --file=/sql/001_schema.sql
+        for file in /sql/0[0-9][0-9]_*.sql; do
+          case "$$file" in */000_bootstrap.*) continue ;; esac
+          cockroach sql --insecure --host=cockroachdb:26257 --database=projecty --file="$$file"
+        done
     volumes:
       - ./deploy/db/sql:/sql:ro
     networks:
@@ -279,25 +280,6 @@ services:
     depends_on:
       cockroachdb:
         condition: service_healthy
-  mongodb:
-    image: mongo:8.3
-    container_name: mongodb
-    ports:
-      - "27017:27017"
-    environment:
-      MONGO_INITDB_ROOT_USERNAME: "${MONGO_USER:?Set MONGO_USER in .env}"
-      MONGO_INITDB_ROOT_PASSWORD: "${MONGO_PASSWORD:?Set MONGO_PASSWORD in .env}"
-    volumes:
-      - mongo-data:/data/db
-    networks:
-      - projecty
-    healthcheck:
-      test: ["CMD-SHELL", "mongosh --quiet --username \"$${MONGO_INITDB_ROOT_USERNAME}\" --password \"$${MONGO_INITDB_ROOT_PASSWORD}\" --authenticationDatabase admin --eval \"db.adminCommand('ping').ok\""]
-      interval: 5s
-      timeout: 5s
-      retries: 12
-      start_period: 10s
-
   rabbitmq:
     image: rabbitmq:4-management
     container_name: rabbitmq
@@ -474,21 +456,11 @@ services:
       redis:
         condition: service_healthy
 
-  rental-core-migrations:
-    image: projecty/rental-core:dev
-    build:
-      context: .
-      dockerfile: services/rental-core/RentalCore/Dockerfile
-    command: ["--migrate=true"]
-    networks:
-      - projecty
-    environment: *rental-core-environment
-    depends_on:
-      postgres:
-        condition: service_healthy
-
   # One service where there were two. The gateway sends both /api/motorcycles and
   # /api/rentals here, under one audience, because they are one process now.
+  #
+  # Não há serviço de migração ao lado: o schema é aplicado pelo cockroach-init,
+  # a partir dos mesmos arquivos que o CI prova serem portáteis.
   rental-core:
     image: projecty/rental-core:dev
     build:
@@ -511,10 +483,6 @@ services:
       start_period: 10s
     depends_on:
       otel-collector:
-        condition: service_healthy
-      rental-core-migrations:
-        condition: service_completed_successfully
-      mongodb:
         condition: service_healthy
       cockroach-init:
         condition: service_completed_successfully
@@ -553,7 +521,6 @@ volumes:
   postgres-data:
   cockroach-data:
   redis-data:
-  mongo-data:
   rabbitmq-data:
   minio-data:
   grafana-data:
