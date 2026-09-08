@@ -21,3 +21,8 @@ DO $$ BEGIN
     CREATE ROLE billing LOGIN;
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
+
+DO $$ BEGIN
+    CREATE ROLE identity LOGIN;
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;

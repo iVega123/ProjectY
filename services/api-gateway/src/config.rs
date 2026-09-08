@@ -516,7 +516,7 @@ mod tests {
 
         let jwks = parse_absolute_url(
             "GATEWAY_JWKS_URL",
-            "http://identity:8080/.well-known/jwks.json",
+            "http://identity:8095/.well-known/jwks.json",
         )
         .unwrap();
         assert_eq!(jwks.path(), "/.well-known/jwks.json");

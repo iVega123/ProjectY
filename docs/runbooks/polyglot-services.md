@@ -112,6 +112,46 @@ if another request has already closed the rental, the losing request returns
 HTTP 409. Closing again returns the stored rental unchanged; only the winning
 update enqueues `rental.closed`.
 
+## identity
+
+Issues the tokens and publishes the JWKS. Port `8095`, its own tables in the
+shared CockroachDB (`users`, `user_roles`, `riders`, `refresh_tokens`,
+`signing_keys`), and no dependency on Kafka.
+
+If the gateway answers `401` to everything, check the JWKS first:
+
+```bash
+curl -s localhost:8095/.well-known/jwks.json
+```
+
+An empty or unreachable document means the gateway fails closed, which is the
+posture ADR 0013 chose. A token whose `kid` is not in that document was signed
+by a key that has already been retired.
+
+Rotating the signing key is a command, not a database edit:
+
+```bash
+docker compose exec identity /app/identity rotate-keys
+```
+
+The previous key stays published for
+`IDENTITY_KEY_ROTATION_OVERLAP_SECONDS` (900 by default), which is what lets a
+token already in flight keep working. The service refuses to start if that
+overlap is shorter than the access token's lifetime.
+
+Bringing the legacy AuthGate users across:
+
+```bash
+docker compose exec -e AUTHGATE_DATABASE_URL=postgres://... identity \
+  /app/identity import-authgate
+```
+
+It preserves each user's identifier — that value is the JWT `sub` and
+`rentals.rider_id` — and copies the ASP.NET Identity password hash unchanged.
+Those passwords keep working: the first successful login verifies the old format
+and rewrites it as Argon2id. Re-running the import is safe; it skips what is
+already there and reports what it could not map.
+
 The invoice itself is read through the gateway, from billing:
 
 ```

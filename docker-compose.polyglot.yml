@@ -85,6 +85,41 @@ services:
     depends_on:
       kafka-init: {condition: service_completed_successfully}
       schema-init: {condition: service_completed_successfully}
+  identity:
+    image: projecty/identity:dev
+    build: {context: ., dockerfile: services/identity/Dockerfile}
+    networks: [projecty]
+    ports: ['127.0.0.1:8095:8095']
+    environment:
+      IDENTITY_BIND: 0.0.0.0:8095
+      # Como o rental-core e o billing, conecta como root. O papel `identity`
+      # e os seus GRANTs existem em 005_identity.sql; passar a usá-lo depende
+      # do GRANT CONNECT no bootstrap, que é a dívida registrada no #134.
+      IDENTITY_DATABASE_URL: postgres://root@cockroachdb:26257/projecty?sslmode=disable
+      IDENTITY_PUBLIC_URL: http://localhost:8095
+      IDENTITY_ISSUER: projecty.identity
+      # As audiências que um token carrega, e o portão valida a do upstream
+      # chamado. Uma lista, e não uma por token: ver o comentário de
+      # GATEWAY_JWT_AUDIENCE_BILLING no docker-compose.yml.
+      IDENTITY_AUDIENCES: projecty.rental-core,projecty.billing,projecty.auth-gate,projecty.rider-manager
+      # Sela a semente Ed25519 no banco. Sem esta chave, quem lê signing_keys
+      # não consegue assinar nada -- que é a afirmação do ADR 0013 valendo
+      # também para quem tem o backup.
+      IDENTITY_KEY_ENCRYPTION_KEY: "${IDENTITY_KEY_ENCRYPTION_KEY:?Set IDENTITY_KEY_ENCRYPTION_KEY}"
+      IDENTITY_ADMIN_EMAIL: admin@projecty.local
+      IDENTITY_ADMIN_PASSWORD: "${IDENTITY_ADMIN_PASSWORD:?Set IDENTITY_ADMIN_PASSWORD}"
+      IDENTITY_HEALTH_URL: http://127.0.0.1:8095/health/ready
+      OTEL_SERVICE_NAME: identity
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+      OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
+    healthcheck:
+      # O próprio binário, porque a imagem final não tem shell nem curl.
+      test: [CMD, /app/identity, healthcheck]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+    depends_on:
+      cockroach-init: {condition: service_completed_successfully}
   billing:
     image: projecty/billing:dev
     build: {context: ., dockerfile: services/billing/Dockerfile}
@@ -102,7 +137,7 @@ services:
       # por que ela é a do rental-core.
       GATEWAY_IDENTITY_SIGNING_KEY: "${GATEWAY_IDENTITY_SIGNING_KEY:?Set GATEWAY_IDENTITY_SIGNING_KEY}"
       GATEWAY_IDENTITY_SIGNING_KEY_ID: local-v1
-      BILLING_IDENTITY_AUDIENCE: projecty.rental-core
+      BILLING_IDENTITY_AUDIENCE: projecty.billing
       OTEL_SERVICE_NAME: billing
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
       OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
