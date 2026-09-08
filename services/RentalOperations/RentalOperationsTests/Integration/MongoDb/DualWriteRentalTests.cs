@@ -22,6 +22,8 @@ public sealed class DualWriteRentalTests : IAsyncLifetime
         .WithDatabase("projecty").WithUsername("projecty").Build();
     private MongoDbContext _context = null!;
     private IRentalRepository _repository = null!;
+    private RentalTargetWriter _writer = null!;
+    private NpgsqlDataSource _dataSource = null!;
     private Guid _motorcycle;
 
     public async Task InitializeAsync()
@@ -39,13 +41,16 @@ public sealed class DualWriteRentalTests : IAsyncLifetime
         await Execute("INSERT INTO motorcycles (id, license_plate, model, year) VALUES ("
             + Literal(_motorcycle.ToString()) + ", 'DUA-0001', 'Dual write', 2026);");
 
-        _repository = new DualWriteRentalRepository(
-            new RentalRepository(_context), _target.GetConnectionString(),
-            NullLogger<DualWriteRentalRepository>.Instance);
+        _dataSource = NpgsqlDataSource.Create(_target.GetConnectionString());
+        _writer = new RentalTargetWriter(_dataSource, NullLogger<RentalTargetWriter>.Instance);
+        _repository = new DualWriteRentalRepository(new RentalRepository(_context), _writer);
     }
 
-    public Task DisposeAsync() =>
-        Task.WhenAll(_mongo.DisposeAsync().AsTask(), _target.DisposeAsync().AsTask());
+    public async Task DisposeAsync()
+    {
+        await _dataSource.DisposeAsync();
+        await Task.WhenAll(_mongo.DisposeAsync().AsTask(), _target.DisposeAsync().AsTask());
+    }
 
     private static string Literal(string value) => "'" + value.Replace("'", "''") + "'";
 
@@ -168,5 +173,46 @@ public sealed class DualWriteRentalTests : IAsyncLifetime
         var refusal = RentalRowMapper.Refusal(rental);
         Assert.NotNull(refusal);
         Assert.Contains("Quarantined", refusal!.Reason, StringComparison.Ordinal);
+    }
+
+    // Motorcycles reach the target through a reconciling projector, so one registered
+    // moments ago is not there yet and a rental referencing it is refused by the
+    // foreign key. Without a retry that rental would stay absent until something
+    // happened to update it, turning a routine projection delay into permanent
+    // divergence -- and divergence is what decides whether the cutover can happen.
+    [Fact]
+    [Trait("Category", "Integration")]
+    public async Task ARentalRefusedByTheForeignKeyIsRepairedOnceTheMotorcycleArrives()
+    {
+        var late = Guid.NewGuid();
+        var rental = NewRental();
+        rental.MotorcycleId = late.ToString();
+        rental.MotorcycleLicencePlate = "DUA-0002";
+        await _repository.CreateRentalAsync(rental);
+
+        Assert.Empty(await TargetRentals());
+
+        await Execute("INSERT INTO motorcycles (id, license_plate, model, year) VALUES ("
+            + Literal(late.ToString()) + ", 'DUA-0002', 'Late arrival', 2026);");
+        var repaired = await RentalMirrorReconciler.ReconcileAsync(
+            _context, _writer, DateTime.UtcNow.AddHours(-1), CancellationToken.None);
+
+        Assert.Equal(1, repaired);
+        Assert.Equal(RentalRowMapper.ToRowId(rental._id!.Value), Assert.Single(await TargetRentals()).Id);
+    }
+
+    // Reconciliation is a repair pass, not a second writer. A rental already mirrored
+    // must not be counted or rewritten, or the divergence signal would never settle.
+    [Fact]
+    [Trait("Category", "Integration")]
+    public async Task ReconciliationLeavesRentalsThatAlreadyArrived()
+    {
+        await _repository.CreateRentalAsync(NewRental());
+
+        var repaired = await RentalMirrorReconciler.ReconcileAsync(
+            _context, _writer, DateTime.UtcNow.AddHours(-1), CancellationToken.None);
+
+        Assert.Equal(0, repaired);
+        Assert.Single(await TargetRentals());
     }
 }

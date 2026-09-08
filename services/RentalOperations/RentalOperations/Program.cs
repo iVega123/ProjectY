@@ -1,3 +1,4 @@
+using Npgsql;
 using Microsoft.OpenApi.Models;
 using MongoDB.Driver;
 using ProjectY.Shared.Health;
@@ -100,13 +101,22 @@ builder.Services.AddScoped<IMotorcycleService, MotorcycleService>();
 builder.Services.AddScoped<RentalRepository>();
 // Dual write only where the target engine is configured. Without it the service
 // runs on Mongo alone, which is what every stack does until #135 finishes.
-builder.Services.AddScoped<IRentalRepository>(provider =>
+var targetSchema = builder.Configuration.GetConnectionString("TargetSchema");
+if (string.IsNullOrWhiteSpace(targetSchema))
 {
-    var target = builder.Configuration.GetConnectionString("TargetSchema");
-    var mongo = provider.GetRequiredService<RentalRepository>();
-    return string.IsNullOrWhiteSpace(target) ? mongo : new DualWriteRentalRepository(
-        mongo, target, provider.GetRequiredService<ILogger<DualWriteRentalRepository>>());
-});
+    builder.Services.AddScoped<IRentalRepository>(provider => provider.GetRequiredService<RentalRepository>());
+}
+else
+{
+    // One data source for the process. Each owns a connection pool, so building
+    // one per write would leak a pool per write; the container disposes this one.
+    builder.Services.AddSingleton(NpgsqlDataSource.Create(targetSchema));
+    builder.Services.AddSingleton<RentalTargetWriter>();
+    builder.Services.AddScoped<IRentalRepository>(provider => new DualWriteRentalRepository(
+        provider.GetRequiredService<RentalRepository>(),
+        provider.GetRequiredService<RentalTargetWriter>()));
+    builder.Services.AddHostedService<RentalMirrorReconciler>();
+}
 builder.Services.AddScoped<IRentalService, RentalService>();
 
 var app = builder.Build();
