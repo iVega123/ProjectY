@@ -8,7 +8,7 @@ namespace RentalOperations.Services
     public interface IRentalService
     {
         Task CreateRentalAsync(RentalCreateDto createDto, string userId);
-        Task<ResponseRentalDTO> CalculateFinalCostAsync(string rentalId, string userId, DateTime actualEndDate);
+        Task<ResponseRentalDTO> CloseRentalAsync(string rentalId, string userId, DateTime actualEndDate);
         Task<CursorPage<ResponseRentalDTO>> GetRentalsByUserIdAsync(
             string userId,
             string? cursor,

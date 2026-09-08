@@ -22,9 +22,15 @@ public sealed class Rental
     public DateTime StartDate { get; set; }
     public DateTime? EndDate { get; set; }
     public DateTime PredictedEndDate { get; set; }
+    /// <summary>
+    /// O combinado, decidido quando o aluguel começa. Não é a liquidação.
+    ///
+    /// Continua aqui porque é o preço do contrato, e o billing precisa dele no
+    /// evento para saber a diária que valia. O que saiu no #137 foi o outro
+    /// número -- quanto se deve no fim --, que era calculado nesta classe e
+    /// agora tem dono.
+    /// </summary>
     public decimal InitCost { get; set; }
-    public decimal FinalCost { get; set; }
-    public decimal AdditionalCostsOrSavings { get; set; }
-    public string StatusMessage { get; set; } = string.Empty;
+
     public RentalStatus Status { get; set; } = RentalStatus.Active;
 }

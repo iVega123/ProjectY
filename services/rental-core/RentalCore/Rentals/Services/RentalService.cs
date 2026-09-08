@@ -97,7 +97,19 @@ namespace RentalOperations.Services
             await _repository.CreateRentalAsync(rental);
         }
 
-        public async Task<ResponseRentalDTO> CalculateFinalCostAsync(string rentalId, string userId, DateTime actualEndDate)
+        /// <summary>
+        /// Fecha o aluguel. Não calcula dinheiro.
+        ///
+        /// O que acontece aqui é uma transição de estado e uma data. Quanto se
+        /// deve é decidido pelo billing, a partir do rental.closed que esta
+        /// mesma transação enfileira -- porque liquidação e ciclo de vida do
+        /// aluguel são contextos diferentes, e até o #137 dividiam esta classe.
+        ///
+        /// A consequência está à vista e vale ser dita: o valor devido passa a
+        /// ser eventualmente consistente. Fechar devolve o aluguel fechado, não
+        /// a fatura; ela existe alguns instantes depois, quando o evento chega.
+        /// </summary>
+        public async Task<ResponseRentalDTO> CloseRentalAsync(string rentalId, string userId, DateTime actualEndDate)
         {
             var rental = await BeforeWriteAsync(() => _repository.GetRentalByIdAsync(rentalId));
 
@@ -107,44 +119,27 @@ namespace RentalOperations.Services
             if (!string.Equals(rental.UserId, userId, StringComparison.Ordinal))
                 throw new UnauthorizedAccessException("The rental belongs to another rider.");
 
+            // Fechar de novo devolve o mesmo aluguel em vez de enfileirar um
+            // segundo rental.closed: o inbox do billing reconheceria a
+            // repetição, mas não há razão para produzi-la.
             if (rental.Status == RentalStatus.Completed)
             {
                 return _mapper.Map<ResponseRentalDTO>(rental);
             }
 
-            var response = _mapper.Map<ResponseRentalDTO>(rental);
-            response.ActualEndDate = actualEndDate;
-
-            int daysPlanned = (rental.PredictedEndDate - rental.StartDate).Days;
-            decimal dailyRate = daysPlanned > 0 ? rental.InitCost / daysPlanned : 0;
-
-            if (actualEndDate < rental.PredictedEndDate)
+            // Uma devolução antes do início não existe, e o billing não tem como
+            // recusá-la: para ele seriam zero dias usados e o plano inteiro em
+            // multa. A data é entrada de usuário, e a validação pertence a quem
+            // a recebe.
+            if (actualEndDate < rental.StartDate)
             {
-                decimal penaltyRate = GetPenaltyRate(daysPlanned);
-                int daysEarly = (rental.PredictedEndDate - actualEndDate).Days;
-                response.AdditionalCostsOrSavings = -(daysEarly * dailyRate * penaltyRate);
-                response.StatusMessage = "Return was early. A penalty was applied.";
+                throw new ArgumentException("A rental cannot end before it starts.");
             }
-            else if (actualEndDate > rental.PredictedEndDate)
-            {
-                int daysLate = (actualEndDate - rental.PredictedEndDate).Days;
-                response.AdditionalCostsOrSavings = daysLate * 50.00m;
-                response.StatusMessage = "Return was late. Additional cost for extra days.";
-            }
-            else
-            {
-                response.StatusMessage = "Returned on the predicted end date. No additional costs.";
-            }
-
-            response.FinalTotalCost = response.OriginalTotalCost + response.AdditionalCostsOrSavings;
 
             rental.EndDate = actualEndDate;
-            rental.FinalCost = response.FinalTotalCost;
-            rental.AdditionalCostsOrSavings = response.AdditionalCostsOrSavings;
-            rental.StatusMessage = response.StatusMessage;
             rental.Status = RentalStatus.Completed;
             await _repository.UpdateRentalAsync(rental);
-            return response;
+            return _mapper.Map<ResponseRentalDTO>(rental);
         }
 
         public async Task<CursorPage<ResponseRentalDTO>> GetRentalsByUserIdAsync(
@@ -193,10 +188,5 @@ namespace RentalOperations.Services
             }
         }
 
-        private decimal GetPenaltyRate(int days)
-        {
-            if (days <= 7) return 0.20m;
-            return 0.40m;
-        }
     }
 }

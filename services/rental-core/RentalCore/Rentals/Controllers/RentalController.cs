@@ -130,8 +130,15 @@ namespace RentalOperations.Controllers
             }
         }
 
-        [HttpPost("calculate-final-cost")]
-        public async Task<IActionResult> CalculateFinalCost([FromQuery] string rentalId, [FromQuery] DateTime actualEndDate)
+        /// <summary>
+        /// Fecha o aluguel.
+        ///
+        /// Chamava-se calculate-final-cost, e o nome era o problema: um POST que
+        /// diz "calcular" e na verdade encerra o contrato. Encerrar é o que ele
+        /// sempre fez; o cálculo saiu daqui no #137 e a rota passa a dizer isso.
+        /// </summary>
+        [HttpPost("close")]
+        public async Task<IActionResult> Close([FromQuery] string rentalId, [FromQuery] DateTime actualEndDate)
         {
             try
             {
@@ -140,7 +147,7 @@ namespace RentalOperations.Controllers
                 {
                     return Forbid();
                 }
-                var response = await _rentalService.CalculateFinalCostAsync(rentalId, userIdClaim.Value, actualEndDate);
+                var response = await _rentalService.CloseRentalAsync(rentalId, userIdClaim.Value, actualEndDate);
                 return Ok(response);
             }
             catch (UnauthorizedAccessException)

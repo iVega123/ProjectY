@@ -90,6 +90,12 @@ autenticado; na linha 111 faz `response.UserId = userId` antes de gravar.
 `UserId`. O controller converte a violação em `403`. Testes pelo pipeline HTTP comprovam que um
 rider não consegue finalizar nem ler o resultado já finalizado de outro, que o documento permanece
 inalterado na tentativa e que o proprietário legítimo continua conseguindo finalizar o aluguel.
+
+**Nota de #137.** O método passou a chamar-se `CloseRentalAsync` e a rota, `POST /api/Rental/close`.
+A comparação de proprietário é a mesma e os testes acima continuam existindo com os nomes
+`Close_*`; o que saiu do método foi o cálculo do valor, que hoje mora no billing. Este relatório
+é um registro datado e não foi reescrito -- esta nota existe só para que um achado fechado
+continue verificável.
 Fechado pelo commit
 [`e0873be`](https://github.com/iVega123/ProjectY/commit/e0873be) (C4, task #21).
 

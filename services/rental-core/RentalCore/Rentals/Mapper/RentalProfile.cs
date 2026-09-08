@@ -16,9 +16,6 @@ namespace RentalOperations.Mapper
             .ForMember(dest => dest.PredictedEndDate, opt => opt.MapFrom(src => src.PredictedEndDate))
             .ForMember(dest => dest.OriginalTotalCost, opt => opt.MapFrom(src => src.InitCost))
             .ForMember(dest => dest.ActualEndDate, opt => opt.MapFrom(src => src.EndDate))
-            .ForMember(dest => dest.FinalTotalCost, opt => opt.MapFrom(src => src.FinalCost))
-            .ForMember(dest => dest.AdditionalCostsOrSavings, opt => opt.MapFrom(src => src.AdditionalCostsOrSavings))
-            .ForMember(dest => dest.StatusMessage, opt => opt.MapFrom(src => src.StatusMessage))
             .ForMember(dest => dest.UserId, opt => opt.MapFrom(src => src.UserId));
 
         }

@@ -5,7 +5,7 @@
 -- devolvida não poder ser alugada nunca mais. É este arquivo que prova que a
 -- restrição é parcial, e não só única.
 UPDATE rentals
-   SET status = 'closed', ends_at = now(), final_cost = 210.00
+   SET status = 'closed', ends_at = now()
  WHERE status = 'active'
    AND motorcycle_id IN (SELECT id FROM motorcycles WHERE license_plate = 'CI0T35T');
 
