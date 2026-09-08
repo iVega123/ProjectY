@@ -89,6 +89,27 @@ public sealed class RiderProjectionTests(RentalCoreDatabase database)
 
     [Fact]
     [Trait("Category", "Integration")]
+    [Trait("Guarantee", "ADR-0015#carried-state")]
+    public async Task RevokingARiderUnverifiesTheProjection()
+    {
+        await database.ResetAsync();
+        await using var dataSource = NpgsqlDataSource.Create(database.ConnectionString);
+        var projection = Projection(dataSource);
+        var rider = Guid.NewGuid().ToString("D");
+
+        await projection.HandleAsync(Event(rider, true, 100, "Ada Lovelace"), CancellationToken.None);
+        await projection.HandleAsync(Event(rider, false, 500, "Ada Lovelace"), CancellationToken.None);
+
+        // Apagar o piloto no RiderManager não alcança este banco. O que alcança é
+        // o fato, e ele tem de derrubar a linha -- senão a autorização local
+        // continua dizendo sim para quem não existe mais.
+        var view = await new SqlRiderProjectionStore(dataSource).GetAsync(rider, CancellationToken.None);
+        Assert.NotNull(view);
+        Assert.False(view!.Verified);
+    }
+
+    [Fact]
+    [Trait("Category", "Integration")]
     public async Task StoreReadsWhatTheProjectionWrote()
     {
         await database.ResetAsync();

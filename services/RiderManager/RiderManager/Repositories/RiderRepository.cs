@@ -69,11 +69,17 @@ namespace RiderManager.Repositories
             _context.EventOutbox.Add(RiderEventEnvelope.Verified(rider));
         }
 
+        // A revogação entra no mesmo SaveChanges da remoção: ou o piloto some e o
+        // fato sai, ou nenhum dos dois acontece. Enfileirar depois abriria uma
+        // janela em que a linha já não existe e a projeção ainda diz que existe --
+        // e é exatamente nessa janela que alguém alugaria.
         public async Task DeleteAsync(string id)
         {
             var rider = await _context.Riders.FindAsync(id);
             if (rider != null)
             {
+                _context.EventOutbox.Add(RiderEventEnvelope.RevokedLegacy(rider));
+                _context.EventOutbox.Add(RiderEventEnvelope.Revoked(rider));
                 _context.Riders.Remove(rider);
                 await _context.SaveChangesAsync();
             }
