@@ -30,7 +30,7 @@ public static class ProjectYTelemetryExtensions
 
         services.AddOpenTelemetry()
             .ConfigureResource(resource => resource.AddService(serviceName))
-            .WithMetrics(metrics => metrics.AddMeter("ProjectY.Messaging", "ProjectY.Resilience").AddOtlpExporter(options =>
+            .WithMetrics(metrics => metrics.AddMeter("ProjectY.Messaging", "ProjectY.Resilience", "ProjectY.Migration").AddOtlpExporter(options =>
             {
                 options.Endpoint = endpoint;
                 options.Protocol = protocol;
