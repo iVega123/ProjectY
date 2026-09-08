@@ -64,7 +64,9 @@ export default function () {
   const startsAt = new Date(Date.now() + 8 * 86400000).toISOString();
   const predictedEndsAt = new Date(Date.now() + 1 * 86400000).toISOString();
   const payload = JSON.stringify({
-    motocycleLicencePlate: "ABC1D23",
+    // A moto não é o assunto deste ensaio: o período é inválido de propósito e
+    // a recusa vem antes de qualquer busca. O id nulo deixa isso explícito.
+    motorcycleId: "00000000-0000-0000-0000-000000000000",
     startDate: startsAt,
     predictedEndDate: predictedEndsAt,
   });

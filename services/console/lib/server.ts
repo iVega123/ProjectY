@@ -52,21 +52,33 @@ export function verifyGrant(value:string, traceId:string, userId:string) {
 // sendo o que a pessoa sabe de cor. Resolver uma na outra é trabalho de BFF --
 // exatamente o que o #138 diz que o console faz -- e não da API de escrita, que
 // perderia a referência estável se voltasse a aceitar placa.
-async function motorcycleId(value:string, plate:string): Promise<string> {
+//
+// A busca devolve a falha em vez de lançá-la, porque essas falhas são resultado
+// e não transporte: 404 quando a placa não existe, 429 quando o portão limita.
+// Colapsar as duas num 503 esconderia o erro real de quem digitou a placa, e
+// faria o gerador de carga contar menos limitações do que houve -- e esse é um
+// dos números que o console mostra na tela.
+type Lookup = {id:string} | {status:number; detail:string};
+async function motorcycleId(value:string, plate:string): Promise<Lookup> {
   const response = await upstream('/api/motorcycles/'+encodeURIComponent(plate), value);
-  if(!response.ok) throw new Error('No motorcycle with plate '+plate);
+  if(!response.ok) return {status:response.status,
+    detail:(await response.text()).slice(0,500) || 'No motorcycle with plate '+plate};
   const motorcycle = await response.json();
-  if(typeof motorcycle?.id !== 'string' || !motorcycle.id) throw new Error('Motorcycle '+plate+' has no id');
-  return motorcycle.id;
+  return typeof motorcycle?.id === 'string' && motorcycle.id
+    ? {id:motorcycle.id}
+    : {status:502, detail:'Motorcycle '+plate+' came back without an id'};
 }
 export async function createRental(value:string, userId:string, plate:string, date:object, index:number): Promise<Attempt> {
   const traceId = randomBytes(16).toString('hex');
   const start = performance.now();
   try {
+    const lookup = await motorcycleId(value,plate);
+    if(!('id' in lookup)) return {index,plate,status:lookup.status,duration:performance.now()-start,
+      traceId,grant:grant(traceId,userId),detail:lookup.detail};
     const response = await upstream('/api/Rental/create', value, {method:'POST',
       headers:{'Content-Type':'application/json', 'Idempotency-Key':randomBytes(16).toString('hex'),
         traceparent:`00-${traceId}-${randomBytes(8).toString('hex')}-01`},
-      body:JSON.stringify({motorcycleId:await motorcycleId(value,plate),...date})});
+      body:JSON.stringify({motorcycleId:lookup.id,...date})});
     return {index,plate,status:response.status,duration:performance.now()-start,traceId,
       grant:grant(traceId,userId), detail:(await response.text()).slice(0,500)};
   } catch {
