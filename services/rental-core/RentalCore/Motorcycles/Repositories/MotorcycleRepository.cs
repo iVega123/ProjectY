@@ -1,4 +1,4 @@
-﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore;
 using MotoHub.Data;
 using MotoHub.Models;
 
@@ -18,12 +18,17 @@ namespace MotoHub.Repositories
         public async Task<CursorPage<Motorcycle>> GetPageAsync(string? cursor, int? pageSize)
         {
             var size = CursorPagination.NormalizePageSize(pageSize);
-            var afterId = CursorPagination.Decode(cursor);
+            var decoded = CursorPagination.Decode(cursor);
+            Guid? afterId = decoded is null
+                ? null
+                : Guid.TryParse(decoded, out var parsed)
+                    ? parsed
+                    : throw new FormatException("The pagination cursor is invalid.");
             var source = afterId is null
                 ? _context.Motorcycles
-                : _context.Motorcycles.FromSqlInterpolated($$"""
-                    SELECT * FROM "Motorcycles"
-                    WHERE "RetiredAtUtc" IS NULL AND "Id" > {{afterId}}
+                : _context.Motorcycles.FromSqlInterpolated($"""
+                    SELECT * FROM motorcycles
+                    WHERE retired_at IS NULL AND id > {afterId}
                     """);
             var query = source
                 .AsNoTracking()
@@ -32,10 +37,10 @@ namespace MotoHub.Repositories
                 .AsQueryable();
 
             var fetched = await query.Take(size + 1).ToListAsync();
-            return CursorPagination.CreatePage(fetched, size, motorcycle => motorcycle.Id);
+            return CursorPagination.CreatePage(fetched, size, motorcycle => motorcycle.Id.ToString());
         }
 
-        public Motorcycle? GetById(string id)
+        public Motorcycle? GetById(Guid id)
         {
             return _context.Motorcycles.Find(id);
         }
@@ -50,50 +55,6 @@ namespace MotoHub.Repositories
         {
             _context.Entry(motorcycle).State = EntityState.Modified;
             _context.SaveChanges();
-        }
-
-        public async Task<bool> RetireAsync(string id, DateTime retiredAtUtc, string reason)
-        {
-            var motorcycle = await _context.Motorcycles
-                .FirstOrDefaultAsync(candidate => candidate.Id == id && candidate.RetiredAtUtc == null);
-            if (motorcycle is null)
-            {
-                return false;
-            }
-
-            motorcycle.RetiredAtUtc = retiredAtUtc;
-            motorcycle.RetirementReason = reason;
-            await _context.SaveChangesAsync();
-            return true;
-        }
-
-        public async Task EnsureHistoricalReferenceAsync(string licensePlate, DateTime retiredAtUtc)
-        {
-            if (await _context.Motorcycles.AnyAsync(motorcycle => motorcycle.LicensePlate == licensePlate))
-            {
-                return;
-            }
-
-            var placeholder = new Motorcycle
-            {
-                LicensePlate = licensePlate,
-                Model = "Legacy motorcycle (metadata unavailable)",
-                Year = 0,
-                RegistrationDate = retiredAtUtc,
-                RetiredAtUtc = retiredAtUtc,
-                RetirementReason = MotorcycleRetirementReasons.LegacyOrphanBackfill
-            };
-
-            _context.Motorcycles.Add(placeholder);
-            try
-            {
-                await _context.SaveChangesAsync();
-            }
-            catch (DbUpdateException)
-                when (_context.Motorcycles.Any(motorcycle => motorcycle.LicensePlate == licensePlate))
-            {
-                _context.Entry(placeholder).State = EntityState.Detached;
-            }
         }
 
         public bool LicensePlateExists(string licensePlate)

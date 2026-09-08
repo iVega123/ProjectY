@@ -5,7 +5,7 @@ Tilt loads `docker-compose.yml` plus `docker-compose.chaos.yml`. The latter is
 controlled infrastructure experiments. Do not include the chaos overlay in a
 production deployment. The unauthenticated control API binds to loopback only.
 
-The active .NET topology routes PostgreSQL, Redis, RabbitMQ, MongoDB and MinIO
+The active .NET topology routes PostgreSQL, CockroachDB, Redis, RabbitMQ and MinIO
 through `toxiproxy` on their native ports. Keeping the native AMQP and object-store
 ports also routes the existing TCP readiness checks through the same listeners.
 Migrations wait for both the proxy and their database. Application services and

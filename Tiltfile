@@ -120,9 +120,11 @@ configure_live_update(
     'cd /workspace && cargo fetch --locked',
     'cd /workspace && cargo build --locked',
 )
-infra_resources = ['toxiproxy', 'postgres', 'redis', 'rabbitmq', 'mongodb', 'minio']
+infra_resources = ['toxiproxy', 'postgres', 'cockroachdb', 'redis', 'rabbitmq', 'minio']
 observability_resources = ['tempo', 'loki', 'otel-collector', 'prometheus', 'grafana']
-setup_resources = ['auth-gate-migrations', 'rider-manager-migrations', 'rental-core-migrations']
+# O rental-core saiu daqui: o schema dele vem de deploy/db/sql, aplicado pelo
+# cockroach-init, e não de migrações do EF.
+setup_resources = ['auth-gate-migrations', 'rider-manager-migrations', 'cockroach-init']
 service_resources = ['auth-gate', 'rider-manager', 'rental-core', 'media-guard']
 
 if full:

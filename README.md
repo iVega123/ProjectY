@@ -49,7 +49,7 @@ source locations are in the
 | Area | Current state |
 |---|---|
 | Audited baseline | Four ASP.NET Core services under `services/`: `AuthGate`, `MotoHub`, `RiderManager`, and `RentalOperations` |
-| Data and messaging | PostgreSQL, MongoDB, RabbitMQ, and MinIO in the original local stack |
+| Data and messaging | CockroachDB for `rental-core`, PostgreSQL for the rest, RabbitMQ, and MinIO |
 | Active observability | Application OTLP exporters, OpenTelemetry Collector, Prometheus, Tempo, Loki, and Grafana |
 | Retired observability | The unauthenticated Elasticsearch, Logstash, and Kibana stack |
 | Platform integration | Root and `deploy/base` entrypoints share the real application topology; Tilt live updates all four .NET services |
@@ -58,8 +58,9 @@ source locations are in the
 
 The platform entrypoint imports the root Compose model, which builds the
 existing services behind the Rust gateway with the LGTM observability stack.
-The rental OTel resource is `rental-core`. PostgreSQL and MongoDB remain until
-the verified data migration; no nonexistent application is declared.
+The rental OTel resource is `rental-core`, and it runs on CockroachDB: motorcycles,
+rentals, outbox and inbox share one database, so a rental and the event that
+announces it are one transaction. No nonexistent application is declared.
 
 ### Operate the polyglot flow
 
@@ -192,17 +193,19 @@ and 61.55 GiB RAM; 5 VUs for 30 seconds using one seeded rider and the default l
 
 Reproduce: `powershell -File scripts/Run-LoadTest.ps1`; append
 `-Mode slow-db`, `-Mode db-down` or `-Mode rabbit-down` for fault runs.
-Both MongoDB fault runs fail the unchanged k6 thresholds. These measurements
+Both database fault runs fail the unchanged k6 thresholds. The numbers above
+were measured while rentals still lived in MongoDB; the store changed in #135
+and the runs have not been repeated. These measurements
 include rate limiting and do not estimate maximum capacity.
 [Raw results and caveats](docs/measurements/epic-9/README.md).
 
 | Tilt drill | Injection | Acceptance / observation |
 |---|---|---|
-| Slow database | MongoDB +500 ms | No-errors criterion failed: [#160](https://github.com/iVega123/ProjectY/issues/160) |
-| Database down | MongoDB timeout | Bounded refusals and gateway breaker; inspect traces and metrics |
+| Slow database | CockroachDB +500 ms | No-errors criterion failed against the previous store: [#160](https://github.com/iVega123/ProjectY/issues/160) |
+| Database down | CockroachDB timeout | Bounded refusals and gateway breaker; inspect traces and metrics |
 | Redis down | Redis timeout | Limiter open; revocation/idempotency closed |
 | Kafka down | Disabled | Waiting for Kafka rental path, #130 |
-| Bad network | MongoDB slicer + connection byte limit | Error-rate acceptance still open |
+| Bad network | CockroachDB slicer + connection byte limit | Error-rate acceptance still open |
 | Service killed | Disabled | Waiting for live tracking/map, #10 |
 
 Each Tilt drill has a clear button. [Detailed commands](docs/chaos-drills.md).

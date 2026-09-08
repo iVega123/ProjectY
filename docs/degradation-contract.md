@@ -8,7 +8,7 @@ the unfinished target rows. Do not interpret a missing service as a passing dril
 |---|---|---|
 | Redis rate limiter | The gateway admits traffic and increments `gateway_ratelimit_degraded_total`. | Existing gateway Redis failure tests. |
 | Redis revocation / idempotency | High-value rental creation and protected idempotent mutations refuse closed. Ordinary JWT verification uses cached JWKS. | ADR 0017 supersedes the earlier blanket “everything continues” row. |
-| MongoDB rental store | Rental endpoints return 503 with `Retry-After: 1`; driver connection, selection, socket and pool waits are bounded to one second each. | Driver deadline test plus controller failure tests; gateway retains its independent 2.5 s request budget. |
+| rental-core database | Rental endpoints return 503 with `Retry-After: 1`; a constraint violation stays a 409, because "do not retry" and "retry shortly" are different answers. | Driver deadline test plus controller failure tests; gateway retains its independent 2.5 s request budget. |
 | RiderManager / MotoHub dependency | Rental calls have a one-second HTTP deadline. Transport failures and upstream 5xx become 503, with a distinct refusal counter and a trace degradation tag. Business 4xx remain client errors. | Controller tests cover wrapped 503 versus 404 / business rejection. |
 | RabbitMQ | AuthGate and MotoHub transactional outboxes retain unpublished events and retry after recovery. Consumers use durable bounded retries and DLQ. | #69 / #154, outbox integration tests. This is the active broker; it is not Kafka evidence. |
 | Risk/pricing | Rental closure already uses the fixed daily-rate model. There is no dynamic-pricing service to fail over from. | Target fallback blocked by #10. |

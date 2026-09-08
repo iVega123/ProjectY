@@ -90,23 +90,19 @@ TTL. Query the actual rider/day after the probe to verify stored rows and TTL.
 
 ## Failure expectations
 
-On rollout, the rental Kafka relay reconciles active legacy Mongo documents in
-batches of 100. A missing `PendingEvents` field identifies the old schema; an
-empty persisted array already belongs to the outbox schema and is not replayed.
-The relay atomically adds a stable `rental.started` envelope only while the
-document remains active and uninitialized. Its occurrence time is the original
-Mongo ObjectId creation time, so a delayed backfill cannot reopen a closed rental
-in consumers. Legacy records lack an immutable motorcycle ID: their start/close
-events use the stable `legacy-rental:<id>` key, independent of licence plate
-renames. New rentals continue to use their real motorcycle ID. Settlement updates
-preserve concurrent outbox writes and acknowledgements. No SQL migration or
-manual database rewrite is needed; tracking becomes available after Kafka catches up.
+The rental Kafka relay drains the `outbox` table in batches of 100, oldest
+first. A row is written in the same transaction as the rental, so an event
+without a rental cannot exist and a rental without its event cannot either. The
+row is marked published only after `ProduceAsync` returns: a crash between the
+two republishes the same event, and its id -- derived from the rental and the
+subject -- is what lets the consumer recognise it. The partition key is the
+motorcycle id, which does not change when a licence plate is corrected.
 
-Concurrent settlements use the Mongo update's matched count: if another request
-has already completed the rental, the losing request returns HTTP 409 and does
-not release the motorcycle claim or return its unpersisted calculation. Reloading
-the rental or retrying settlement after completion returns the stored dates and
-costs; only the winning update enqueues `rental.closed`.
+Concurrent settlements are decided by the update's row count under a status
+guard: if another request has already closed the rental, the losing request
+returns HTTP 409 and does not persist its calculation. Reloading the rental or
+retrying settlement after completion returns the stored dates and costs; only
+the winning update enqueues `rental.closed`.
 
 Replacing or deleting a document may remove its object before a delayed
 `document.stored` event arrives. Only S3 `NoSuchKey` is consumed as failed

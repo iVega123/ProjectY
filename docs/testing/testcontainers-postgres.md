@@ -6,11 +6,11 @@ PostgreSQL container and proves that two concurrent active-rental claims for the
 same motorcycle cannot both commit. The loser is rejected by PostgreSQL with
 `unique_violation` (`23505`), something an in-memory repository cannot reproduce.
 
-`RentalOperations` still uses MongoDB in the audited baseline, and the planned
-`services/rental-core` project has not landed yet. For that reason, this task keeps
-the minimal future rental schema inside the test fixture instead of pretending it
-is a production migration. Epic 5 should move this schema into a real migration and
-reuse the same concurrent-write pattern against the production repository.
+That is what it does now. The fixture no longer carries a schema of its own:
+`RentalCoreDatabase` applies `deploy/db/sql` -- the same files `cockroach-init`
+applies -- so the test exercises the production DDL rather than a copy of it.
+A test that builds its own schema proves the code agrees with itself; this one
+proves the code agrees with what gets deployed.
 
 ## Run locally
 

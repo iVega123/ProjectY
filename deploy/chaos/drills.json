@@ -3,7 +3,7 @@
     "id": "slow-db",
     "label": "Slow database",
     "available": true,
-    "proxy": "mongodb",
+    "proxy": "cockroachdb",
     "toxics": [
       {
         "name": "slow-db",
@@ -12,13 +12,13 @@
       }
     ],
     "expectation": "Latency should rise. Compare p95/p99 and 503s with baseline; the original no-5xx target is not yet proven.",
-    "observe": "Grafana rental SLO and MongoDB spans in Tempo."
+    "observe": "Grafana rental SLO and database spans in Tempo."
   },
   {
     "id": "db-down",
     "label": "Database down",
     "available": true,
-    "proxy": "mongodb",
+    "proxy": "cockroachdb",
     "toxics": [
       {
         "name": "db-down",
@@ -57,7 +57,7 @@
     "id": "bad-network",
     "label": "Bad network",
     "available": true,
-    "proxy": "mongodb",
+    "proxy": "cockroachdb",
     "toxics": [
       {
         "name": "bad-network-slicer",
@@ -71,7 +71,7 @@
       }
     ],
     "expectation": "Fragment responses and interrupt long connections. Measure client retries and errors; unchanged error rate is not yet proven.",
-    "observe": "MongoDB client spans, gateway resilience metrics and k6 error rate."
+    "observe": "Database client spans, gateway resilience metrics and k6 error rate."
   },
   {
     "id": "service-killed",

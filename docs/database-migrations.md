@@ -4,6 +4,43 @@ AuthGate, MotoHub, and RiderManager own separate PostgreSQL databases and use
 EF Core migrations as the only schema creation and evolution mechanism. A
 `DbContext` constructor must never create, migrate, or contact a database.
 
+`rental-core` is deliberately not on that list. Its schema is applied from
+`deploy/db/sql` by the `cockroach-init` service, because the same files have to
+run unchanged on CockroachDB and PostgreSQL, and two tools owning one schema is
+how a schema drifts. EF Core still maps `motorcycles`, but it neither creates
+nor evolves the table.
+
+## The #135 cutover is destructive by design
+
+#135 moved rentals out of MongoDB and removed the store. There is no backfill,
+no dual-read window and no ObjectId compatibility lookup, because there is no
+installation to carry forward: this repository has only ever run on a developer
+machine and in CI. The cutover is `docker compose down -v` and a fresh stack.
+
+That is a boundary, not a claim that migrating would have been easy. An
+installation holding real rentals would need at least:
+
+- every rental copied, closed history included, carrying `rider_name`,
+  `additional_costs` and `status_message`. The pre-cutover mirror wrote nine
+  columns and none of those three, so migrated rows would read back as `0` and
+  empty text rather than as what was settled.
+- a stable external identifier. The mirror derived a row id by zero-padding a
+  12-byte ObjectId into a UUID, while issued URLs and already-published
+  `rental.started` events carry the ObjectId itself — so a migrated rental's
+  `rental.closed` would not correlate with its own start.
+- pending event envelopes drained out of each rental document into `outbox`.
+  A Kafka backlog at cutover would otherwise be dropped instead of retried,
+  which is worse than a delay: the events were already committed.
+- `rider_projection` seeded, because the `rental-rider-projection-v1` consumer
+  group already has committed offsets and `AutoOffsetReset.Earliest` will not
+  replay what that group has read. Existing riders would resolve as unverified
+  until each happened to emit a new event.
+
+None of that is implemented, and none of it should be inferred from the code.
+If this project ever acquires an installation worth migrating, the list above is
+where that work starts, and it is its own change — not a step folded into the
+one that removed the store.
+
 ## Local startup
 
 The root Compose stack runs one-shot migration services after PostgreSQL is

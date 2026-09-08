@@ -1,5 +1,4 @@
-﻿using AutoMapper;
-using MotoHub.CrossCutting;
+using AutoMapper;
 using MotoHub.DTOs;
 using MotoHub.Entities;
 using MotoHub.Models;
@@ -16,18 +15,18 @@ namespace MotoHub.Services
         private readonly IMotorcycleRepository _repository;
         private readonly IMapper _mapper;
         private readonly IMessagingPublisherService _messagingPublisherService;
-        private readonly IRentalOperationService _rentalOperationService;
+        private readonly IMotorcycleRetirement _retirement;
 
         public MotorcycleService(
             IMotorcycleRepository repository,
             IMapper mapper,
             IMessagingPublisherService messagingPublisherService,
-            IRentalOperationService rentalOperationService)
+            IMotorcycleRetirement retirement)
         {
             _repository = repository;
             _mapper = mapper;
             _messagingPublisherService = messagingPublisherService;
-            _rentalOperationService = rentalOperationService;
+            _retirement = retirement;
         }
 
         public async Task<CursorPage<MotorcycleDTO>> GetMotorcyclesAsync(string? cursor, int? pageSize)
@@ -50,6 +49,16 @@ namespace MotoHub.Services
             _repository.Add(motorcycle);
         }
 
+        /// <summary>
+        /// Renomear uma moto voltou a ser o que sempre deveria ter sido: um
+        /// UPDATE numa linha.
+        ///
+        /// Antes havia uma reserva a pedir ao serviço de aluguéis, porque lá a
+        /// placa era a chave -- renomear significava reescrever todos os
+        /// aluguéis da moto, e duas renomeações concorrentes podiam se cruzar no
+        /// meio. Os aluguéis referenciam o id da moto, então não há nada a
+        /// reescrever: a placa nova aparece no histórico inteiro por junção.
+        /// </summary>
         public async Task UpdateMotorcycleAsync(string licensePlate, string newLicencePlate)
         {
             licensePlate = BrazilianLicensePlateAttribute.Normalize(licensePlate);
@@ -76,24 +85,18 @@ namespace MotoHub.Services
                     $"Motorcycle with plate {newLicencePlate} already exists.");
             }
 
-            var renameReserved = await _rentalOperationService.TryReserveMotorcycleRenameAsync(
-                licensePlate,
-                newLicencePlate);
-            if (!renameReserved)
-            {
-                throw new InvalidOperationException(
-                    $"Motorcycle plate {newLicencePlate} is already claimed by a rental or retirement.");
-            }
-
             existingMotorcycle.LicensePlate = newLicencePlate;
 
             LicencePlateRabbitMQEntity licencePlateRabbitMQEntity = new LicencePlateRabbitMQEntity()
             {
-                AggregateId = existingMotorcycle.Id,
+                AggregateId = existingMotorcycle.Id.ToString(),
                 newLicencePlate = newLicencePlate,
                 oldLicencePlate = licensePlate,
             };
 
+            // A linha do outbox entra no mesmo SaveChanges do UPDATE: ou os dois,
+            // ou nenhum. É o efeito exatamente-uma-vez do ADR 0009, e aqui ele
+            // custa uma ordem de chamada, não um protocolo.
             _messagingPublisherService.PublishLicenceUpdate(licencePlateRabbitMQEntity);
             _repository.Update(existingMotorcycle);
         }
@@ -104,46 +107,19 @@ namespace MotoHub.Services
             if (existingMotorcycle == null)
                 return OperationResult.Fail($"Motorcycle with plate {licensePlate} not found.");
 
-            if (existingMotorcycle.RetiredAtUtc is not null)
-                return OperationResult.Ok("Motorcycle was already retired.");
-
-            try
+            var result = await _retirement.RetireAsync(
+                existingMotorcycle.Id,
+                DateTime.UtcNow,
+                MotorcycleRetirementReasons.RequestedByAdministrator);
+            return result switch
             {
-                var retirementReserved = await _rentalOperationService.TryRetireMotorcycleAsync(licensePlate);
-                if (!retirementReserved)
-                    return OperationResult.Fail(
-                        "Motorcycle has an active rental and cannot be retired.",
-                        StatusCodes.Status409Conflict);
-
-                var retired = await _repository.RetireAsync(
-                    existingMotorcycle.Id,
-                    DateTime.UtcNow,
-                    MotorcycleRetirementReasons.RequestedByAdministrator);
-                return retired
-                    ? OperationResult.Ok("Motorcycle successfully retired.")
-                    : OperationResult.Ok("Motorcycle was already retired.");
-            }
-            catch (Exception ex)
-            {
-                // The RentalOperations retirement marker is intentionally retained on an
-                // ambiguous failure. A retry can finish the soft delete without allowing a
-                // rental to slip through the cross-service commit window.
-                return OperationResult.Fail("Failed to retire the motorcycle due to an unexpected error. " + ex.Message);
-            }
+                MotorcycleRetirementResult.Retired => OperationResult.Ok("Motorcycle successfully retired."),
+                MotorcycleRetirementResult.AlreadyRetired => OperationResult.Ok("Motorcycle was already retired."),
+                _ => OperationResult.Fail(
+                    "Motorcycle has an active rental and cannot be retired.",
+                    StatusCodes.Status409Conflict)
+            };
         }
-
-        public async Task EnsureHistoricalReferencesAsync(IEnumerable<string> licensePlates)
-        {
-            var retiredAtUtc = DateTime.UtcNow;
-            foreach (var licensePlate in licensePlates
-                         .Where(plate => !string.IsNullOrWhiteSpace(plate))
-                         .Select(plate => plate.Trim())
-                         .Distinct(StringComparer.Ordinal))
-            {
-                await _repository.EnsureHistoricalReferenceAsync(licensePlate, retiredAtUtc);
-            }
-        }
-
 
         public bool LicensePlateExists(string licensePlate)
         {

@@ -19,7 +19,6 @@
     <PackageReference Include="Npgsql" Version="10.0.3" />
     <PackageReference Include="RabbitMQ.Client" Version="6.8.1" />
     <PackageReference Include="Testcontainers.PostgreSql" Version="4.14.0" />
-    <PackageReference Include="Testcontainers.MongoDb" Version="4.14.0" />
     <PackageReference Include="xunit" Version="2.5.3" />
     <PackageReference Include="xunit.runner.visualstudio" Version="2.5.3" />
   </ItemGroup>
@@ -33,7 +32,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- The dual write is tested against the schema file itself, never a copy. -->
-    <Content Include="../../../deploy/db/sql/001_schema.sql" Link="target-schema/001_schema.sql" CopyToOutputDirectory="PreserveNewest" />
+    <!-- Os testes rodam contra o schema de deploy, nunca contra uma cópia dele. -->
+    <Content Include="../../../deploy/db/sql/*.sql" Link="db/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

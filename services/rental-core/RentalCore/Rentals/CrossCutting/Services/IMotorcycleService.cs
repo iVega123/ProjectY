@@ -1,10 +1,9 @@
-﻿using RentalOperations.CrossCutting.Model;
+using RentalOperations.CrossCutting.Model;
 
 namespace RentalOperations.CrossCutting.Services
 {
     public interface IMotorcycleService
     {
-        Task<Motorcycle> GetMotorcycleByIdAsync(string motorcycleId);
-        Task EnsureHistoricalReferencesAsync(IEnumerable<string> licensePlates);
+        Task<Motorcycle?> GetMotorcycleByIdAsync(string licensePlate);
     }
 }

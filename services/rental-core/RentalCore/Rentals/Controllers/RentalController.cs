@@ -177,51 +177,5 @@ namespace RentalOperations.Controllers
             }
         }
 
-        [Authorize(Roles = "Admin")]
-        [HttpPost("motorcycle-retirements/{licencePlate}")]
-        public async Task<IActionResult> TryRetireMotorcycle(string licencePlate)
-        {
-            try
-            {
-                var acquired = await _rentalService.TryRetireMotorcycleAsync(licencePlate);
-                return acquired
-                    ? NoContent()
-                    : Conflict(new ProblemDetails
-                    {
-                        Status = StatusCodes.Status409Conflict,
-                        Title = "Active rental conflict",
-                        Detail = $"Motorcycle {licencePlate} has an active rental."
-                    });
-            }
-            catch (Exception ex) when (DependencyFailure.IsUnavailable(ex))
-            {
-                return Unavailable(ex);
-            }
-        }
-
-        [Authorize(Roles = "Admin")]
-        [HttpPost("motorcycle-renames/reservations")]
-        public async Task<IActionResult> TryReserveMotorcycleRename(
-            [FromBody] MotorcycleRenameReservationDto request)
-        {
-            try
-            {
-                var acquired = await _rentalService.TryReserveLicensePlateRenameAsync(
-                    request.OldLicencePlate,
-                    request.NewLicencePlate);
-                return acquired
-                    ? NoContent()
-                    : Conflict(new ProblemDetails
-                    {
-                        Status = StatusCodes.Status409Conflict,
-                        Title = "Motorcycle claim conflict",
-                        Detail = $"Motorcycle {request.NewLicencePlate} is already claimed."
-                    });
-            }
-            catch (Exception ex) when (DependencyFailure.IsUnavailable(ex))
-            {
-                return Unavailable(ex);
-            }
-        }
     }
 }

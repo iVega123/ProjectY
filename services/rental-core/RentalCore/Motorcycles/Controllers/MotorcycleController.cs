@@ -111,13 +111,5 @@ namespace MotoHub.Controllers
             }
 
         }
-
-        [HttpPost("historical-references")]
-        public async Task<IActionResult> EnsureHistoricalReferences(
-            [FromBody] HistoricalMotorcycleReferencesRequest request)
-        {
-            await _motorcycleService.EnsureHistoricalReferencesAsync(request.LicensePlates);
-            return NoContent();
-        }
     }
 }

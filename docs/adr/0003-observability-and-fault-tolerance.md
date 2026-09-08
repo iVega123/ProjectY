@@ -38,7 +38,7 @@ Fault tolerance, per layer:
   than queues, retry with full jitter on idempotent requests only.
 - **Domain:** outbox and inbox boundaries provide an exactly-once *effect*
   without any broker promising exactly-once delivery. The precise boundaries,
-  including the weaker MongoDB convergence case, are defined by
+  including the weaker inbox convergence case, are defined by
   [ADR 0009](0009-exactly-once-effect.md).
 - **Messaging:** durable queues, persistent messages, publisher confirms, and a
   real dead-letter exchange with backoff via TTL in the broker rather than

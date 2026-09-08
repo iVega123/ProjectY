@@ -30,11 +30,19 @@ apply() {
 echo "==> bootstrap do engine"
 apply "$ADMIN_DSN" "$BOOTSTRAP"
 
+# Todos os arquivos numerados, em ordem, menos os bootstraps por engine. É um
+# glob e não uma lista para que um arquivo novo entre no teste de portabilidade
+# por existir, e não por alguém ter lembrado de citá-lo aqui.
+schema_files() {
+    find "$SQL_DIR" -maxdepth 1 -name "[0-9][0-9][0-9]_*.sql" \
+        -not -name "000_bootstrap.*" | sort
+}
+
 echo "==> aplicando o schema portátil"
-apply "$APP_DSN" "$SQL_DIR/001_schema.sql"
+for file in $(schema_files); do apply "$APP_DSN" "$file"; done
 
 echo "==> reaplicando (o schema precisa ser idempotente)"
-apply "$APP_DSN" "$SQL_DIR/001_schema.sql"
+for file in $(schema_files); do apply "$APP_DSN" "$file"; done
 
 echo "==> primeiro aluguel ativo — deve ser aceito"
 apply "$APP_DSN" "$TEST_DIR/double_booking_setup.sql"

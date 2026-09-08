@@ -49,7 +49,6 @@ public sealed class RentalPeriodTests
 
     [Theory]
     [InlineData(RentalStatus.Cancelled)]
-    [InlineData(RentalStatus.Quarantined)]
     public void Overlaps_WhenExistingRentalIsUnavailableForScheduling_ReturnsFalse(RentalStatus status)
     {
         var rental = CreateRental(status);
@@ -61,6 +60,7 @@ public sealed class RentalPeriodTests
 
     private static Rental CreateRental(RentalStatus status, DateTime? endDate = null) => new()
     {
+        MotorcycleId = Guid.NewGuid(),
         MotorcycleLicencePlate = "TEST-0001",
         UserId = "rider-1",
         StartDate = ExistingStart,

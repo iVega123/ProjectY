@@ -4,24 +4,25 @@ using ProjectY.Events;
 
 namespace RentalOperations.Model;
 
-public sealed class RentalEventEnvelope
+/// <summary>
+/// Um evento de aluguel pronto para virar linha do outbox.
+///
+/// O identificador é derivado do aluguel e do assunto, e não sorteado: uma
+/// republicação depois de uma falha precisa carregar o mesmo id, ou o inbox do
+/// outro lado não teria como reconhecê-la como repetida.
+/// </summary>
+public sealed record RentalEventEnvelope(string Id, string Topic, byte[] Payload, string? TraceParent)
 {
-    public string Id { get; set; } = string.Empty;
-    public string Topic { get; set; } = string.Empty;
-    public byte[] Payload { get; set; } = [];
-    public string? TraceParent { get; set; }
-
-    public static string PartitionKey(Rental rental) => string.IsNullOrEmpty(rental.MotorcycleId)
-        ? $"legacy-rental:{rental._id}" : rental.MotorcycleId;
+    public static string PartitionKey(Rental rental) => rental.MotorcycleId.ToString();
 
     public static RentalEventEnvelope Create(Rental rental, string topic, DateTime? occurredAt = null)
     {
-        var id = $"{rental._id}:{topic}:v1";
+        var id = $"{rental.Id}:{topic}:v1";
         var time = new DateTimeOffset(occurredAt ?? DateTime.UtcNow).ToUnixTimeMilliseconds();
         var message = new RentalEvent
         {
             EventId = id,
-            RentalId = rental._id!.Value.ToString(),
+            RentalId = rental.Id.ToString(),
             RiderId = rental.UserId,
             MotorcycleId = PartitionKey(rental),
             OccurredAtMs = time,
@@ -33,6 +34,6 @@ public sealed class RentalEventEnvelope
         };
         if (rental.RiderName is { } riderName) message.RiderName = riderName;
         if (rental.EndDate is { } ended) message.EndedAtMs = new DateTimeOffset(ended.ToUniversalTime()).ToUnixTimeMilliseconds();
-        return new() { Id = id, Topic = topic, Payload = message.ToByteArray(), TraceParent = Activity.Current?.Id };
+        return new RentalEventEnvelope(id, topic, message.ToByteArray(), Activity.Current?.Id);
     }
 }

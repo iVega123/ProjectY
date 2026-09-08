@@ -57,7 +57,7 @@ export function setup() {
   if (warmup.status !== 200 && warmup.status !== 201) fail("Rental warmup failed: " + warmup.status + " " + warmup.body);
   const mode = __ENV.MODE || "baseline";
   if (mode !== "baseline") {
-    const proxy = mode === "rabbit-down" ? "rabbitmq" : "mongodb";
+    const proxy = mode === "rabbit-down" ? "rabbitmq" : "cockroachdb";
     const attributes = mode === "slow-db" ? { latency: 500, jitter: 0 } : { timeout: 0 };
     const injection = http.post("http://toxiproxy:8474/proxies/" + proxy + "/toxics",
       JSON.stringify({ name: "load-drill", type: mode === "slow-db" ? "latency" : "timeout",
@@ -97,7 +97,7 @@ export function handleSummary(data) {
 
 export function teardown() {
   if ((__ENV.MODE || "baseline") !== "baseline") {
-    const proxy = __ENV.MODE === "rabbit-down" ? "rabbitmq" : "mongodb";
+    const proxy = __ENV.MODE === "rabbit-down" ? "rabbitmq" : "cockroachdb";
     const response = http.del("http://toxiproxy:8474/proxies/" + proxy + "/toxics/load-drill",
       null, { tags: { name: "chaos-clear" } });
     check(response, { "benchmark toxic cleared": r => r.status === 204 });

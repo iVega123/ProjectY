@@ -1,8 +1,6 @@
 using Confluent.Kafka;
-using MongoDB.Bson.Serialization.Attributes;
-using MongoDB.Driver;
+using Npgsql;
 using ProjectY.Events;
-using RentalOperations.Data;
 using RentalOperations.Services.RabbitMQService;
 
 namespace RentalOperations.Services;
@@ -15,15 +13,6 @@ public interface IRiderProjectionStore
     Task<RiderView?> GetAsync(string riderId, CancellationToken token);
 }
 
-public sealed class RiderSnapshot
-{
-    [BsonId]
-    public string Id { get; set; } = string.Empty;
-    public bool Verified { get; set; }
-    public long VerifiedAtMs { get; set; }
-    public string? Name { get; set; }
-}
-
 /// <summary>
 /// Raised when a rider has not reached the projection yet. This fails closed and
 /// says so: the rider may well be entitled, and the client can retry. A generic
@@ -33,16 +22,26 @@ public sealed class RiderSnapshot
 public sealed class RiderProjectionPendingException(string riderId)
     : Exception($"Rider {riderId} is awaiting processing.");
 
-public sealed class MongoRiderProjectionStore(MongoDbContext db) : IRiderProjectionStore
+public sealed class SqlRiderProjectionStore(NpgsqlDataSource database) : IRiderProjectionStore
 {
-    public const string CollectionName = "RiderProjection";
-
     public async Task<RiderView?> GetAsync(string riderId, CancellationToken token)
     {
-        var snapshot = await db.Database.GetCollection<RiderSnapshot>(CollectionName)
-            .Find(row => row.Id == riderId).FirstOrDefaultAsync(token);
-        return snapshot is null ? null
-            : new RiderView(snapshot.Id, snapshot.Verified, snapshot.VerifiedAtMs, snapshot.Name);
+        await using var connection = await database.OpenConnectionAsync(token);
+        await using var command = new NpgsqlCommand(
+            "SELECT rider_id, verified, verified_at_ms, rider_name FROM rider_projection WHERE rider_id = @id",
+            connection);
+        command.Parameters.AddWithValue("id", riderId);
+        await using var reader = await command.ExecuteReaderAsync(token);
+        if (!await reader.ReadAsync(token))
+        {
+            return null;
+        }
+
+        return new RiderView(
+            reader.GetString(0),
+            reader.GetBoolean(1),
+            reader.GetInt64(2),
+            reader.IsDBNull(3) ? null : reader.GetString(3));
     }
 }
 
@@ -52,8 +51,8 @@ public sealed class MongoRiderProjectionStore(MongoDbContext db) : IRiderProject
 /// service does not own.
 /// </summary>
 public sealed class RiderProjection(
-    MongoDbContext db,
-    MongoInboxProcessor inbox,
+    NpgsqlDataSource database,
+    SqlInboxProcessor inbox,
     IConfiguration config,
     ILogger<RiderProjection> log) : BackgroundService
 {
@@ -64,7 +63,6 @@ public sealed class RiderProjection(
     {
         var bootstrap = config["Kafka:BootstrapServers"];
         if (string.IsNullOrWhiteSpace(bootstrap)) return;
-        var riders = db.Database.GetCollection<RiderSnapshot>(MongoRiderProjectionStore.CollectionName);
         using var consumer = new ConsumerBuilder<string, byte[]>(new ConsumerConfig
         {
             BootstrapServers = bootstrap,
@@ -82,7 +80,7 @@ public sealed class RiderProjection(
                 {
                     message = consumer.Consume(TimeSpan.FromSeconds(1));
                     if (message is null) continue;
-                    await HandleAsync(riders, message.Message.Value, token);
+                    await HandleAsync(message.Message.Value, token);
                     consumer.Commit(message);
                 }
                 catch (Exception error) when (!token.IsCancellationRequested)
@@ -96,7 +94,7 @@ public sealed class RiderProjection(
         finally { consumer.Close(); }
     }
 
-    public async Task HandleAsync(IMongoCollection<RiderSnapshot> riders, byte[] payload, CancellationToken token)
+    public async Task HandleAsync(byte[] payload, CancellationToken token)
     {
         var value = RiderEventV2.Parser.ParseFrom(payload);
         if (!value.HasOccurredAtMs || !value.HasVerified || string.IsNullOrWhiteSpace(value.RiderId)
@@ -105,29 +103,27 @@ public sealed class RiderProjection(
 
         // The inbox is what makes a redelivery a no-op. Kafka redelivers on any
         // rebalance or uncommitted offset, so this is the normal path, not an edge.
-        await inbox.ProcessAsync(value.EventId, ConsumerName, async _ =>
+        await inbox.ProcessAsync(value.EventId, ConsumerName, async inner =>
         {
             // No ordering exists between topics, and none is assumed here: the newest
             // fact wins by its own timestamp, so a replayed older event cannot undo it.
-            try
-            {
-                await riders.UpdateOneAsync(
-                    row => row.Id == value.RiderId && row.VerifiedAtMs <= value.OccurredAtMs,
-                    Builders<RiderSnapshot>.Update
-                        .SetOnInsert(row => row.Id, value.RiderId)
-                        .Set(row => row.Verified, value.Verified)
-                        .Set(row => row.VerifiedAtMs, value.OccurredAtMs)
-                        .Set(row => row.Name, value.HasName ? value.Name : null),
-                    new UpdateOptions { IsUpsert = true },
-                    token);
-            }
-            catch (MongoWriteException duplicate)
-                when (duplicate.WriteError?.Category == ServerErrorCategory.DuplicateKey)
-            {
-                // The filter missed because a newer fact is already stored, so the
-                // upsert tried to insert a second row for this rider. Nothing to do:
-                // an older event must not roll the projection backwards.
-            }
+            // The WHERE on the upsert is what says so -- an older event matches no row
+            // and changes nothing, instead of rolling the projection backwards.
+            await using var connection = await database.OpenConnectionAsync(inner);
+            await using var command = new NpgsqlCommand("""
+                INSERT INTO rider_projection (rider_id, verified, verified_at_ms, rider_name)
+                VALUES (@id, @verified, @at, @name)
+                ON CONFLICT (rider_id) DO UPDATE
+                   SET verified = EXCLUDED.verified,
+                       verified_at_ms = EXCLUDED.verified_at_ms,
+                       rider_name = EXCLUDED.rider_name
+                 WHERE rider_projection.verified_at_ms <= EXCLUDED.verified_at_ms
+                """, connection);
+            command.Parameters.AddWithValue("id", value.RiderId);
+            command.Parameters.AddWithValue("verified", value.Verified);
+            command.Parameters.AddWithValue("at", value.OccurredAtMs);
+            command.Parameters.AddWithValue("name", value.HasName ? value.Name : DBNull.Value);
+            await command.ExecuteNonQueryAsync(inner);
         }, token);
     }
 }

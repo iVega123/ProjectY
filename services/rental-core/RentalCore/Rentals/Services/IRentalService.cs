@@ -13,10 +13,7 @@ namespace RentalOperations.Services
             string userId,
             string? cursor,
             int? pageSize);
-        Task UpdateMotorcycleLicensePlateAsync(string oldLicensePlate, string newLicensePlate);
-        Task<bool> TryReserveLicensePlateRenameAsync(string oldLicensePlate, string newLicensePlate);
         Task<bool> IsMotorcycleCurrentlyRentedAsync(string licencePlate);
-        Task<bool> TryRetireMotorcycleAsync(string licencePlate);
     }
 }
 

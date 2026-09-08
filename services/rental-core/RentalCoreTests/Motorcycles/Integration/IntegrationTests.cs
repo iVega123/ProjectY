@@ -34,7 +34,6 @@ namespace MotoHubTests.Integration
 
             var motorcycle = new Motorcycle
             {
-                Id = Guid.NewGuid().ToString(),
                 LicensePlate = $"OUT-{Guid.NewGuid():N}".ToUpperInvariant(),
                 Model = "Transactional outbox",
                 Year = 2026,
@@ -48,7 +47,7 @@ namespace MotoHubTests.Integration
             await service.UpdateMotorcycleAsync(motorcycle.LicensePlate, newLicencePlate);
 
             var message = Assert.Single(context.OutboxMessages.Local);
-            Assert.Equal(motorcycle.Id, message.AggregateId);
+            Assert.Equal(motorcycle.Id.ToString(), message.AggregateId);
             Assert.Equal(newLicencePlate, motorcycle.LicensePlate);
             Assert.Equal(1, await context.OutboxMessages.CountAsync(item => item.Id == message.Id));
         }

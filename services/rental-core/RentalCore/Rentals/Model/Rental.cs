@@ -1,55 +1,30 @@
-﻿using MongoDB.Bson.Serialization.Attributes;
-using MongoDB.Bson;
-using System.Security.Cryptography;
+namespace RentalOperations.Model;
 
-namespace RentalOperations.Model
+/// <summary>
+/// Um aluguel como o banco o guarda.
+///
+/// O documento do MongoDB virou linha: o identificador é o UUID que a tabela
+/// gera, e a moto é referenciada pelo id dela, não pela placa. A placa continua
+/// aqui porque a API a devolve, mas é resultado de junção -- lê-se de
+/// motorcycles a cada consulta, então uma correção de placa aparece no
+/// histórico inteiro sem que nada precise reescrever os aluguéis.
+/// </summary>
+public sealed class Rental
 {
-    public class Rental
-    {
-        public string MotorcycleId { get; set; } = string.Empty;
-        public string? RiderName { get; set; }
-        public List<RentalEventEnvelope> PendingEvents { get; set; } = [];
-        [BsonId]
-        [BsonRepresentation(BsonType.ObjectId)]
-        public ObjectId? _id { get; set; }
+    public Guid Id { get; set; }
+    public required Guid MotorcycleId { get; set; }
+    public required string UserId { get; set; }
+    public string? RiderName { get; set; }
 
-        [BsonElement("MotorcycleLicencePlate")]
-        public required string MotorcycleLicencePlate { get; set; }
+    /// <summary>Vem da junção com motorcycles; não existe como coluna em rentals.</summary>
+    public string MotorcycleLicencePlate { get; set; } = string.Empty;
 
-        [BsonElement("userId")]
-        public required string UserId { get; set; }
-
-        [BsonElement("startDate")]
-        public DateTime StartDate { get; set; }
-
-        [BsonElement("endDate")]
-        [BsonIgnoreIfNull]
-        public DateTime? EndDate { get; set; }
-
-        [BsonElement("predictedEndDate")]
-        public DateTime PredictedEndDate { get; set; }
-
-        [BsonElement("initCost")]
-        public decimal InitCost { get; set; }
-
-        [BsonElement("finalCost")]
-        public decimal FinalCost { get; set; }
-
-        [BsonElement("additionalCostsOrSavings")]
-        public decimal AdditionalCostsOrSavings { get; set; }
-
-        [BsonElement("statusMessage")]
-        public string StatusMessage { get; set; } = string.Empty;
-
-        [BsonElement("status")]
-        [BsonRepresentation(BsonType.String)]
-        public RentalStatus Status { get; set; } = RentalStatus.Active;
-
-        public Rental()
-        {
-            _id = ObjectId.GenerateNewId();
-        }
-    }
-
-
+    public DateTime StartDate { get; set; }
+    public DateTime? EndDate { get; set; }
+    public DateTime PredictedEndDate { get; set; }
+    public decimal InitCost { get; set; }
+    public decimal FinalCost { get; set; }
+    public decimal AdditionalCostsOrSavings { get; set; }
+    public string StatusMessage { get; set; } = string.Empty;
+    public RentalStatus Status { get; set; } = RentalStatus.Active;
 }

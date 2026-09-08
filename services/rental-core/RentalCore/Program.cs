@@ -1,27 +1,26 @@
 using Microsoft.EntityFrameworkCore;
-using OpenTelemetry.Trace;
 using Microsoft.OpenApi.Models;
-using MongoDB.Driver;
 using MotoHub.Data;
 using MotoHub.Repositories;
 using MotoHub.Services.RabbitMQ;
 using Npgsql;
+using OpenTelemetry.Trace;
 using ProjectY.Shared.Health;
 using ProjectY.Shared.Hosting;
 using ProjectY.Shared.Idempotency;
 using ProjectY.Shared.Messaging;
 using ProjectY.Shared.Observability;
 using ProjectY.Shared.Security;
-using RentalOperations.Data;
 using RentalOperations.Repository;
 using RentalOperations.Services;
 using RentalOperations.Services.RabbitMQService;
 using Serilog;
 using Serilog.Formatting.Compact;
 
-// One service, one process. The two halves keep their namespaces -- MotoHub.* and
-// RentalOperations.* -- because renaming them would bury the merge in a diff nobody
-// could review. The names go in the step that dissolves the seam between them.
+// Um serviço, um processo, um banco. As duas metades mantêm seus namespaces --
+// MotoHub.* e RentalOperations.* -- porque renomeá-los enterraria a fusão num
+// diff que ninguém conseguiria revisar. Os nomes entram no passo que dissolve a
+// costura entre elas.
 
 if (await HealthProbeCommand.TryRunAsync(args))
 {
@@ -37,8 +36,7 @@ var serviceName = builder.Configuration["OTEL_SERVICE_NAME"]
 builder.Services.AddProjectYTelemetry(
     builder.Configuration,
     serviceName,
-    tracing => tracing.AddEntityFrameworkCoreInstrumentation(),
-    MongoTelemetry.ActivitySourceName);
+    tracing => tracing.AddEntityFrameworkCoreInstrumentation());
 
 Log.Logger = new LoggerConfiguration()
     .Enrich.FromLogContext()
@@ -50,32 +48,29 @@ builder.Host.UseSerilog();
 
 builder.Services.AddProjectYIdempotency(builder.Configuration, "rental-core");
 
-// Both halves read the same RabbitMQ section into their own options type. Each is
-// registered under its own type, so the classes that ask for one keep working.
-var motorcycleRabbit = builder.Configuration.GetSection("RabbitMQ").Get<MotoHub.Configurations.RabbitMQOptions>()
+var rabbit = builder.Configuration.GetSection("RabbitMQ").Get<MotoHub.Configurations.RabbitMQOptions>()
     ?? throw new InvalidOperationException("RabbitMQ configuration is missing.");
-var rentalRabbit = builder.Configuration.GetSection("RabbitMQ").Get<RentalOperations.Configurations.RabbitMQOptions>();
-builder.Services.AddSingleton(motorcycleRabbit);
-builder.Services.AddSingleton(rentalRabbit!);
-builder.Services.Configure<RentalOperations.Configurations.RabbitMQOptions>(
-    builder.Configuration.GetSection("RabbitMQ"));
+builder.Services.AddSingleton(rabbit);
 
-var postgresConnection = new NpgsqlConnectionStringBuilder(
-    builder.Configuration.GetConnectionString("Postgresql") ?? "Host=postgres;Port=5432");
-var mongoDbSettings = builder.Configuration.GetSection("MongoDbSettings");
-var mongoUrl = new MongoUrl(mongoDbSettings["ConnectionString"] ?? "mongodb://mongodb:27017");
+// Uma string de conexão para o serviço inteiro. Motos, aluguéis, outbox e
+// inbox estão no mesmo banco -- é isso que permite que criar um aluguel e
+// anunciá-lo sejam a mesma transação, e que aposentar uma moto seja uma
+// instrução em vez de um protocolo entre dois bancos.
+var connectionString = builder.Configuration.GetConnectionString("Postgresql")
+    ?? throw new InvalidOperationException("ConnectionStrings:Postgresql is not configured.");
+var database = new NpgsqlConnectionStringBuilder(connectionString);
 builder.Services
     .AddProjectYHealthChecks()
-    .AddTcpDependency("postgres", postgresConnection.Host ?? "postgres", postgresConnection.Port)
-    .AddTcpDependency("mongodb", mongoUrl.Server.Host, mongoUrl.Server.Port)
-    .AddTcpDependency("rabbitmq", motorcycleRabbit.HostName, 5672);
+    .AddTcpDependency("database", database.Host ?? "cockroachdb", database.Port)
+    .AddTcpDependency("rabbitmq", rabbit.HostName, 5672);
 
-builder.Services.AddDbContext<ApplicationDbContext>(options =>
-    options.UseNpgsql(builder.Configuration.GetConnectionString("Postgresql")));
+builder.Services.AddDbContext<ApplicationDbContext>(options => options.UseNpgsql(connectionString));
 builder.Services.AddScoped<IApplicationDbContext>(services =>
     services.GetRequiredService<ApplicationDbContext>());
-builder.Services.AddSingleton<MongoDbContext>(_ =>
-    new MongoDbContext(mongoDbSettings["ConnectionString"], mongoDbSettings["DatabaseName"]));
+
+// Uma fonte de dados por processo. Cada uma tem seu próprio pool, então criar
+// uma por escrita vazaria um pool por escrita; o contêiner descarta esta.
+builder.Services.AddSingleton(NpgsqlDataSource.Create(connectionString));
 
 // One audience for one service. The gateway sends projecty.rental-core for both
 // paths now, so a token minted for either half is accepted by the merged service.
@@ -93,88 +88,42 @@ builder.Services.AddSwaggerGen(c =>
 // The motorcycle half
 builder.Services.AddScoped<IMotorcycleRepository, MotorcycleRepository>();
 builder.Services.AddScoped<MotoHub.Services.IMotorcycleService, MotoHub.Services.MotorcycleService>();
+builder.Services.AddSingleton<MotoHub.Services.IMotorcycleRetirement, MotoHub.Services.MotorcycleRetirement>();
 builder.Services.AddScoped<IMessagingPublisherService, MessagingPublisherService>();
 builder.Services.AddSingleton(new OutboxRelayOptions
 {
     ServiceName = "rental-core",
-    HostName = motorcycleRabbit.HostName,
-    VirtualHost = motorcycleRabbit.VirtualHost,
-    UserName = motorcycleRabbit.UserName,
-    Password = motorcycleRabbit.Password
+    HostName = rabbit.HostName,
+    VirtualHost = rabbit.VirtualHost,
+    UserName = rabbit.UserName,
+    Password = rabbit.Password
 });
 builder.Services.AddSingleton<IOutboxTransport, RabbitMqOutboxTransport>();
 builder.Services.AddSingleton<IRabbitMqConnectionProvider, RabbitMqConnectionProvider>();
 builder.Services.AddHostedService<OutboxRelay<ApplicationDbContext>>();
-builder.Services.AddHostedService<MotoHub.Services.MotorcycleProjector>();
 
 // The rental half
-builder.Services.AddHostedService<MongoRentalIndexInitializer>();
 builder.Services.AddHostedService<RentalKafkaRelay>();
 builder.Services.AddHostedService<PricingProjection>();
 builder.Services.AddHostedService<RiderProjection>();
-builder.Services.AddSingleton<IRiderProjectionStore, MongoRiderProjectionStore>();
+builder.Services.AddSingleton<IRiderProjectionStore, SqlRiderProjectionStore>();
 builder.Services.AddSingleton(
-    builder.Configuration.GetSection("Messaging:Inbox").Get<MongoInboxOptions>()
-        ?? new MongoInboxOptions());
+    builder.Configuration.GetSection("Messaging:Inbox").Get<InboxOptions>()
+        ?? new InboxOptions());
 builder.Services.AddSingleton(TimeProvider.System);
-builder.Services.AddSingleton<MongoInboxProcessor>();
-builder.Services.AddHostedService<MongoInboxInitializer>();
-builder.Services.AddSingleton<IRabbitMqService, RabbitMqService>();
-builder.Services.AddSingleton<IMessagingConsumerService, MessagingConsumerService>();
-builder.Services.AddHostedService<ConsumerHostedService>();
+builder.Services.AddSingleton<SqlInboxProcessor>();
+builder.Services.AddHostedService<InboxRetentionSweeper>();
 
-// Still a call, still over HTTP, now to itself. The two halves reach each other
-// through the same clients they used across the network, because collapsing them
-// into method calls is the step that removes the seam -- and doing it here would
-// mix a relocation with a redesign. The base URLs point at this service.
-builder.Services
-    .AddHttpClient("moto-hub", client =>
-    {
-        client.Timeout = TimeSpan.FromSeconds(1);
-        client.BaseAddress = new Uri(
-            builder.Configuration["MotoHubSettings:BaseUrl"]
-                ?? throw new InvalidOperationException("MotoHubSettings:BaseUrl is not configured."));
-    })
-    .AddGatewayIdentityPropagation("projecty.rental-core", "service:rental-core");
-builder.Services
-    .AddHttpClient("rental-operations", client =>
-    {
-        client.BaseAddress = new Uri(
-            builder.Configuration["RentalOperationsSettings:BaseUrl"]
-                ?? throw new InvalidOperationException("RentalOperationsSettings:BaseUrl is not configured."));
-    })
-    .AddGatewayIdentityPropagation("projecty.rental-core");
+// A metade de aluguéis pergunta à de motos por chamada de método. Era um
+// HttpClient para o próprio processo, com timeout e propagação de identidade
+// para si mesmo; a costura entre os domínios continua sendo a interface.
 builder.Services.AddScoped<RentalOperations.CrossCutting.Services.IMotorcycleService,
     RentalOperations.CrossCutting.Services.MotorcycleService>();
-builder.Services.AddScoped<MotoHub.CrossCutting.IRentalOperationService, MotoHub.CrossCutting.RentalOperationService>();
 
-builder.Services.AddScoped<RentalRepository>();
-// Dual write only where the target engine is configured. Without it the service
-// runs on Mongo alone, which is what every stack does until #135 finishes.
-var targetSchema = builder.Configuration.GetConnectionString("TargetSchema");
-if (string.IsNullOrWhiteSpace(targetSchema))
-{
-    builder.Services.AddScoped<IRentalRepository>(provider => provider.GetRequiredService<RentalRepository>());
-}
-else
-{
-    // One data source for the process. Each owns a connection pool, so building
-    // one per write would leak a pool per write; the container disposes this one.
-    builder.Services.AddSingleton(NpgsqlDataSource.Create(targetSchema));
-    builder.Services.AddSingleton<RentalTargetWriter>();
-    builder.Services.AddScoped<IRentalRepository>(provider => new DualWriteRentalRepository(
-        provider.GetRequiredService<RentalRepository>(),
-        provider.GetRequiredService<RentalTargetWriter>()));
-    builder.Services.AddHostedService<RentalMirrorReconciler>();
-}
+builder.Services.AddScoped<IRentalRepository, SqlRentalRepository>();
 builder.Services.AddScoped<IRentalService, RentalService>();
 
 var app = builder.Build();
-
-if (await DatabaseMigrationCommand.TryRunAsync<ApplicationDbContext>(args, app.Services))
-{
-    return;
-}
 
 if (SwaggerPolicy.IsEnabled(app.Environment, app.Configuration))
 {
