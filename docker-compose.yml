@@ -233,6 +233,48 @@ services:
     networks:
       - projecty
 
+  # The engine the target schema is written for. It arrives before any row does:
+  # #135 moves rentals across with both uniqueness guarantees live at once, and
+  # neither can be live if one of the two stores is not running.
+  cockroachdb:
+    image: cockroachdb/cockroach:v26.3.1
+    container_name: cockroachdb
+    command: start-single-node --insecure --http-addr=0.0.0.0:8080
+    environment:
+      COCKROACH_HEALTH_URL: postgresql://root@localhost:26257/defaultdb?sslmode=disable
+    ports:
+      - "26257:26257"
+      - "26080:8080"
+    volumes:
+      - cockroach-data:/cockroach/cockroach-data
+    networks:
+      - projecty
+    healthcheck:
+      test: ["CMD-SHELL", "cockroach sql --url=\"$${COCKROACH_HEALTH_URL}\" --execute 'SELECT 1' >/dev/null 2>&1"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+
+  # Two invocations: the bootstrap creates the database, the portable schema fills
+  # it. That is why the entrypoint is a shell rather than `cockroach sql` directly.
+  cockroach-init:
+    image: cockroachdb/cockroach:v26.3.1
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        cockroach sql --insecure --host=cockroachdb:26257 \
+          --file=/sql/000_bootstrap.cockroach.sql
+        cockroach sql --insecure --host=cockroachdb:26257 --database=projecty \
+          --file=/sql/001_schema.sql
+    volumes:
+      - ./deploy/db/sql:/sql:ro
+    networks:
+      - projecty
+    depends_on:
+      cockroachdb:
+        condition: service_healthy
   mongodb:
     image: mongo:8.3
     container_name: mongodb
@@ -544,6 +586,7 @@ networks:
 
 volumes:
   postgres-data:
+  cockroach-data:
   redis-data:
   mongo-data:
   rabbitmq-data:
