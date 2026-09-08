@@ -107,11 +107,18 @@ two republishes the same event, and its id -- derived from the rental and the
 subject -- is what lets the consumer recognise it. The partition key is the
 motorcycle id, which does not change when a licence plate is corrected.
 
-Concurrent settlements are decided by the update's row count under a status
-guard: if another request has already closed the rental, the losing request
-returns HTTP 409 and does not persist its calculation. Reloading the rental or
-retrying settlement after completion returns the stored dates and costs; only
-the winning update enqueues `rental.closed`.
+Concurrent closings are decided by the update's row count under a status guard:
+if another request has already closed the rental, the losing request returns
+HTTP 409. Closing again returns the stored rental unchanged; only the winning
+update enqueues `rental.closed`.
+
+Since #137 that endpoint is `POST /api/Rental/close`, and it computes no money.
+It records the end date and the status; what is owed is decided by billing from
+the event, which makes the amount eventually consistent by design. Closing
+returns the closed rental, not the invoice — the invoice exists moments later,
+once the relay publishes and the consumer settles. A rental closed with no
+invoice after the relay has drained means billing is behind or refused the
+event, and its log says which.
 
 The billing consumer separates a broken message from a broken dependency,
 because the two need opposite answers. Undecodable Protobuf and an event

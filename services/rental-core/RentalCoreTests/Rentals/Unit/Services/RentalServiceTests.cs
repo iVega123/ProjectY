@@ -146,6 +146,76 @@ public sealed class RentalServiceTests
     }
 
     /// <summary>
+    /// Fechar grava a data e o estado, e mais nada.
+    ///
+    /// A devolução é dois dias atrasada de propósito: era o caso em que a versão
+    /// anterior somava R$ 50 por dia e escrevia a frase que explicava a soma,
+    /// tudo dentro de um método chamado Calculate. O aluguel que chega ao
+    /// repositório agora não carrega número nenhum além do combinado.
+    /// </summary>
+    [Fact]
+    public async Task CloseRental_RecordsTheDateAndStatusWithoutSettling()
+    {
+        var start = DateTime.UtcNow.Date;
+        var rental = new RentalOperations.Model.Rental
+        {
+            Id = Guid.NewGuid(),
+            MotorcycleId = Motorcycle,
+            UserId = "rider-1",
+            StartDate = start,
+            PredictedEndDate = start.AddDays(7),
+            InitCost = 210m
+        };
+        var repository = new Mock<IRentalRepository>();
+        repository.Setup(r => r.GetRentalByIdAsync(rental.Id.ToString(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(rental);
+        RentalOperations.Model.Rental? persisted = null;
+        repository.Setup(r => r.UpdateRentalAsync(
+                It.IsAny<RentalOperations.Model.Rental>(), It.IsAny<CancellationToken>()))
+            .Callback((RentalOperations.Model.Rental updated, CancellationToken _) => persisted = updated)
+            .Returns(Task.CompletedTask);
+        var service = new RentalService(
+            repository.Object, Mock.Of<IMapper>(), Mock.Of<IRiderProjectionStore>(), Mock.Of<IMotorcycleService>());
+
+        await service.CloseRentalAsync(rental.Id.ToString(), "rider-1", start.AddDays(9));
+
+        Assert.NotNull(persisted);
+        Assert.Equal(start.AddDays(9), persisted!.EndDate);
+        Assert.Equal(RentalOperations.Model.RentalStatus.Completed, persisted.Status);
+        Assert.Equal(210m, persisted.InitCost);
+    }
+
+    /// <summary>
+    /// Uma devolução anterior ao início não existe, e o billing não teria como
+    /// recusá-la: para ele seriam zero dias usados e o plano inteiro em multa --
+    /// a fatura mais cara possível, a partir de uma data impossível.
+    /// </summary>
+    [Fact]
+    public async Task CloseRental_BeforeTheRentalStarted_IsRefusedWithoutWriting()
+    {
+        var start = DateTime.UtcNow.Date;
+        var rental = new RentalOperations.Model.Rental
+        {
+            Id = Guid.NewGuid(),
+            MotorcycleId = Motorcycle,
+            UserId = "rider-1",
+            StartDate = start,
+            PredictedEndDate = start.AddDays(7),
+            InitCost = 210m
+        };
+        var repository = new Mock<IRentalRepository>();
+        repository.Setup(r => r.GetRentalByIdAsync(rental.Id.ToString(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(rental);
+        var service = new RentalService(
+            repository.Object, Mock.Of<IMapper>(), Mock.Of<IRiderProjectionStore>(), Mock.Of<IMotorcycleService>());
+
+        await Assert.ThrowsAsync<ArgumentException>(() =>
+            service.CloseRentalAsync(rental.Id.ToString(), "rider-1", start.AddDays(-1)));
+        repository.Verify(r => r.UpdateRentalAsync(
+            It.IsAny<RentalOperations.Model.Rental>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    /// <summary>
     /// O suficiente para o filtro ser observável. Estes testes são sobre quem
     /// pode ver o quê, não sobre o mapeamento -- que tem o seu próprio caminho.
     /// </summary>

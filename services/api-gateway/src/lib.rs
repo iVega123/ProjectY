@@ -1723,7 +1723,7 @@ mod tests {
         let token = issuer.token("projecty.rental-operations", &["Rider"]);
         let response = app
             .oneshot(
-                HttpRequest::post("/api/rental/calculate-final-cost?plan=weekly")
+                HttpRequest::post("/api/rental/close?plan=weekly")
                     .header(AUTHORIZATION, format!("Bearer {token}"))
                     .header(http::header::COOKIE, "session=must-not-cross")
                     .body(Body::empty())
@@ -1746,7 +1746,7 @@ mod tests {
             .strip_prefix("v1=")
             .unwrap();
         let canonical = format!(
-            "v1\nlocal-v1\nrider-123\nRider\n{issued_at}\nPOST\n/api/rental/calculate-final-cost?plan=weekly\nprojecty.rental-operations"
+            "v1\nlocal-v1\nrider-123\nRider\n{issued_at}\nPOST\n/api/rental/close?plan=weekly\nprojecty.rental-operations"
         );
         let mut mac = Hmac::<Sha256>::new_from_slice(&[b'x'; 32]).unwrap();
         mac.update(canonical.as_bytes());
@@ -1857,7 +1857,7 @@ mod tests {
         let token = issuer.token("projecty.rider-manager", &["Rider"]);
         let response = app
             .oneshot(
-                HttpRequest::post("/api/rental/calculate-final-cost")
+                HttpRequest::post("/api/rental/close")
                     .header(AUTHORIZATION, format!("Bearer {token}"))
                     .body(Body::empty())
                     .unwrap(),
@@ -1883,7 +1883,7 @@ mod tests {
         let token = issuer.token_with_lifetime("projecty.rental-operations", &["Rider"], 301);
         let response = app
             .oneshot(
-                HttpRequest::post("/api/rental/calculate-final-cost")
+                HttpRequest::post("/api/rental/close")
                     .header(AUTHORIZATION, format!("Bearer {token}"))
                     .body(Body::empty())
                     .unwrap(),
@@ -1908,7 +1908,7 @@ mod tests {
         let first_response = app
             .clone()
             .oneshot(
-                HttpRequest::post("/api/rental/calculate-final-cost")
+                HttpRequest::post("/api/rental/close")
                     .header(AUTHORIZATION, format!("Bearer {first_token}"))
                     .body(Body::empty())
                     .unwrap(),
@@ -1922,7 +1922,7 @@ mod tests {
         let second_response = app
             .clone()
             .oneshot(
-                HttpRequest::post("/api/rental/calculate-final-cost")
+                HttpRequest::post("/api/rental/close")
                     .header(AUTHORIZATION, format!("Bearer {second_token}"))
                     .body(Body::empty())
                     .unwrap(),
@@ -1934,7 +1934,7 @@ mod tests {
 
         let retired_response = app
             .oneshot(
-                HttpRequest::post("/api/rental/calculate-final-cost")
+                HttpRequest::post("/api/rental/close")
                     .header(AUTHORIZATION, format!("Bearer {first_token}"))
                     .body(Body::empty())
                     .unwrap(),
@@ -1955,7 +1955,7 @@ mod tests {
         let token = issuer.token("projecty.rental-operations", &["Rider"]);
         let response = app
             .oneshot(
-                HttpRequest::post("/api/rental/calculate-final-cost")
+                HttpRequest::post("/api/rental/close")
                     .header(AUTHORIZATION, format!("Bearer {token}"))
                     .body(Body::empty())
                     .unwrap(),
@@ -1977,7 +1977,7 @@ mod tests {
         let app = build_app(config).unwrap();
         let token = issuer.token("projecty.rental-operations", &["Rider"]);
         let request = || {
-            HttpRequest::post("/api/rental/calculate-final-cost")
+            HttpRequest::post("/api/rental/close")
                 .header(AUTHORIZATION, format!("Bearer {token}"))
                 .body(Body::empty())
                 .unwrap()

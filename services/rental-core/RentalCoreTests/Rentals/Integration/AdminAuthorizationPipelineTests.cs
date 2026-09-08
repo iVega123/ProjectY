@@ -71,7 +71,7 @@ public class AdminAuthorizationPipelineTests : IClassFixture<CustomWebApplicatio
     }
 
     [Fact]
-    public async Task CalculateFinalCost_ForAnotherRidersRental_ReturnsForbiddenAndLeavesRentalUnchanged()
+    public async Task Close_ForAnotherRidersRental_ReturnsForbiddenAndLeavesRentalUnchanged()
     {
         var original = _factory.Repository.SeedRental(new Rental
         {
@@ -87,7 +87,7 @@ public class AdminAuthorizationPipelineTests : IClassFixture<CustomWebApplicatio
         var actualEndDate = Uri.EscapeDataString(original.PredictedEndDate.ToString("O"));
 
         var response = await client.PostAsync(
-            $"/api/Rental/calculate-final-cost?rentalId={rentalId}&actualEndDate={actualEndDate}",
+            $"/api/Rental/close?rentalId={rentalId}&actualEndDate={actualEndDate}",
             content: null);
 
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
@@ -95,13 +95,11 @@ public class AdminAuthorizationPipelineTests : IClassFixture<CustomWebApplicatio
         Assert.NotNull(persisted);
         Assert.Equal(original.UserId, persisted.UserId);
         Assert.Equal(original.EndDate, persisted.EndDate);
-        Assert.Equal(original.FinalCost, persisted.FinalCost);
-        Assert.Equal(original.AdditionalCostsOrSavings, persisted.AdditionalCostsOrSavings);
-        Assert.Equal(original.StatusMessage, persisted.StatusMessage);
+        Assert.Equal(RentalStatus.Active, persisted.Status);
     }
 
     [Fact]
-    public async Task CalculateFinalCost_ForFinalizedRentalOwnedByAnotherRider_ReturnsForbidden()
+    public async Task Close_ForFinalizedRentalOwnedByAnotherRider_ReturnsForbidden()
     {
         var original = _factory.Repository.SeedRental(new Rental
         {
@@ -112,22 +110,21 @@ public class AdminAuthorizationPipelineTests : IClassFixture<CustomWebApplicatio
             EndDate = DateTime.UtcNow.Date,
             PredictedEndDate = DateTime.UtcNow.Date,
             InitCost = 210m,
-            FinalCost = 210m,
-            StatusMessage = "Already finalized."
+            Status = RentalStatus.Completed
         });
         var rentalId = original.Id.ToString();
         using var client = CreateClient("Rider", "rider-b");
         var actualEndDate = Uri.EscapeDataString(original.EndDate!.Value.ToString("O"));
 
         var response = await client.PostAsync(
-            $"/api/Rental/calculate-final-cost?rentalId={rentalId}&actualEndDate={actualEndDate}",
+            $"/api/Rental/close?rentalId={rentalId}&actualEndDate={actualEndDate}",
             content: null);
 
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
     }
 
     [Fact]
-    public async Task CalculateFinalCost_ForOwnedRental_PreservesOwner()
+    public async Task Close_ForOwnedRental_PreservesOwnerAndRecordsOnlyTheEndDate()
     {
         var original = _factory.Repository.SeedRental(new Rental
         {
@@ -143,7 +140,7 @@ public class AdminAuthorizationPipelineTests : IClassFixture<CustomWebApplicatio
         var actualEndDate = Uri.EscapeDataString(original.PredictedEndDate.ToString("O"));
 
         var response = await client.PostAsync(
-            $"/api/Rental/calculate-final-cost?rentalId={rentalId}&actualEndDate={actualEndDate}",
+            $"/api/Rental/close?rentalId={rentalId}&actualEndDate={actualEndDate}",
             content: null);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -151,7 +148,11 @@ public class AdminAuthorizationPipelineTests : IClassFixture<CustomWebApplicatio
         Assert.NotNull(persisted);
         Assert.Equal(original.UserId, persisted.UserId);
         Assert.Equal(original.PredictedEndDate, persisted.EndDate);
-        Assert.Equal(original.InitCost, persisted.FinalCost);
+        Assert.Equal(RentalStatus.Completed, persisted.Status);
+        // O combinado nao muda ao fechar: ele e o preco do contrato. O quanto se
+        // deve depois da devolucao nao esta mais nesta resposta nem nesta tabela
+        // -- e a nota que o billing emite a partir do rental.closed.
+        Assert.Equal(original.InitCost, persisted.InitCost);
     }
 
     private HttpClient CreateClient(string role, string userId = "requesting-user")

@@ -35,8 +35,7 @@ public sealed class SqlRentalRepository(NpgsqlDataSource database) : IRentalRepo
 
     private const string SelectRental = """
         SELECT r.id, r.rider_id, r.motorcycle_id, r.rider_name, m.license_plate,
-               r.starts_at, r.predicted_ends_at, r.ends_at, r.init_cost, r.final_cost,
-               r.additional_costs, r.status_message, r.status, r.created_at
+               r.starts_at, r.predicted_ends_at, r.ends_at, r.init_cost, r.status, r.created_at
           FROM rentals AS r
           JOIN motorcycles AS m ON m.id = r.motorcycle_id
         """;
@@ -60,11 +59,9 @@ public sealed class SqlRentalRepository(NpgsqlDataSource database) : IRentalRepo
                      FOR UPDATE
                 )
                 INSERT INTO rentals (id, rider_id, motorcycle_id, rider_name, starts_at,
-                                     predicted_ends_at, ends_at, init_cost, final_cost,
-                                     additional_costs, status_message, status)
+                                     predicted_ends_at, ends_at, init_cost, status)
                 SELECT @id, @rider, available.id, @rider_name, @starts::timestamptz,
-                       @predicted::timestamptz, @ends::timestamptz, @init::decimal,
-                       @final::decimal, @additional::decimal, @message, @status
+                       @predicted::timestamptz, @ends::timestamptz, @init::decimal, @status
                   FROM available
                 """, connection, transaction))
             {
@@ -76,9 +73,6 @@ public sealed class SqlRentalRepository(NpgsqlDataSource database) : IRentalRepo
                 insert.Parameters.AddWithValue("predicted", Utc(rental.PredictedEndDate));
                 insert.Parameters.AddWithValue("ends", rental.EndDate is { } ends ? Utc(ends) : DBNull.Value);
                 insert.Parameters.AddWithValue("init", rental.InitCost);
-                insert.Parameters.AddWithValue("final", rental.FinalCost == 0m ? DBNull.Value : rental.FinalCost);
-                insert.Parameters.AddWithValue("additional", rental.AdditionalCostsOrSavings);
-                insert.Parameters.AddWithValue("message", rental.StatusMessage);
                 insert.Parameters.AddWithValue("status", ToColumn(rental.Status));
                 inserted = await insert.ExecuteNonQueryAsync(token);
             }
@@ -121,18 +115,12 @@ public sealed class SqlRentalRepository(NpgsqlDataSource database) : IRentalRepo
         await using (var update = new NpgsqlCommand($"""
             UPDATE rentals
                SET ends_at = @ends,
-                   final_cost = @final,
-                   additional_costs = @additional,
-                   status_message = @message,
                    status = @status
              WHERE id = @id{guard}
             """, connection, transaction))
         {
             update.Parameters.AddWithValue("id", rental.Id);
             update.Parameters.AddWithValue("ends", rental.EndDate is { } ends ? Utc(ends) : DBNull.Value);
-            update.Parameters.AddWithValue("final", rental.FinalCost == 0m ? DBNull.Value : rental.FinalCost);
-            update.Parameters.AddWithValue("additional", rental.AdditionalCostsOrSavings);
-            update.Parameters.AddWithValue("message", rental.StatusMessage);
             update.Parameters.AddWithValue("status", ToColumn(rental.Status));
             updated = await update.ExecuteNonQueryAsync(token);
         }
@@ -360,11 +348,6 @@ public sealed class SqlRentalRepository(NpgsqlDataSource database) : IRentalRepo
             ? null
             : reader.GetDateTime(reader.GetOrdinal("ends_at")),
         InitCost = reader.GetDecimal(reader.GetOrdinal("init_cost")),
-        FinalCost = reader.IsDBNull(reader.GetOrdinal("final_cost"))
-            ? 0m
-            : reader.GetDecimal(reader.GetOrdinal("final_cost")),
-        AdditionalCostsOrSavings = reader.GetDecimal(reader.GetOrdinal("additional_costs")),
-        StatusMessage = reader.GetString(reader.GetOrdinal("status_message")),
         Status = FromColumn(reader.GetString(reader.GetOrdinal("status")))
     };
 

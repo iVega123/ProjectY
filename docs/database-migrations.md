@@ -23,7 +23,11 @@ installation holding real rentals would need at least:
 - every rental copied, closed history included, carrying `rider_name`,
   `additional_costs` and `status_message`. The pre-cutover mirror wrote nine
   columns and none of those three, so migrated rows would read back as `0` and
-  empty text rather than as what was settled.
+  empty text rather than as what was settled. (#137 has since dropped the last
+  two from `rentals` altogether — settlement moved to `invoices`, and
+  `004_settlement_moves_to_billing.sql` is where they leave. The paragraph
+  stands as written because it describes what the #135 cutover would have had to
+  carry at the time it happened.)
 - a stable external identifier. The mirror derived a row id by zero-padding a
   12-byte ObjectId into a UUID, while issued URLs and already-published
   `rental.started` events carry the ObjectId itself — so a migrated rental's

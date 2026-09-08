@@ -58,7 +58,6 @@ public sealed class RentalStoreTests(RentalCoreDatabase database)
         var first = await repository.CreateRentalAsync(NewRental(motorcycleId, "rider-first"));
         first.Status = RentalStatus.Completed;
         first.EndDate = first.PredictedEndDate;
-        first.FinalCost = 210m;
         await repository.UpdateRentalAsync(first);
 
         // O predicado é o que torna a restrição correta. Um índice único comum
@@ -130,7 +129,6 @@ public sealed class RentalStoreTests(RentalCoreDatabase database)
             var snapshot = await repository.GetRentalByIdAsync(rental.Id.ToString());
             snapshot!.Status = RentalStatus.Completed;
             snapshot.EndDate = snapshot.PredictedEndDate;
-            snapshot.FinalCost = 210m;
             try
             {
                 await repository.UpdateRentalAsync(snapshot);
@@ -166,7 +164,6 @@ public sealed class RentalStoreTests(RentalCoreDatabase database)
         var created = await repository.CreateRentalAsync(rental);
         created.Status = RentalStatus.Completed;
         created.EndDate = start.AddDays(7);
-        created.FinalCost = 210m;
         await repository.UpdateRentalAsync(created);
 
         // Um aluguel devolvido continua ocupando a agenda até onde ocupou. Sem

@@ -73,6 +73,46 @@ public sealed class RegisteredEventSchemaTests
         Assert.Equal("Original name", message.RiderName);
     }
 
+    /// <summary>
+    /// O contrato com o billing, agora que a liquidação mora lá.
+    ///
+    /// O billing recusa um rental.closed sem ended_at_ms ou sem plan_days -- não
+    /// há como liquidar sem eles -- e calcula errado sem as outras duas datas.
+    /// Nada disso é opcional do lado de cá, e este teste é o que faz uma coluna
+    /// removida do evento aparecer aqui em vez de virar uma fatura errada.
+    /// </summary>
+    [Fact]
+    public void ClosedEventCarriesEverythingTheSettlementNeeds()
+    {
+        var start = new DateTime(2026, 10, 1, 0, 0, 0, DateTimeKind.Utc);
+        var rental = new Rental
+        {
+            MotorcycleId = new Guid("22222222-2222-2222-2222-222222222222"),
+            UserId = "rider",
+            InitCost = 210m,
+            StartDate = start,
+            PredictedEndDate = start.AddDays(7),
+            EndDate = start.AddDays(4),
+            Status = RentalStatus.Completed
+        };
+
+        var message = RentalEvent.Parser.ParseFrom(
+            RentalEventEnvelope.Create(rental, "rental.closed").Payload);
+
+        Assert.True(message.HasEndedAtMs, "sem a data de fim o billing recusa o evento");
+        Assert.Equal(7, message.PlanDays);
+        Assert.Equal(21000, message.AgreedTotalMinor);
+        Assert.Equal(
+            new DateTimeOffset(start).ToUnixTimeMilliseconds(),
+            message.StartedAtMs);
+        Assert.Equal(
+            new DateTimeOffset(start.AddDays(7)).ToUnixTimeMilliseconds(),
+            message.PredictedEndAtMs);
+        Assert.Equal(
+            new DateTimeOffset(start.AddDays(4)).ToUnixTimeMilliseconds(),
+            message.EndedAtMs);
+    }
+
     private sealed class RegistryHandler : HttpMessageHandler
     {
         public bool Available { get; set; } = true;
