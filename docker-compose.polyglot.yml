@@ -85,6 +85,31 @@ services:
     depends_on:
       kafka-init: {condition: service_completed_successfully}
       schema-init: {condition: service_completed_successfully}
+  billing:
+    image: projecty/billing:dev
+    build: {context: ., dockerfile: services/billing/Dockerfile}
+    networks: [projecty]
+    environment:
+      # Como o rental-core, o billing conecta como root. O papel `billing` e os
+      # seus GRANTs existem em 003_billing.sql; passar a usá-lo depende do
+      # GRANT CONNECT no bootstrap, que é a mesma dívida registrada no #134.
+      BILLING_DATABASE_URL: jdbc:postgresql://cockroachdb:26257/projecty?sslmode=disable&user=root
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      SCHEMA_REGISTRY_URL: http://schema-registry:8080/apis/ccompat/v7
+      OTEL_SERVICE_NAME: billing
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+      OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
+      OTEL_METRICS_EXPORTER: otlp
+      OTEL_LOGS_EXPORTER: otlp
+    healthcheck:
+      test: [CMD, curl, --fail, --silent, http://localhost:8094/health/ready]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+    depends_on:
+      kafka-init: {condition: service_completed_successfully}
+      schema-init: {condition: service_completed_successfully}
+      cockroach-init: {condition: service_completed_successfully}
   kafka:
     image: apache/kafka:4.3.1
     networks: [projecty]

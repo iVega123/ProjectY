@@ -1,0 +1,32 @@
+name: Billing
+on:
+  workflow_call:
+permissions: {contents: read}
+jobs:
+  billing:
+    runs-on: ubuntu-latest
+    defaults:
+      run: {working-directory: services/billing}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-java@v5
+        with: {distribution: temurin, java-version: '21'}
+      # Sem gradle-wrapper.jar no repositório.
+      #
+      # O wrapper serve para fixar a versão do Gradle para quem clona. Aqui ela
+      # já está fixa em dois lugares -- a imagem base do Dockerfile e a linha
+      # abaixo -- e o job "changes" recusa o PR se as duas divergirem. Isso
+      # troca um binário versionado por uma verificação em texto, que é a troca
+      # que este repositório vem fazendo em todo lugar.
+      - uses: gradle/actions/setup-gradle@v4
+        with: {gradle-version: '8.14.3'}
+      # ktlint é o `dotnet format --verify-no-changes` desta linguagem, e o teste
+      # de integração sobe um CockroachDB por Testcontainers -- o runner tem
+      # Docker, então ele roda de verdade e não como mock.
+      - run: gradle --no-daemon ktlintCheck test
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-billing
+          path: services/billing/build/reports/tests/test
+          if-no-files-found: warn

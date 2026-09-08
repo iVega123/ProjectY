@@ -10,3 +10,4 @@ CREATE DATABASE IF NOT EXISTS projecty;
 -- Um papel por serviço, com permissão só no que lhe cabe (A2).
 CREATE USER IF NOT EXISTS rental_core;
 CREATE USER IF NOT EXISTS media_guard;
+CREATE USER IF NOT EXISTS billing;

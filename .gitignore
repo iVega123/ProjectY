@@ -61,3 +61,7 @@ msbuild.wrn
 # Generated benchmark summaries (published evidence lives in docs/measurements)
 load/results/
 docs/images/console-test-failure.png
+
+# JVM build output (services/billing)
+**/.gradle/
+services/billing/build/

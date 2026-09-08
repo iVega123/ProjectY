@@ -17,6 +17,12 @@
 !services/risk-pricing/**
 !services/console/
 !services/console/**
+!services/billing/
+!services/billing/**
+!deploy/
+!deploy/db/
+!deploy/db/sql/
+!deploy/db/sql/**
 **/node_modules/
 **/.next/
 **/__pycache__/
@@ -24,3 +30,5 @@
 **/.venv/
 **/bin/
 **/obj/
+**/.gradle/
+services/billing/build/

@@ -1,7 +1,8 @@
 # Original epic 10: running and verifying the four services
 
-The original scope is #73–#77. Identity/billing/additional BFF (#136–#138) and
-the strangler migration (#130) remain separate. The running topology is the
+The original scope is #73–#77. billing (#137) landed after it and runs in the
+same stack; identity and the BFF read composition (#136, #138) remain separate.
+The strangler migration (#130) is done. The running topology is the
 root Compose stack, extended by `docker-compose.polyglot.yml`.
 
 ## Start
@@ -81,6 +82,14 @@ requires; temporary compiler dependencies are removed after installation.
 * .NET: `dotnet test services/rental-core/RentalCore.sln` and
   `dotnet test services/RiderManager/RiderManager.sln` use isolated Testcontainers.
 * Console: `npm ci`, `npm test`, `npm run build` in services/console.
+* Kotlin: `gradle ktlintCheck test` in services/billing, with a JDK 21 and
+  Gradle 8.14.3 — there is no `gradlew` here; the version is pinned in the
+  Dockerfile and in the workflow, and CI refuses a PR where the two disagree.
+  The settlement tests are pure; `ExactlyOnceTest` starts a real CockroachDB
+  through Testcontainers and applies `deploy/db/sql` to it. Where the Docker
+  socket is not reachable from inside a container — Docker Desktop on Windows —
+  start one by hand and point the test at it with
+  `BILLING_TEST_COCKROACH=host:port`.
 
 The telemetry `test/soak.mjs` sends bursts through a real socket for 30 seconds
 by default. Its observed acceptance must remain at most one/second; Redis
@@ -103,6 +112,24 @@ guard: if another request has already closed the rental, the losing request
 returns HTTP 409 and does not persist its calculation. Reloading the rental or
 retrying settlement after completion returns the stored dates and costs; only
 the winning update enqueues `rental.closed`.
+
+The billing consumer separates a broken message from a broken dependency,
+because the two need opposite answers. Undecodable Protobuf and an event
+missing what a settlement needs are logged and skipped, and the batch still
+commits -- retrying them forever would stop the partition for every other
+rider. Anything else (the database down, a pool timeout) rewinds the batch to
+the last committed offsets and tries again, because dropping a good message
+would lose an invoice. A worker thread that dies anyway halts the process on
+purpose: a billing service that has stopped billing must not keep answering
+`/health/live` with 200.
+
+billing settles from what `rental.closed` carries and never calls back: the
+agreed total, the plan days and the three dates all travel on the event, so an
+invoice is issued with rental-core down. The invoice, the inbox row and the
+`invoice.issued` outbox row share one transaction, so a crash cannot leave a
+message marked handled without its invoice. A replay that arrives with a new
+message id — after inbox retention swept the old row, say — passes the inbox and
+is refused by `one_invoice_per_rental` instead.
 
 Replacing or deleting a document may remove its object before a delayed
 `document.stored` event arrives. Only S3 `NoSuchKey` is consumed as failed

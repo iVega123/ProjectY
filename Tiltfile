@@ -146,9 +146,16 @@ if full:
             sync('services/risk-pricing', '/workspace'), restart_container(),
         ],
     )
+    # O billing compila da raiz, como os .NET: o Gradle gera as classes de
+    # contracts/events e o teste aplica deploy/db/sql. Sem live update -- uma
+    # troca a quente de classes na JVM daria menos do que custaria explicar.
+    docker_build(
+        'projecty/billing:dev', '.',
+        dockerfile = 'services/billing/Dockerfile', target = 'development',
+    )
     infra_resources += ['kafka', 'cassandra', 'schema-registry']
     setup_resources += ['kafka-init', 'cassandra-init', 'schema-init']
-    service_resources += ['telemetry', 'risk-pricing', 'console']
+    service_resources += ['telemetry', 'risk-pricing', 'console', 'billing']
 
 for resource in infra_resources:
     dc_resource(resource, labels = ['infra'])
