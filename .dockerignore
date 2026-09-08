@@ -2,12 +2,9 @@
 !services/AuthGate/
 !services/AuthGate/AuthGate/
 !services/AuthGate/AuthGate/**
-!services/MotoHub/
-!services/MotoHub/MotoHub/
-!services/MotoHub/MotoHub/**
-!services/RentalOperations/
-!services/RentalOperations/RentalOperations/
-!services/RentalOperations/RentalOperations/**
+!services/rental-core/
+!services/rental-core/RentalCore/
+!services/rental-core/RentalCore/**
 !services/RiderManager/
 !services/RiderManager/RiderManager/
 !services/RiderManager/RiderManager/**
