@@ -139,6 +139,42 @@ namespace MotoHubTests.Integration
         }
 
         [Fact]
+        public async Task GetById_ExistingMotorcycle_ReturnsTheSameRecordAsThePlate()
+        {
+            var client = _factory.CreateClient();
+            var licensePlate = NextPlate();
+            var token = GenerateGatewayIdentityMarker();
+            client.DefaultRequestHeaders.Add("Authorization", $"Bearer {token}");
+            var createResponse = await client.PostAsJsonAsync(
+                "/api/motorcycles",
+                new MotorcycleDTO { LicensePlate = licensePlate, Model = "Honda", Year = 2020 });
+            createResponse.EnsureSuccessStatusCode();
+            var byPlate = await client.GetFromJsonAsync<MotorcycleDTO>($"/api/motorcycles/{licensePlate}");
+
+            // A referência do aluguel é o id desde #134. Ler pelo id tem de chegar
+            // na mesma moto que ler pela placa, ou as duas rotas divergem sem que
+            // nada avise -- e a que a tela usa é a nova.
+            var response = await client.GetAsync($"/api/motorcycles/{byPlate!.Id}");
+
+            response.EnsureSuccessStatusCode();
+            var byId = await response.Content.ReadFromJsonAsync<MotorcycleDTO>();
+            Assert.Equal(byPlate.Id, byId!.Id);
+            Assert.Equal(licensePlate, byId.LicensePlate);
+        }
+
+        [Fact]
+        public async Task GetById_UnknownMotorcycle_ReturnsNotFound()
+        {
+            var client = _factory.CreateClient();
+            var token = GenerateGatewayIdentityMarker();
+            client.DefaultRequestHeaders.Add("Authorization", $"Bearer {token}");
+
+            var response = await client.GetAsync($"/api/motorcycles/{Guid.NewGuid()}");
+
+            Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        }
+
+        [Fact]
         public async Task GetByLicensePlate_NonExistingPlate_ReturnsNotFound()
         {
             // Arrange

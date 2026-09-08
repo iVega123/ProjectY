@@ -36,6 +36,24 @@ namespace MotoHub.Controllers
             }
         }
 
+        /// <summary>
+        /// A moto pelo identificador dela.
+        ///
+        /// A referência do aluguel passou a ser o id em #134, então a leitura
+        /// precisa aceitar o id -- senão quem tem um aluguel na mão não consegue
+        /// descobrir de que moto ele é sem passar pela placa, que é justamente o
+        /// caminho que deixou de ser a referência.
+        ///
+        /// A restrição :guid é o que separa esta rota da de placa. Nenhuma placa
+        /// brasileira se parece com um UUID, então não há ambiguidade a resolver.
+        /// </summary>
+        [HttpGet("{id:guid}")]
+        public async Task<IActionResult> GetByIdAsync(Guid id)
+        {
+            var motorcycle = await _motorcycleService.GetMotorcycleByIdAsync(id);
+            return motorcycle == null ? NotFound() : Ok(motorcycle);
+        }
+
         [HttpGet("{licensePlate}")]
         public async Task<IActionResult> GetByLicensePlateAsync(string licensePlate)
         {

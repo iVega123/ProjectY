@@ -1,4 +1,4 @@
-export type Rental = { rentalId: string; userId: string; motocycleLicencePlate: string;
+export type Rental = { rentalId: string; userId: string; motorcycleId: string; motorcycleLicencePlate: string;
   startDate: string; predictedEndDate: string; actualEndDate: string | null; originalTotalCost: number };
 export type RentalPage = {items: Rental[]; nextCursor: string | null};
 export type Position = {latitude: number; longitude: number; recorded_at: number};

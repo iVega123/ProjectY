@@ -36,6 +36,13 @@ token.**
   upstream trusts the gateway, not the caller.
 - Domain services apply **domain** authorization only — "is this rental mine",
   not "is this token valid".
+- Where the edge also gates by role, it mirrors the service rather than
+  inventing its own answer. A blanket `Admin` over an upstream is easy to write
+  and reads as safe, but when the service already allows a rider the two
+  disagree in silence, and the wrong one stays invisible until someone needs
+  that route. Reading one motorcycle is a rider action in
+  `MotorcyclesController`; listing the fleet is not; the gateway now says the
+  same thing.
 - The three inter-service API keys are removed; service-to-service calls carry
   gateway-issued identity like any other request.
 

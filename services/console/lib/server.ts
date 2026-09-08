@@ -48,6 +48,17 @@ export function verifyGrant(value:string, traceId:string, userId:string) {
   const claim = JSON.parse(Buffer.from(payload,'base64url').toString());
   return claim.traceId === traceId && claim.userId === userId && claim.exp > Date.now()/1000;
 }
+// A API de aluguel passou a referenciar a moto pelo id, e uma placa continua
+// sendo o que a pessoa sabe de cor. Resolver uma na outra é trabalho de BFF --
+// exatamente o que o #138 diz que o console faz -- e não da API de escrita, que
+// perderia a referência estável se voltasse a aceitar placa.
+async function motorcycleId(value:string, plate:string): Promise<string> {
+  const response = await upstream('/api/motorcycles/'+encodeURIComponent(plate), value);
+  if(!response.ok) throw new Error('No motorcycle with plate '+plate);
+  const motorcycle = await response.json();
+  if(typeof motorcycle?.id !== 'string' || !motorcycle.id) throw new Error('Motorcycle '+plate+' has no id');
+  return motorcycle.id;
+}
 export async function createRental(value:string, userId:string, plate:string, date:object, index:number): Promise<Attempt> {
   const traceId = randomBytes(16).toString('hex');
   const start = performance.now();
@@ -55,7 +66,7 @@ export async function createRental(value:string, userId:string, plate:string, da
     const response = await upstream('/api/Rental/create', value, {method:'POST',
       headers:{'Content-Type':'application/json', 'Idempotency-Key':randomBytes(16).toString('hex'),
         traceparent:`00-${traceId}-${randomBytes(8).toString('hex')}-01`},
-      body:JSON.stringify({motocycleLicencePlate:plate,...date})});
+      body:JSON.stringify({motorcycleId:await motorcycleId(value,plate),...date})});
     return {index,plate,status:response.status,duration:performance.now()-start,traceId,
       grant:grant(traceId,userId), detail:(await response.text()).slice(0,500)};
   } catch {
