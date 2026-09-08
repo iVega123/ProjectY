@@ -36,6 +36,8 @@ x-moto-hub-environment: &moto-hub-environment
   Swagger__Enabled: "${SWAGGER_ENABLED:-false}"
   ASPNETCORE_URLS: http://+:8100
   ConnectionStrings__Postgresql: "Host=postgres;Port=5432;Database=${MOTO_HUB_POSTGRES_DB:?Set MOTO_HUB_POSTGRES_DB in .env};Username=${POSTGRES_USER:?Set POSTGRES_USER in .env};Password=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}"
+  # Empty disables the projector, so a stack without the target engine still runs.
+  ConnectionStrings__TargetSchema: "Host=cockroachdb;Port=26257;Database=projecty;Username=root;SSL Mode=Disable"
   RabbitMQ__UserName: "${MOTO_HUB_RABBITMQ_USER:?Set MOTO_HUB_RABBITMQ_USER in .env}"
   RabbitMQ__Password: "${MOTO_HUB_RABBITMQ_PASSWORD:?Set MOTO_HUB_RABBITMQ_PASSWORD in .env}"
   Redis__ConnectionString: "redis:6379"
@@ -509,6 +511,8 @@ services:
       otel-collector:
         condition: service_healthy
       moto-hub-migrations:
+        condition: service_completed_successfully
+      cockroach-init:
         condition: service_completed_successfully
       rabbitmq:
         condition: service_healthy
