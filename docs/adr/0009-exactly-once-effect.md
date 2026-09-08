@@ -36,6 +36,7 @@ identity, durability boundary, expiry, and failure response.
 | Relay | Outbox row and claim token | CockroachDB / PostgreSQL | A committed row remains retryable; concurrent relays do not own the same row |
 | Rider consumer | `(MessageId, ConsumerName)` | PostgreSQL inbox transaction | Inbox record and relational domain effect commit once |
 | Rental consumer | `(message_id, consumer)` | Target-schema inbox row | One active handler lease; completed messages are suppressed |
+| Settlement consumer | `(message_id, consumer)` and `rental_id` | Target-schema transaction | Inbox row, invoice, and outgoing event commit once, together |
 | HTTP retry | Service, authenticated caller, and `Idempotency-Key` | Redis AOF | Same fingerprint replays; a different fingerprint is rejected for 24 hours |
 
 <a id="database-serialized-rental-claim"></a>
@@ -123,6 +124,28 @@ Until #135 this was a MongoDB inbox document, and the idempotent handler was
 the licence-plate rewrite. Both are gone: a rental references `motorcycle_id`,
 so there is no copied plate left to rewrite.
 
+<a id="settlement-inbox"></a>
+## Settlement inbox: the effect inside the transaction
+
+billing consumes `rental.closed` and writes the inbox row, the invoice, and the
+`invoice.issued` outbox row in one transaction. There is no claim lease, no
+handler running between a claim and a completion, and therefore no crash window
+of the kind the rental inbox above lives with. Crashing anywhere before the
+commit leaves the message untreated and the redelivery settles it; crashing
+after leaves both the invoice and its inbox row.
+
+This is the same promise as the PostgreSQL transactional inbox, made in a
+different runtime and against the target schema. It is worth stating separately
+because it is the version of the promise where duplication costs money rather
+than a recomputed projection, and because it crosses a process and language
+boundary: billing shares no transaction, connection pool, or runtime with the
+producer, so it can only hold if the outbox and inbox contract is real.
+
+A second, independent guard sits under it. The inbox deduplicates *messages*;
+`one_invoice_per_rental` deduplicates *rentals*. They fail differently — a
+replay from offset zero after inbox retention has swept the row carries a new
+message id and passes the first gate — and only the second one refuses it.
+
 <a id="http-idempotency"></a>
 ## HTTP idempotency
 
@@ -198,7 +221,7 @@ acknowledge conflicting writes outside its configured consistency model.
 | After commit, before publish | Domain state exists; pending outbox row publishes after recovery |
 | After broker accept, before `PublishedAtUtc` | Message may be published again; inbox suppresses the duplicate effect |
 | During PostgreSQL inbox handler | Inbox and relational effect roll back together |
-| After an inbox handler effect, before inbox completion | Redelivery occurs; only an idempotent handler is safe |
+| After an inbox handler effect, before inbox completion | Redelivery occurs; only an idempotent handler is safe. Does not arise in billing, whose effect and inbox row share the commit |
 | After HTTP effect, before response persistence | Redis retains `unknown`; the same key never executes again during retention |
 
 ## What is deliberately not promised
@@ -216,7 +239,9 @@ acknowledge conflicting writes outside its configured consistency model.
   substitute for one.
 - **Not arbitrary inbox effect safety.** The rental inbox claims a row rather
   than committing with its handler, so it requires an idempotent effect after a
-  crash window.
+  crash window. The RiderManager and billing inboxes do commit with their
+  handlers and carry no such window; the property belongs to the consumer, not
+  to the pattern's name.
 - **Not permanent deduplication.** HTTP and inbox records expire.
 - **Not protection for requests without `Idempotency-Key`.** Those requests
   intentionally bypass Redis.
@@ -227,7 +252,8 @@ acknowledge conflicting writes outside its configured consistency model.
 
 ## Executable proof matrix
 
-Every proof carries a `Guarantee` trait that points back to the paragraph above.
+Every proof carries a `Guarantee` trait — a JUnit `@Tag` in billing — that points
+back to the paragraph above.
 All database and Redis proofs use real Testcontainers; the transport is replaced
 only where the test must deterministically stop or observe a publish.
 
@@ -244,6 +270,9 @@ only where the test must deterministically stop or observe a publish.
 | [PostgreSQL inbox](#transactional-inbox) | [`ImageRedelivery_UsesInboxAndCallsIdempotentUploadOnce`](../../services/RiderManager/RiderManagerTests/Integration/PostgreSql/InboxProcessorTests.cs) | Completed image messages are handled again |
 | [Rental inbox](#inbox-convergence) | [`SameMessageDeliveredTwice_ExecutesHandlerOnce`](../../services/rental-core/RentalCoreTests/Rentals/Integration/Database/InboxProcessorTests.cs) | Completed inbox rows are claimable |
 | [Rental inbox](#inbox-convergence) | [`CrashAfterIdempotentEffect_RedeliveryConvergesAndCompletesInbox`](../../services/rental-core/RentalCoreTests/Rentals/Integration/Database/InboxProcessorTests.cs) | A crash cannot be reclaimed or the handler is not idempotent |
+| [Settlement inbox](#settlement-inbox) | [`a mesma mensagem duas vezes emite uma nota so`](../../services/billing/src/test/kotlin/projecty/billing/ExactlyOnceTest.kt) | The inbox row stops sharing the invoice transaction |
+| [Settlement inbox](#settlement-inbox) | [`nota recusada pelo banco nao deixa a mensagem marcada como tratada`](../../services/billing/src/test/kotlin/projecty/billing/ExactlyOnceTest.kt) | A refused invoice still marks the message handled |
+| [Settlement inbox](#settlement-inbox) | [`mensagem nova para aluguel ja faturado nao emite a segunda nota`](../../services/billing/src/test/kotlin/projecty/billing/ExactlyOnceTest.kt) | `one_invoice_per_rental` is removed |
 | [HTTP idempotency](#http-idempotency) | [`ReplayingCreateWithSameKey_ReturnsOriginalResponseAndOneEffect`](../../services/RiderManager/RiderManagerTests/Integration/Redis/IdempotencyMiddlewareTests.cs) | Completed responses are not stored |
 | [HTTP idempotency](#http-idempotency) | [`ReusingKeyWithDifferentBody_ReturnsUnprocessableEntity`](../../services/RiderManager/RiderManagerTests/Integration/Redis/IdempotencyMiddlewareTests.cs) | Body fingerprints are ignored |
 | [HTTP idempotency](#http-idempotency) | [`ConcurrentRequestWithSameKey_ReturnsConflictUntilFirstCompletes`](../../services/RiderManager/RiderManagerTests/Integration/Redis/IdempotencyMiddlewareTests.cs) | Atomic Redis claiming is removed |

@@ -66,6 +66,17 @@ jobs:
           docker compose --file docker-compose.yml --file docker-compose.polyglot.yml config --quiet --no-interpolate
           docker compose --file deploy/overlays/selfhost/compose.yaml config --quiet --no-interpolate
 
+      # O billing não versiona um gradle-wrapper.jar: a versão do Gradle está
+      # fixada na imagem base do Dockerfile e no workflow, e este passo é o que
+      # impede as duas de divergirem em silêncio -- que é a única coisa que o
+      # wrapper garantiria e este repositório ainda não tem.
+      - name: Validate the pinned Gradle version
+        shell: bash
+        run: |
+          set -euo pipefail
+          image=$(grep -m1 '^FROM gradle:' services/billing/Dockerfile | cut -d: -f2 | cut -d- -f1)
+          workflow=$(grep -m1 'gradle-version:' .github/workflows/billing.yml | tr -dc '0-9.')
+          test -n "$image" && test "$image" = "$workflow"
       - name: Validate spanmetrics dashboard contract
         shell: bash
         run: |
@@ -176,6 +187,8 @@ jobs:
               - 'services/telemetry/**'
               - 'services/risk-pricing/**'
               - 'services/console/**'
+              - 'services/billing/**'
+              - 'deploy/db/sql/**'
               - 'contracts/**'
               - '.github/workflows/*.yml'
               - '.dockerignore'
@@ -231,9 +244,11 @@ jobs:
           fi
 
           if [[ "$POLYGLOT_CHANGED" == "true" ]]; then
-            for service in media-guard telemetry risk-pricing console; do
+            for service in media-guard telemetry risk-pricing console billing; do
               context="services/$service"
-              if [[ "$service" == "risk-pricing" ]]; then context="."; fi
+              # risk-pricing e billing compilam da raiz: um gera de contracts/,
+              # o outro de contracts/ e deploy/db/sql.
+              if [[ "$service" == "risk-pricing" || "$service" == "billing" ]]; then context="."; fi
               image_matrix=$(jq --compact-output --arg service "$service" --arg context "$context" \
                 '.include += [{service: $service, image: $service, context: $context, dockerfile: ("services/" + $service + "/Dockerfile"), repository: ("ghcr.io/ivega123/projecty/" + $service)}]' \
                 <<< "$image_matrix")
@@ -263,6 +278,10 @@ jobs:
     needs: changes
     if: needs.changes.outputs.has_polyglot_changes == 'true'
     uses: ./.github/workflows/console.yml
+  billing-tests:
+    needs: changes
+    if: needs.changes.outputs.has_polyglot_changes == 'true'
+    uses: ./.github/workflows/billing.yml
 
   observability:
     name: Observability stack
@@ -663,6 +682,7 @@ jobs:
       - telemetry-tests
       - risk-tests
       - console-tests
+      - billing-tests
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -681,6 +701,7 @@ jobs:
           TELEMETRY_RESULT: ${{ needs.telemetry-tests.result }}
           RISK_RESULT: ${{ needs.risk-tests.result }}
           CONSOLE_RESULT: ${{ needs.console-tests.result }}
+          BILLING_RESULT: ${{ needs.billing-tests.result }}
           EVENT_NAME: ${{ github.event_name }}
           REF: ${{ github.ref }}
           HAS_IMAGE_CHANGES: ${{ needs.changes.outputs.has_image_changes }}
@@ -693,7 +714,7 @@ jobs:
           [[ "$RUST_RESULT" == "success" || "$RUST_RESULT" == "skipped" ]]
           [[ "$IMAGES_RESULT" == "success" || "$IMAGES_RESULT" == "skipped" ]]
           [[ "$SECRETS_RESULT" == "success" ]]
-          for result in "$MEDIA_RESULT" "$TELEMETRY_RESULT" "$RISK_RESULT" "$CONSOLE_RESULT"; do
+          for result in "$MEDIA_RESULT" "$TELEMETRY_RESULT" "$RISK_RESULT" "$CONSOLE_RESULT" "$BILLING_RESULT"; do
             [[ "$result" == "success" || "$result" == "skipped" ]]
           done
 

@@ -16,3 +16,8 @@ DO $$ BEGIN
     CREATE ROLE media_guard LOGIN;
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
+
+DO $$ BEGIN
+    CREATE ROLE billing LOGIN;
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
