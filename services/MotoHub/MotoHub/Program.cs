@@ -86,6 +86,7 @@ builder.Services.AddSingleton(new OutboxRelayOptions
 builder.Services.AddSingleton<IOutboxTransport, RabbitMqOutboxTransport>();
 builder.Services.AddSingleton<IRabbitMqConnectionProvider, RabbitMqConnectionProvider>();
 builder.Services.AddHostedService<OutboxRelay<ApplicationDbContext>>();
+builder.Services.AddHostedService<MotoHub.Services.MotorcycleProjector>();
 builder.Services.AddScoped<IRentalOperationService, RentalOperationService>();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(c =>

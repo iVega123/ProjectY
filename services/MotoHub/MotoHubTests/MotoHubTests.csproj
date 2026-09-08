@@ -30,4 +30,8 @@
     <ProjectReference Include="..\MotoHub\MotoHub.csproj" />
   </ItemGroup>
 
+<ItemGroup>
+    <!-- The projector is tested against the schema file itself, never a copy. -->
+    <Content Include="../../../deploy/db/sql/001_schema.sql" Link="target-schema/001_schema.sql" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
 </Project>
