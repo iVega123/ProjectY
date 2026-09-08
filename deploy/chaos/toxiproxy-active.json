@@ -18,9 +18,9 @@
         "enabled":  true
     },
     {
-        "name":  "mongodb",
-        "listen":  "0.0.0.0:27017",
-        "upstream":  "mongodb:27017",
+        "name":  "cockroachdb",
+        "listen":  "0.0.0.0:26257",
+        "upstream":  "cockroachdb:26257",
         "enabled":  true
     },
     {

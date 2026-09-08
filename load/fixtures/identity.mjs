@@ -10,7 +10,7 @@ http.createServer((request, response) => {
   if (request.url === "/token") {
     const now = Math.floor(Date.now() / 1000);
     const body = encode({ alg: "EdDSA", kid: key.kid, typ: "JWT" }) + "." +
-      encode({ iss: "projecty.identity", aud: "projecty.rental-operations", sub: "load-rider",
+      encode({ iss: "projecty.identity", aud: "projecty.rental-core", sub: "load-rider",
         roles: ["Rider"], iat: now, exp: now + 300, jti: randomUUID() });
     return response.end(JSON.stringify({ expiresAt: now + 300, token: body + "." + sign(null, Buffer.from(body), privateKey).toString("base64url") }));
   }

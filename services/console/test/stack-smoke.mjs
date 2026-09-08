@@ -22,7 +22,7 @@ const action=await create('KAA8'+suffix);
 let cursor='',rental;
 for(let page=0;page<100;page++) {
   const session=await get('/api/session'+(cursor?'?cursor='+encodeURIComponent(cursor):''));
-  rental=session.rentals.items.find(r=>r.motocycleLicencePlate===action.plate);
+  rental=session.rentals.items.find(r=>r.motorcycleLicencePlate===action.plate);
   if(rental || !session.rentals.nextCursor) break;
   cursor=session.rentals.nextCursor;
 }
@@ -53,7 +53,7 @@ for(let i=0;i<20;i++) {
   await new Promise(resolve=>setTimeout(resolve,3000));
 }
 assert.ok(spans.some(s=>s.service==='api-gateway'),'Missing gateway trace');
-assert.ok(spans.some(s=>s.service==='rental-operations'),'Missing rental trace');
+assert.ok(spans.some(s=>s.service==='rental-core'),'Missing rental trace');
 assert.ok(spans.some(s=>s.service==='telemetry'),'Missing Kafka telemetry consumer trace');
 assert.ok(spans.some(s=>s.service==='risk-pricing'),'Missing risk consumer trace');
 const metrics=await get('/api/metrics');

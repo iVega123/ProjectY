@@ -85,6 +85,27 @@ def configure_live_update(image, context, manifests, install_command, build_comm
         live_update = update_steps,
     )
 
+def configure_dotnet_live_update(name, project, directory = None):
+    # The directory and the project stopped being the same name when moto-hub and
+    # rental-operations merged, so they are separate arguments now.
+    source = 'services/' + (directory or project) + '/' + project
+    docker_build(
+        'projecty/' + name + ':dev', '.',
+        dockerfile = source + '/Dockerfile', target = 'development',
+        live_update = [
+            fall_back_on([source + '/Dockerfile', source + '/' + project + '.csproj', 'services/risk-pricing/pricing-policy.json']),
+            sync(source, '/src/' + source),
+            sync('Shared', '/src/Shared'),
+            sync('contracts', '/src/contracts'),
+            run('dotnet publish /src/' + source + '/' + project + '.csproj --configuration Release --output /app/publish --no-restore /p:UseAppHost=false'),
+            restart_container(),
+        ],
+    )
+
+configure_dotnet_live_update('auth-gate', 'AuthGate')
+configure_dotnet_live_update('rider-manager', 'RiderManager')
+configure_dotnet_live_update('rental-core', 'RentalCore', 'rental-core')
+
 configure_live_update(
     'projecty/api-gateway:dev',
     'services/api-gateway',
@@ -99,10 +120,12 @@ configure_live_update(
     'cd /workspace && cargo fetch --locked',
     'cd /workspace && cargo build --locked',
 )
-infra_resources = ['toxiproxy', 'postgres', 'redis', 'rabbitmq', 'mongodb', 'minio']
+infra_resources = ['toxiproxy', 'postgres', 'cockroachdb', 'redis', 'rabbitmq', 'minio']
 observability_resources = ['tempo', 'loki', 'otel-collector', 'prometheus', 'grafana']
-setup_resources = ['auth-gate-migrations', 'rider-manager-migrations', 'moto-hub-migrations']
-service_resources = ['auth-gate', 'rider-manager', 'moto-hub', 'rental-operations', 'media-guard']
+# O rental-core saiu daqui: o schema dele vem de deploy/db/sql, aplicado pelo
+# cockroach-init, e não de migrações do EF.
+setup_resources = ['auth-gate-migrations', 'rider-manager-migrations', 'cockroach-init']
+service_resources = ['auth-gate', 'rider-manager', 'rental-core', 'media-guard']
 
 if full:
     configure_live_update(
@@ -123,8 +146,8 @@ if full:
             sync('services/risk-pricing', '/workspace'), restart_container(),
         ],
     )
-    infra_resources += ['kafka', 'cassandra']
-    setup_resources += ['kafka-init', 'cassandra-init']
+    infra_resources += ['kafka', 'cassandra', 'schema-registry']
+    setup_resources += ['kafka-init', 'cassandra-init', 'schema-init']
     service_resources += ['telemetry', 'risk-pricing', 'console']
 
 for resource in infra_resources:

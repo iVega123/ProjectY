@@ -28,14 +28,16 @@ query flexibility; analytics must not scan it on a request path.
 
 ## Events and integration boundary
 
-The active .NET service writes pending Protobuf envelopes inside the same Mongo
-document as the rental. A background relay publishes rental.started/closed with
-immutable motorcycle id as key. Kafka downtime accumulates envelopes and does
-not fail rental creation. Acknowledgement pulls only the delivered envelope;
-a crash can duplicate an event. Redis applies event timestamps atomically before
-Kafka offset commit, preventing replay or a late start from reopening a closed
-rental. Raw Protobuf contracts are checked in; registry governance stays #132.
-This is a transitional adapter, not the SQL migration of #130.
+rental-core writes pending Protobuf envelopes to the `outbox` table in the
+same transaction as the rental. A background relay publishes
+rental.started/closed with immutable motorcycle id as key. Kafka downtime
+accumulates envelopes and does not fail rental creation. The relay marks a row
+published only after the broker accepts it; a crash can duplicate an event.
+Redis applies event timestamps atomically before Kafka offset commit,
+preventing replay or a late start from reopening a closed rental. Raw Protobuf
+contracts are checked in; registry governance stays #132.
+The Mongo document that first held these envelopes became a target-schema
+table in #135; the boundary described here did not change with the store.
 
 ## Degradation
 

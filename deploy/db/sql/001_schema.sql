@@ -58,12 +58,22 @@ CREATE INDEX IF NOT EXISTS rentals_by_rider ON rentals (rider_id, created_at DES
 
 -- Outbox: a linha é gravada na MESMA transação do aluguel, e um publicador
 -- separado a envia ao Kafka. É o que impede a divergência de escrita dupla (M3).
+--
+-- payload é BYTEA, não JSONB, porque o contrato de evento é Protobuf (#132) e o
+-- que trafega no Kafka são os bytes serializados. Guardá-los como JSON exigiria
+-- uma segunda codificação só para desfazê-la antes de publicar, e o que saísse
+-- deixaria de ser byte a byte o que o outbox guardou -- que é exatamente o que
+-- esta tabela existe para garantir. topic e trace_parent acompanham a linha
+-- pelo mesmo motivo: destino e contexto de trace são decididos por quem
+-- escreve, dentro da transação, não adivinhados por quem publica.
 CREATE TABLE IF NOT EXISTS outbox (
     id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     aggregate_type TEXT NOT NULL,
     aggregate_id   TEXT NOT NULL,
     event_type     TEXT NOT NULL,
-    payload        JSONB NOT NULL,
+    topic          TEXT NOT NULL,
+    payload        BYTEA NOT NULL,
+    trace_parent   TEXT,
     occurred_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
     published_at   TIMESTAMPTZ
 );

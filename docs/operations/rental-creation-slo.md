@@ -4,7 +4,7 @@
 
 The service-level indicator includes every server span named
 `POST api/Rental/create` (with or without a leading slash in the route name)
-from `rental-operations`.
+from the `rental-core` OTel resource (the `rental-operations` container until consolidation).
 
 | Objective | Good event | Target | Window | Error budget |
 |---|---|---:|---:|---:|

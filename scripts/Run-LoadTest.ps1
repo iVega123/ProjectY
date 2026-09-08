@@ -50,7 +50,6 @@ try {
         }
     }
     $fixtureMount = @{type='bind';source=(Join-Path $root 'load/fixtures');target='/load';read_only=$true}
-    $model.services.mongodb.volumes += $fixtureMount
     $model.services.'api-gateway'.build.target = 'final'
     $model.services.'api-gateway'.healthcheck.test = @('CMD','/app/api-gateway','--healthcheck')
     $model.services.'api-gateway'.environment.GATEWAY_JWKS_URL = 'http://load-identity:8080/jwks'
@@ -95,9 +94,8 @@ try {
     # Only this generated project and its fresh, separately named volumes are touched.
     Get-Content load/fixtures/seed-rider.sql -Raw | docker compose -p $project -f $fixture exec -T postgres sh -c 'exec psql -U "$POSTGRES_USER" -d "$RIDER_MANAGER_POSTGRES_DB" -v ON_ERROR_STOP=1'
     if ($LASTEXITCODE) { throw 'Rider fixture failed.' }
-    Get-Content load/fixtures/seed-motorcycles.sql -Raw | docker compose -p $project -f $fixture exec -T postgres sh -c 'exec psql -U "$POSTGRES_USER" -d "$MOTO_HUB_POSTGRES_DB" -v ON_ERROR_STOP=1'
-    if ($LASTEXITCODE) { throw 'Motorcycle fixture failed.' }
-    Compose exec -T mongodb sh -c 'exec mongosh --quiet --username "$MONGO_INITDB_ROOT_USERNAME" --password "$MONGO_INITDB_ROOT_PASSWORD" --authenticationDatabase admin /load/reset-rentals.js'
+    Get-Content load/fixtures/seed-rental-core.sql -Raw | docker compose -p $project -f $fixture exec -T cockroachdb cockroach sql --insecure --database=projecty
+    if ($LASTEXITCODE) { throw 'Rental-core fixture failed.' }
     Compose exec -T redis redis-cli FLUSHDB
     & "$PSScriptRoot/Invoke-Chaos.ps1" reset -Url 'http://127.0.0.1:18474'
     if ($PrepareOnly) { $exitCode = 0; return }

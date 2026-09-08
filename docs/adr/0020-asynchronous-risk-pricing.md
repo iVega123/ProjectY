@@ -26,7 +26,7 @@ last known values, with score-age OTLP gauges in both worker and projection.
 
 RiderManager saves document metadata and a PostgreSQL outbox row in one EF
 transaction. Its relay deletes only acknowledged Kafka envelopes. Rental
-lifecycle facts retain the Mongo outbox from ADR 0019. Raw Protobuf follows
+lifecycle facts use the rental-core outbox from ADR 0019. Raw Protobuf follows
 ADR 0015; Avro in the original issue is superseded by that contract decision.
 
 The single worker owns a persistent SQLite WAL database containing inbox,
@@ -34,8 +34,8 @@ carried rider/rental state and outbox. Input deduplication, state changes and
 output enqueue are one transaction. Kafka offsets commit afterward. Output
 retries use stable event IDs; source timestamps reject older lifecycle and
 verification updates. Each rental replica has its own consumer group and
-rehydrates persisted Mongo snapshots before consuming. Older deliveries do
-not replace newer in-memory values.
+rehydrates the snapshots persisted in `projection_snapshots` before consuming.
+Older deliveries do not replace newer in-memory values.
 
 SQLite avoids another database for this single-writer prototype. It does not
 support horizontally scaled workers sharing a local volume: scale-out requires

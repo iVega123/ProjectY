@@ -3,8 +3,17 @@
 This guide starts the original four-service system that was reviewed in the
 [architecture and security audit](AUDITORIA-ARQUITETURA-SEGURANCA.md), with the
 Rust gateway in front and the LGTM observability stack running as the first
-strangler-migration components. The remaining topology under `deploy/` is still
-a design scaffold for services that have not been implemented yet.
+strangler-migration components. All four .NET projects now live under `services/`.
+`deploy/base/compose.yaml` imports the same application model as the root
+entrypoint; the self-hosted overlay selects the gateway's production image.
+There is no second, unimplemented application topology. PostgreSQL serves
+auth-gate and rider-manager; rental-core runs on CockroachDB, whose schema is
+`deploy/db/sql`, applied by `cockroach-init`.
+
+`tilt up` enables live updates for the .NET services, gateway and media service.
+`tilt up -- --full` adds the existing telemetry, risk-pricing and console services.
+The rental application’s OTel resource and Compose/DNS name are both
+`rental-core`.
 
 ## Safety warning
 
@@ -37,7 +46,7 @@ starting.
 | PostgreSQL | `5432` |
 | Redis | `6379` |
 | pgAdmin | `5050` |
-| MongoDB | `27017` |
+| CockroachDB | `26257`, `26080` |
 | MinIO | `9000`, `9001` |
 
 | Application service | Required host ports |
@@ -128,8 +137,8 @@ startup.
 The four ASP.NET Core services instrument inbound requests and outbound
 `HttpClient` calls with the OpenTelemetry SDK. The Rust gateway creates a
 server span for each proxied request and propagates its W3C trace context to the
-upstream. PostgreSQL commands emitted through EF Core and native MongoDB driver
-operations are child spans of the request that triggered them. RabbitMQ trace
+upstream. Database commands emitted through EF Core and Npgsql are child spans
+of the request that triggered them. RabbitMQ trace
 context is captured in each transactional outbox row, continued by a producer
 span when the relay publishes, and restored by consumers; bounded retries keep
 the same W3C `traceparent` and `tracestate` headers. The same carrier contract
@@ -138,7 +147,7 @@ or consumer exists in the current tree.
 
 Both runtimes keep structured JSON console output and also export logs and
 traces over OTLP to the Collector. The rental SLO dashboard selects the active
-`rental-operations` service and its `POST /api/Rental/create` span.
+`rental-core` service and its `POST /api/Rental/create` span.
 
 The audited baseline Compose stack runs every application in `Production`, so
 Swagger and the developer exception page are disabled. Local IDE launch

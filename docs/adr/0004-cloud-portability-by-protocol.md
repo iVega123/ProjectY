@@ -55,8 +55,9 @@ path. Everything else is ignorant of where it runs.
   integrity would move into the application, which is exactly where it tends to
   fail.
 - **DocumentDB** — the obvious path from MongoDB. Rejected: partial and
-  perpetually lagging compatibility. The better answer is removing MongoDB
-  entirely.
+  perpetually lagging compatibility. The better answer was removing MongoDB
+  entirely, which #135 did: rental-core runs on CockroachDB and the MongoDB
+  container is gone from the compose file.
 - **A full LocalStack environment.** The services this architecture leans on
   most — MSK, ElastiCache, EKS — sit behind the paid tier. A repository that only
   starts with a paid licence defeats its own purpose, so the local environment is

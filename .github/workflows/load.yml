@@ -2,10 +2,9 @@ name: Rental load gate
 on:
   pull_request:
     paths:
-      - 'AuthGate/**'
-      - 'MotoHub/**'
-      - 'RiderManager/**'
-      - 'RentalOperations/**'
+      - 'services/AuthGate/**'
+      - 'services/RiderManager/**'
+      - 'services/rental-core/**'
       - 'Shared/**'
       - 'services/api-gateway/**'
       - 'docker-compose*.yml'

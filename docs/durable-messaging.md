@@ -39,7 +39,7 @@ to their current users; do not rotate credentials or delete data to add permissi
 Reproduce the restart and poison-message proof:
 
 ```sh
-dotnet test RiderManager/RiderManagerTests/RiderManagerTests.csproj --filter FullyQualifiedName~DurableRetryTests
+dotnet test services/RiderManager/RiderManagerTests/RiderManagerTests.csproj --filter FullyQualifiedName~DurableRetryTests
 ```
 
 The test restarts a real RabbitMQ container during a delayed delivery, verifies

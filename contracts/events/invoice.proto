@@ -1,0 +1,13 @@
+syntax = "proto3";
+package project_y.events;
+
+message InvoiceIssued {
+  optional string event_id = 1;
+  optional string invoice_id = 2;
+  optional string rental_id = 3;
+  optional string rider_id = 4;
+  optional int64 occurred_at_ms = 5;
+  optional int64 total_minor = 6;
+  optional string currency = 7;
+  optional string rider_name = 8;
+}

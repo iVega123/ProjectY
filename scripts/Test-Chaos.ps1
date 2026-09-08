@@ -9,13 +9,16 @@ try {
     $json = docker compose -f docker-compose.yml -f docker-compose.chaos.yml config --format json
     if ($LASTEXITCODE) { throw 'Compose configuration failed.' }
     $model = $json | ConvertFrom-Json
-    foreach ($service in @('auth-gate','rider-manager','moto-hub','rental-operations')) {
+    foreach ($service in @('auth-gate','rider-manager','rental-core')) {
         $environment = $model.services.$service.environment
         foreach ($key in @('Redis__ConnectionString','RabbitMQ__HostName')) {
             if ($environment.$key -notmatch '^toxiproxy(:|$)') { throw "$service bypasses proxy: $key" }
         }
-        $dbKey = if ($service -eq 'rental-operations') { 'MongoDbSettings__ConnectionString' } else { 'ConnectionStrings__Postgresql' }
-        if ($environment.$dbKey -notmatch 'toxiproxy') { throw "$service bypasses its database proxy." }
+        # Um banco por serviço agora, inclusive no rental-core. Enquanto eram
+        # dois, um ensaio de latência atingia metade do serviço de cada vez.
+        if ($environment.ConnectionStrings__Postgresql -notmatch 'toxiproxy') {
+            throw "$service bypasses its database proxy: ConnectionStrings__Postgresql"
+        }
         if ($model.services.$service.depends_on.toxiproxy.condition -ne 'service_healthy') { throw "$service is not health-gated." }
     }
     if ($model.services.'api-gateway'.environment.GATEWAY_REDIS_URL -notmatch '://toxiproxy:') { throw 'Gateway bypasses Redis proxy.' }

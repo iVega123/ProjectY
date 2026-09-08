@@ -31,26 +31,32 @@ identity, durability boundary, expiry, and failure response.
 
 | Layer | Stable identity | Authority | Guarantee |
 |---|---|---|---|
-| Rental claim | Motorcycle licence plate while status is `Active` | MongoDB partial unique index | At most one active rental per motorcycle |
-| Producer write | EF Core database transaction | PostgreSQL | Aggregate mutation and outbox rows commit or roll back together |
-| Relay | Outbox row and claim token | PostgreSQL | A committed row remains retryable; concurrent relays do not own the same row |
+| Rental claim | `motorcycle_id` while status is `active` | Target-schema partial unique index | At most one active rental per motorcycle |
+| Producer write | Database transaction | CockroachDB / PostgreSQL | Aggregate mutation and outbox rows commit or roll back together |
+| Relay | Outbox row and claim token | CockroachDB / PostgreSQL | A committed row remains retryable; concurrent relays do not own the same row |
 | Rider consumer | `(MessageId, ConsumerName)` | PostgreSQL inbox transaction | Inbox record and relational domain effect commit once |
-| Rental consumer | `(MessageId, ConsumerName)` | MongoDB inbox document | One active handler lease; completed messages are suppressed |
+| Rental consumer | `(message_id, consumer)` | Target-schema inbox row | One active handler lease; completed messages are suppressed |
 | HTTP retry | Service, authenticated caller, and `Idempotency-Key` | Redis AOF | Same fingerprint replays; a different fingerprint is rejected for 24 hours |
 
 <a id="database-serialized-rental-claim"></a>
 ## Database-serialized rental claim
 
-RentalOperations relies on MongoDB's partial unique index over
-`MotorcycleLicencePlate` for documents whose status is `Active`. The
-application may perform an advisory read for a friendly error, but correctness
-comes from the index. Two genuinely parallel inserts can both pass an earlier
-read; MongoDB serializes the writes and accepts only one. The losing API request
-returns `409 Conflict`.
+rental-core relies on `one_active_rental_per_motorcycle`, the partial unique
+index in `deploy/db/sql/001_schema.sql` over `motorcycle_id` where the status
+is `active`. The application may perform an advisory read for a friendly error,
+but correctness comes from the index. Two genuinely parallel inserts can both
+pass an earlier read; the database serializes the writes and accepts only one.
+The losing API request returns `409 Conflict`.
 
-The relational `rental_claims` Testcontainer is a portability proof of the same
-invariant using a PostgreSQL partial unique index. It is not a claim that the
-current RentalOperations service stores rentals in PostgreSQL.
+The write also locks the motorcycle row (`FOR UPDATE`). The index settles two
+rentals racing each other, but not a rental racing a retirement: that is write
+skew, and under READ COMMITTED both transactions would see a world in which they
+may proceed. CockroachDB is serializable and would refuse on its own; PostgreSQL
+would not, and the same code runs on both.
+
+Until #135 this invariant lived in a MongoDB partial unique index, and a
+relational `rental_claims` table stood in for it as a portability proof. Both
+are gone: the proof and the production mechanism are now the same index.
 
 <a id="transactional-outbox"></a>
 ## Transactional outbox
@@ -100,16 +106,22 @@ The guarantee covers effects written through that same PostgreSQL transaction.
 Calls to object storage, HTTP APIs, email, or another database are outside it
 and must be independently idempotent.
 
+<a id="inbox-convergence"></a>
 <a id="mongo-inbox-convergence"></a>
-## MongoDB inbox convergence
+## Rental inbox convergence
 
-RentalOperations atomically leases an inbox document and suppresses a completed
-message, but its handler effect and inbox completion are not a general MongoDB
-multi-document transaction. A crash can therefore happen after the effect and
-before completion. Redelivery is safe only where the handler itself is
-idempotent, such as setting every matching rental from an old plate to a new
-plate. The test proves convergence for that operation; it does not generalize
-the PostgreSQL transactional-inbox promise to arbitrary MongoDB effects.
+rental-core claims an `inbox` row for a `(message_id, consumer)` pair and
+suppresses a completed message, but the handler runs between the claim and the
+completion rather than inside one transaction with them. A crash can therefore
+happen after the effect and before completion. Redelivery is safe only where
+the handler itself is idempotent, such as the rider projection's newest-wins
+upsert. The test proves convergence for that operation; it does not generalize
+the PostgreSQL transactional-inbox promise — where effect and inbox commit
+together — to every inbox handler.
+
+Until #135 this was a MongoDB inbox document, and the idempotent handler was
+the licence-plate rewrite. Both are gone: a rental references `motorcycle_id`,
+so there is no copied plate left to rewrite.
 
 <a id="http-idempotency"></a>
 ## HTTP idempotency
@@ -159,7 +171,7 @@ deduplication protects domain effects from duplicate delivery.
 
 ### Clock skew
 
-Outbox and Mongo inbox leases use application-node UTC timestamps. A fast owner
+Outbox and rental inbox leases use application-node UTC timestamps. A fast owner
 clock can hold a claim longer than intended; a fast contender can reclaim it
 early. Claim tokens prevent a former owner from marking a row complete after it
 loses ownership, but they cannot retract an external publish already made.
@@ -175,7 +187,7 @@ The primary database is the authority. A writer that cannot reach it cannot
 claim a rental and fails. If a commit succeeded but its acknowledgement was
 lost, the client sees an ambiguous result; retrying cannot create a second
 active rental because the unique index still arbitrates the write. During a
-database topology event, this guarantee assumes MongoDB itself does not
+database topology event, this guarantee assumes the database itself does not
 acknowledge conflicting writes outside its configured consistency model.
 
 ### Process crash by phase
@@ -186,14 +198,14 @@ acknowledge conflicting writes outside its configured consistency model.
 | After commit, before publish | Domain state exists; pending outbox row publishes after recovery |
 | After broker accept, before `PublishedAtUtc` | Message may be published again; inbox suppresses the duplicate effect |
 | During PostgreSQL inbox handler | Inbox and relational effect roll back together |
-| After Mongo effect, before inbox completion | Redelivery occurs; only an idempotent handler is safe |
+| After an inbox handler effect, before inbox completion | Redelivery occurs; only an idempotent handler is safe |
 | After HTTP effect, before response persistence | Redis retains `unknown`; the same key never executes again during retention |
 
 ## What is deliberately not promised
 
 - **Not exactly-once delivery.** RabbitMQ may redeliver and the relay may
   republish.
-- **Not one transaction across Redis, PostgreSQL, MongoDB, MinIO, and
+- **Not one transaction across Redis, PostgreSQL, CockroachDB, MinIO, and
   RabbitMQ.** Each guarantee ends at its named authority.
 - **Not exactly-once execution.** Handlers and middleware can run more than
   once; the durable effect is what is deduplicated.
@@ -202,8 +214,9 @@ acknowledge conflicting writes outside its configured consistency model.
 - **Not causal ordering for MotoHub licence updates.** Those events do not yet
   carry a durable monotonic aggregate sequence; relay tie-breakers are not a
   substitute for one.
-- **Not arbitrary MongoDB effect safety.** The current Mongo inbox requires an
-  idempotent effect after a crash window.
+- **Not arbitrary inbox effect safety.** The rental inbox claims a row rather
+  than committing with its handler, so it requires an idempotent effect after a
+  crash window.
 - **Not permanent deduplication.** HTTP and inbox records expire.
 - **Not protection for requests without `Idempotency-Key`.** Those requests
   intentionally bypass Redis.
@@ -220,38 +233,39 @@ only where the test must deterministically stop or observe a publish.
 
 | Paragraph | Executable proof | Fails when |
 |---|---|---|
-| [Database rental claim](#database-serialized-rental-claim) | [`ConcurrentCreateRequestsForSameMotorcycle_OneSucceedsAndOneReturnsConflict`](../../RentalOperations/RentalOperationsTests/Integration/MongoDb/ActiveRentalApiTests.cs) | The production Mongo partial unique index is removed |
-| [Database rental claim](#database-serialized-rental-claim) | [`ConcurrentClaimsForSameMotorcycle_OneIsRejectedByDatabaseConstraint`](../../RentalOperations/RentalOperationsTests/Integration/PostgreSql/ActiveRentalConstraintTests.cs) | The relational partial unique index is removed |
-| [Transactional outbox](#transactional-outbox) | [`DomainMutationAndOutboxInsert_RollBackTogetherWhenSaveFails`](../../MotoHub/MotoHubTests/Integration/PostgreSql/OutboxRelayTests.cs) | The outbox is no longer part of the aggregate save |
-| [Transactional outbox](#transactional-outbox) | [`CommittedSequencedMessages_SurviveRelayRestartAndDrainAfterBrokerRecovery`](../../MotoHub/MotoHubTests/Integration/PostgreSql/OutboxRelayTests.cs) | The committed event row or retry behavior is removed |
-| [Leased relay](#leased-outbox-relay) | [`ConcurrentRelays_ClaimOnlyOneHeadMessagePerAggregate`](../../MotoHub/MotoHubTests/Integration/PostgreSql/OutboxRelayTests.cs) | Atomic claims or aggregate-head ordering is removed |
-| [PostgreSQL inbox](#transactional-inbox) | [`SameMessageProcessedConcurrently_ProducesOneDatabaseEffect`](../../RiderManager/RiderManagerTests/Integration/PostgreSql/InboxProcessorTests.cs) | The inbox conflict gate or shared transaction is removed |
-| [PostgreSQL inbox](#transactional-inbox) | [`ImageRedelivery_UsesInboxAndCallsIdempotentUploadOnce`](../../RiderManager/RiderManagerTests/Integration/PostgreSql/InboxProcessorTests.cs) | Completed image messages are handled again |
-| [Mongo inbox](#mongo-inbox-convergence) | [`SameMessageDeliveredTwice_ExecutesHandlerOnce`](../../RentalOperations/RentalOperationsTests/Integration/MongoDb/InboxProcessorTests.cs) | Completed Mongo inbox messages are claimable |
-| [Mongo inbox](#mongo-inbox-convergence) | [`CrashAfterIdempotentEffect_RedeliveryConvergesAndCompletesInbox`](../../RentalOperations/RentalOperationsTests/Integration/MongoDb/InboxProcessorTests.cs) | A crash cannot be reclaimed or the handler is not idempotent |
-| [HTTP idempotency](#http-idempotency) | [`ReplayingCreateWithSameKey_ReturnsOriginalResponseAndOneEffect`](../../RiderManager/RiderManagerTests/Integration/Redis/IdempotencyMiddlewareTests.cs) | Completed responses are not stored |
-| [HTTP idempotency](#http-idempotency) | [`ReusingKeyWithDifferentBody_ReturnsUnprocessableEntity`](../../RiderManager/RiderManagerTests/Integration/Redis/IdempotencyMiddlewareTests.cs) | Body fingerprints are ignored |
-| [HTTP idempotency](#http-idempotency) | [`ConcurrentRequestWithSameKey_ReturnsConflictUntilFirstCompletes`](../../RiderManager/RiderManagerTests/Integration/Redis/IdempotencyMiddlewareTests.cs) | Atomic Redis claiming is removed |
-| [HTTP idempotency](#http-idempotency) | [`LongRunningRequest_RetainsClaimUntilItCompletes`](../../RiderManager/RiderManagerTests/Integration/Redis/IdempotencyMiddlewareTests.cs) | Pending claims expire on a short execution lease |
-| [HTTP idempotency](#http-idempotency) | [`DownstreamFailure_RetainsUnknownOutcomeWithoutRepeatingEffect`](../../RiderManager/RiderManagerTests/Integration/Redis/IdempotencyMiddlewareTests.cs) | Ambiguous failures release their claim |
-| [HTTP idempotency](#http-idempotency) | [`ReusingKeyWithReorderedQueryValues_ReturnsUnprocessableEntity`](../../RiderManager/RiderManagerTests/Integration/Redis/IdempotencyMiddlewareTests.cs) | Repeated query-value order is discarded |
-| [Retention](#retention-boundaries) | [`RetentionSweep_DeletesOnlyExpiredInboxRows`](../../RiderManager/RiderManagerTests/Integration/PostgreSql/InboxProcessorTests.cs) | PostgreSQL retention deletes current evidence |
-| [Retention](#retention-boundaries) | [`Initializer_SchedulesRetentionWithTtlIndex`](../../RentalOperations/RentalOperationsTests/Integration/MongoDb/InboxProcessorTests.cs) | MongoDB inbox TTL is missing or misconfigured |
+| [Database rental claim](#database-serialized-rental-claim) | [`ConcurrentRentalsForSameMotorcycle_OneWinsAndTheDatabaseRefusesTheOther`](../../services/rental-core/RentalCoreTests/Rentals/Integration/Database/RentalStoreTests.cs) | The partial unique index is removed |
+| [Database rental claim](#database-serialized-rental-claim) | [`ReturnedMotorcycle_CanBeRentedAgain`](../../services/rental-core/RentalCoreTests/Rentals/Integration/Database/RentalStoreTests.cs) | The index loses its `WHERE status = 'active'` predicate |
+| [Transactional outbox](#transactional-outbox) | [`CreatingARental_WritesItsOutboxRowInTheSameTransaction`](../../services/rental-core/RentalCoreTests/Rentals/Integration/Database/RentalStoreTests.cs) | The rental and its event stop sharing a transaction |
+| [Transactional outbox](#transactional-outbox) | [`RefusedRental_LeavesNeitherTheRowNorTheEvent`](../../services/rental-core/RentalCoreTests/Rentals/Integration/Database/RentalStoreTests.cs) | A refused rental still announces itself |
+| [Transactional outbox](#transactional-outbox) | [`DomainMutationAndOutboxInsert_RollBackTogetherWhenSaveFails`](../../services/rental-core/RentalCoreTests/Motorcycles/Integration/PostgreSql/OutboxRelayTests.cs) | The outbox is no longer part of the aggregate save |
+| [Transactional outbox](#transactional-outbox) | [`CommittedSequencedMessages_SurviveRelayRestartAndDrainAfterBrokerRecovery`](../../services/rental-core/RentalCoreTests/Motorcycles/Integration/PostgreSql/OutboxRelayTests.cs) | The committed event row or retry behavior is removed |
+| [Leased relay](#leased-outbox-relay) | [`ConcurrentRelays_ClaimOnlyOneHeadMessagePerAggregate`](../../services/rental-core/RentalCoreTests/Motorcycles/Integration/PostgreSql/OutboxRelayTests.cs) | Atomic claims or aggregate-head ordering is removed |
+| [PostgreSQL inbox](#transactional-inbox) | [`SameMessageProcessedConcurrently_ProducesOneDatabaseEffect`](../../services/RiderManager/RiderManagerTests/Integration/PostgreSql/InboxProcessorTests.cs) | The inbox conflict gate or shared transaction is removed |
+| [PostgreSQL inbox](#transactional-inbox) | [`ImageRedelivery_UsesInboxAndCallsIdempotentUploadOnce`](../../services/RiderManager/RiderManagerTests/Integration/PostgreSql/InboxProcessorTests.cs) | Completed image messages are handled again |
+| [Rental inbox](#inbox-convergence) | [`SameMessageDeliveredTwice_ExecutesHandlerOnce`](../../services/rental-core/RentalCoreTests/Rentals/Integration/Database/InboxProcessorTests.cs) | Completed inbox rows are claimable |
+| [Rental inbox](#inbox-convergence) | [`CrashAfterIdempotentEffect_RedeliveryConvergesAndCompletesInbox`](../../services/rental-core/RentalCoreTests/Rentals/Integration/Database/InboxProcessorTests.cs) | A crash cannot be reclaimed or the handler is not idempotent |
+| [HTTP idempotency](#http-idempotency) | [`ReplayingCreateWithSameKey_ReturnsOriginalResponseAndOneEffect`](../../services/RiderManager/RiderManagerTests/Integration/Redis/IdempotencyMiddlewareTests.cs) | Completed responses are not stored |
+| [HTTP idempotency](#http-idempotency) | [`ReusingKeyWithDifferentBody_ReturnsUnprocessableEntity`](../../services/RiderManager/RiderManagerTests/Integration/Redis/IdempotencyMiddlewareTests.cs) | Body fingerprints are ignored |
+| [HTTP idempotency](#http-idempotency) | [`ConcurrentRequestWithSameKey_ReturnsConflictUntilFirstCompletes`](../../services/RiderManager/RiderManagerTests/Integration/Redis/IdempotencyMiddlewareTests.cs) | Atomic Redis claiming is removed |
+| [HTTP idempotency](#http-idempotency) | [`LongRunningRequest_RetainsClaimUntilItCompletes`](../../services/RiderManager/RiderManagerTests/Integration/Redis/IdempotencyMiddlewareTests.cs) | Pending claims expire on a short execution lease |
+| [HTTP idempotency](#http-idempotency) | [`DownstreamFailure_RetainsUnknownOutcomeWithoutRepeatingEffect`](../../services/RiderManager/RiderManagerTests/Integration/Redis/IdempotencyMiddlewareTests.cs) | Ambiguous failures release their claim |
+| [HTTP idempotency](#http-idempotency) | [`ReusingKeyWithReorderedQueryValues_ReturnsUnprocessableEntity`](../../services/RiderManager/RiderManagerTests/Integration/Redis/IdempotencyMiddlewareTests.cs) | Repeated query-value order is discarded |
+| [Retention](#retention-boundaries) | [`RetentionSweep_DeletesOnlyExpiredInboxRows`](../../services/RiderManager/RiderManagerTests/Integration/PostgreSql/InboxProcessorTests.cs) | PostgreSQL retention deletes current evidence |
+| [Retention](#retention-boundaries) | [`RetentionSweep_RemovesHandledEntriesPastTheirPeriod`](../../services/rental-core/RentalCoreTests/Rentals/Integration/Database/InboxProcessorTests.cs) | The rental inbox grows without bound |
 
 Run the proof suite from the repository root:
 
 ```powershell
-dotnet test RentalOperations/RentalOperationsTests/RentalOperationsTests.csproj --filter "Category=Integration&Guarantee~ADR-0009"
-dotnet test MotoHub/MotoHubTests/MotoHubTests.csproj --filter "Category=Integration&Guarantee~ADR-0009"
-dotnet test RiderManager/RiderManagerTests/RiderManagerTests.csproj --filter "Category=Integration&Guarantee~ADR-0009"
+dotnet test services/rental-core/RentalCoreTests/RentalCoreTests.csproj --filter "Category=Integration&Guarantee~ADR-0009"
+dotnet test services/RiderManager/RiderManagerTests/RiderManagerTests.csproj --filter "Category=Integration&Guarantee~ADR-0009"
 ```
 
 ## Alternatives considered
 
 - **Distributed transactions across every dependency.** RabbitMQ, Redis,
-  PostgreSQL, MongoDB, and object storage do not share a practical transaction
-  coordinator here. The operational cost would still not remove ambiguous
-  network outcomes.
+  PostgreSQL, CockroachDB, and object storage do not share a practical
+  transaction coordinator here. The operational cost would still not remove
+  ambiguous network outcomes.
 - **Broker deduplication as the only defense.** It does not cover republish
   after an ambiguous confirm, consumer crashes, or domain-specific identities.
 - **An application mutex around rental creation.** It protects one process,
@@ -264,9 +278,10 @@ dotnet test RiderManager/RiderManagerTests/RiderManagerTests.csproj --filter "Ca
 ## What was explicitly rejected
 
 The project does not use the phrase "exactly-once delivery." It does not hide
-the MongoDB crash window behind the stronger PostgreSQL inbox guarantee, and it
-does not claim that an HTTP idempotency record commits atomically with a domain
-database. Precision is preferred over a broader but false guarantee.
+the rental inbox's crash window behind the stronger PostgreSQL
+transactional-inbox guarantee, and it does not claim that an HTTP idempotency
+record commits atomically with a domain database. Precision is preferred over a
+broader but false guarantee.
 
 ## Consequences
 
@@ -277,9 +292,9 @@ database. Precision is preferred over a broader but false guarantee.
   tuning details.
 - Relay backlog, expired leases, inbox conflicts, and unknown HTTP outcomes
   need operational visibility.
-- The integration suite is slower because it starts real PostgreSQL, MongoDB,
-  and Redis containers; that cost is accepted because mocks cannot prove these
-  database races.
+- The integration suite is slower because it starts real PostgreSQL and Redis
+  containers; that cost is accepted because mocks cannot prove these database
+  races.
 
 ## Follow-up
 

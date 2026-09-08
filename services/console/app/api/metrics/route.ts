@@ -1,6 +1,6 @@
 import { failure, session } from '../../../lib/server';
 const queries = {
-  p99:'histogram_quantile(0.99, sum by (le) (rate(traces_span_metrics_duration_milliseconds_bucket{service_name="rental-operations",span_name=~"POST /?api/Rental/create"}[5m])))',
+  p99:'histogram_quantile(0.99, sum by (le) (rate(traces_span_metrics_duration_milliseconds_bucket{service_name="rental-core",span_name=~"POST /?api/Rental/create"}[5m])))',
   queue:'sum(rabbitmq_detailed_queue_messages_ready)',
   limited:'sum(increase(traces_span_metrics_calls_total{service_name="api-gateway",http_response_status_code="429"}[5m]))'
 };

@@ -175,9 +175,9 @@ its outbox row are written in the **same transaction**. That is what makes
 [ADR 0009](adr/0009-exactly-once-effect.md) true rather than drawn, and it
 requires taking `rentals` out of MongoDB.
 
-**MongoDB's fate:** it leaves the stack when Piso 2 completes. Until then it
-stays in the compose file serving the current `rental-operations`, which is its
-only consumer.
+**MongoDB's fate:** it left the stack with Piso 2. The compose file has no
+`mongodb` service, the driver is gone from the project, and the double-booking
+guarantee is the target schema's own partial unique index.
 
 ### 4.3 Read aggregation — in the BFF, without GraphQL
 
@@ -202,7 +202,11 @@ Partition keys are **always an immutable id, and always per topic**. Never the
 plate: it has already been rewritten in this system
 (`CanonicalizeLegacyMotorcyclePlates`), and a mutable business key would reshard
 the topic at the moment of the correction. For the same reason `rentals` now
-references `motorcycles (id)`.
+references `motorcycles (id)` — in the API as well as in the schema. Creating a
+rental takes a `motorcycleId`; the plate comes back on reads, resolved through
+the join, because a screen needs something a human recognises. Turning a plate
+someone typed into an id is the BFF's job, not the write path's -- see
+[ADR 0014](adr/0014-read-aggregation-at-the-bff.md).
 
 Compatibility is **FULL** — an old consumer survives the producer's upgrade, and
 a new consumer can replay the history. **Protobuf** is the encoding, under
@@ -241,7 +245,7 @@ logs nobody out.
 | # | Contradiction | State |
 |---|---|---|
 | 01 | The target DDL did not run on the engine ADR 0004 declared | ✅ **closed** — portable schema, proven in CI against both engines |
-| 02 | The double-booking guarantee lives in MongoDB, not in the target schema | ⬜ **open** — depends on the Piso 2 merge |
+| 02 | The double-booking guarantee lives in MongoDB, not in the target schema | ✅ **closed** — `one_active_rental_per_motorcycle` is the production mechanism, proved under concurrency |
 | 03 | Identity has no place in the schema or among the services | ⬜ **open** — `identity` decided in ADRs 0012 and 0013; tables not written |
 
 No box is ticked because a decision was taken. Only because code runs.
@@ -254,7 +258,7 @@ No box is ticked because a decision was taken. Only because code runs.
 |---|---|---|---|
 | **0** | Portable schema, per-engine bootstrap, CI on both | S — **done** | Portability becomes verifiable |
 | **1** | Move the .NET services into `services/`, wire them to the new stack, export OTLP | M | The dashboards stop querying an empty series |
-| **2** | Merge into `rental-core`, migrate `rentals` off Mongo, inbox in `billing` | L | Real ACID consistency; exactly-once effect demonstrated |
+| **2** | Merge into `rental-core`, migrate `rentals` off Mongo, inbox in `billing` | L — **rentals done** | Real ACID consistency; exactly-once effect demonstrated |
 | **3** | The remaining polyglot services, with contract testing | L | The target architecture, complete |
 
 No estimates in weeks, deliberately: they would depend on availability, and an

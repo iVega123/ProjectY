@@ -64,7 +64,7 @@ receives all signing keys.
 
 1. Generate or provision new values; never reuse any value from Git history.
 2. Store them in the environment's secret manager (or ignored local `.env`).
-3. Replace credentials in PostgreSQL, MongoDB, RabbitMQ, MinIO, Grafana, and
+3. Replace credentials in PostgreSQL, RabbitMQ, MinIO, Grafana, and
    every service/API-key consumer as one coordinated deployment.
 4. Revoke the prior credentials and restart all four services.
 5. Record the environment and UTC completion time in the rotation ledger.

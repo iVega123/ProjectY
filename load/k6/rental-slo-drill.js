@@ -2,12 +2,12 @@ import http from "k6/http";
 import crypto from "k6/crypto";
 import { check, sleep } from "k6";
 
-const BASE_URL = __ENV.BASE_URL || "http://rental-operations:8200";
+const BASE_URL = __ENV.BASE_URL || "http://rental-core:8200";
 const PATH = "/api/Rental/create";
 const SIGNING_KEY = __ENV.GATEWAY_IDENTITY_SIGNING_KEY;
 const KEY_ID = __ENV.GATEWAY_IDENTITY_SIGNING_KEY_ID || "local-v1";
 const SUBJECT = __ENV.SLO_DRILL_SUBJECT || "slo-drill-rider";
-const AUDIENCE = "projecty.rental-operations";
+const AUDIENCE = "projecty.rental-core";
 const VUS = Number.parseInt(__ENV.VUS || "5", 10);
 const DURATION = __ENV.DURATION || "6m";
 
@@ -64,7 +64,9 @@ export default function () {
   const startsAt = new Date(Date.now() + 8 * 86400000).toISOString();
   const predictedEndsAt = new Date(Date.now() + 1 * 86400000).toISOString();
   const payload = JSON.stringify({
-    motocycleLicencePlate: "ABC1D23",
+    // A moto não é o assunto deste ensaio: o período é inválido de propósito e
+    // a recusa vem antes de qualquer busca. O id nulo deixa isso explícito.
+    motorcycleId: "00000000-0000-0000-0000-000000000000",
     startDate: startsAt,
     predictedEndDate: predictedEndsAt,
   });

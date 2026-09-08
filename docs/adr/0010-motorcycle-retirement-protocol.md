@@ -1,8 +1,22 @@
 # ADR 0010 — Motorcycle retirement is serialized with rental claims
 
-- **Status:** Accepted
+- **Status:** Superseded by the merge in #134 / #135 (2026-09-08)
 - **Date:** 2026-09-01
 - **Deciders:** ProjectY maintainers
+
+> **Superseded.** The premise below -- "MotoHub and RentalOperations use
+> different databases" -- stopped being true. Motorcycles and rentals share one
+> database, and the claim protocol was replaced by a single transaction:
+> `MotorcycleRetirement` locks the motorcycle row, asks whether an active rental
+> exists, and only then writes. The order matters: under READ COMMITTED the same
+> question embedded in the UPDATE's WHERE would not see a rental committed a
+> moment earlier, because PostgreSQL re-evaluates using the statement's own
+> snapshot. The race this ADR describes is now decided by the database rather
+> than negotiated between two services, and is proved by
+> `RetirementAndRental_RacingForTheSameMotorcycle_LeaveExactlyOneWinner` in
+> `services/rental-core/RentalCoreTests/Motorcycles/Integration/PostgreSql/MotorcycleRetirementTests.cs`.
+> The record below is kept as written, because the reasoning that led to the
+> cross-database protocol is the reason the merge was worth doing.
 
 ## Context
 
