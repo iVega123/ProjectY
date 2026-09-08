@@ -29,7 +29,7 @@ fun main() {
 
     val bootstrap = env("KAFKA_BOOTSTRAP_SERVERS")
     val invoices = Invoices(dataSource)
-    val consumer = RentalClosedConsumer(bootstrap, invoices, stopping)
+    val consumer = RentalClosedConsumer.kafka(bootstrap, invoices, stopping)
     val relay = InvoiceRelay(dataSource, bootstrap, SchemaRegistry(env("SCHEMA_REGISTRY_URL")), stopping)
 
     val health =
@@ -43,14 +43,28 @@ fun main() {
                 if (idleMs < 30_000) exchange.reply(200, "ready") else exchange.reply(503, "stalled for ${idleMs}ms")
             }
             createContext("/invoices/count") { it.reply(200, consumer.issued.get().toString()) }
+            createContext("/invoices/skipped") { it.reply(200, consumer.skipped.get().toString()) }
             start()
+        }
+
+    // Uma thread de trabalho que morre precisa derrubar o processo.
+    //
+    // Sem isto, o consumidor morre, a relay segue viva, o join() do main nunca
+    // volta e /health/live continua respondendo 200 -- um processo que parece
+    // saudável e não fatura mais nada. halt() e não exit() porque exit()
+    // dispararia o gancho de desligamento, que faz join na thread que está
+    // morrendo. O código 70 é EX_SOFTWARE.
+    val fatal =
+        Thread.UncaughtExceptionHandler { thread, error ->
+            log.error("{} stopped; halting so the orchestrator restarts billing", thread.name, error)
+            Runtime.getRuntime().halt(70)
         }
 
     val threads =
         listOf(
             Thread(relay, "invoice-relay"),
             Thread(consumer, "rental-closed"),
-        )
+        ).onEach { it.uncaughtExceptionHandler = fatal }
 
     Runtime.getRuntime().addShutdownHook(
         Thread {

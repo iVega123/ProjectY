@@ -18,6 +18,21 @@ enum class Outcome {
 }
 
 /**
+ * Quem emite a nota.
+ *
+ * A interface existe para que o laço do consumidor possa ser testado contra uma
+ * falha de banco sem que exista um banco: o que importa lá é o que o laço faz
+ * quando esta chamada estoura, não o que ela escreve quando não estoura.
+ */
+interface InvoiceIssuer {
+    fun issue(
+        messageId: String,
+        rental: ClosedRental,
+        settled: Settlement.Settled,
+    ): Invoices.Issued
+}
+
+/**
  * A nota, a linha do inbox e o evento de saída numa transação só.
  *
  * É aqui que o ADR 0009 deixa de ser prosa. O `SqlInboxProcessor` do
@@ -32,7 +47,7 @@ enum class Outcome {
  * nenhuma janela -- o preço é que só serve para efeitos que moram no banco, que
  * é exatamente o caso de uma fatura.
  */
-class Invoices(private val dataSource: DataSource) {
+class Invoices(private val dataSource: DataSource) : InvoiceIssuer {
     companion object {
         const val CONSUMER = "billing-v1"
         private const val UNIQUE_VIOLATION = "23505"
@@ -64,7 +79,7 @@ class Invoices(private val dataSource: DataSource) {
 
     data class Issued(val outcome: Outcome, val invoiceId: UUID?)
 
-    fun issue(
+    override fun issue(
         messageId: String,
         rental: ClosedRental,
         settled: Settlement.Settled,

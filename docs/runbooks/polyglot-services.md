@@ -113,6 +113,16 @@ returns HTTP 409 and does not persist its calculation. Reloading the rental or
 retrying settlement after completion returns the stored dates and costs; only
 the winning update enqueues `rental.closed`.
 
+The billing consumer separates a broken message from a broken dependency,
+because the two need opposite answers. Undecodable Protobuf and an event
+missing what a settlement needs are logged and skipped, and the batch still
+commits -- retrying them forever would stop the partition for every other
+rider. Anything else (the database down, a pool timeout) rewinds the batch to
+the last committed offsets and tries again, because dropping a good message
+would lose an invoice. A worker thread that dies anyway halts the process on
+purpose: a billing service that has stopped billing must not keep answering
+`/health/live` with 200.
+
 billing settles from what `rental.closed` carries and never calls back: the
 agreed total, the plan days and the three dates all travel on the event, so an
 invoice is issued with rental-core down. The invoice, the inbox row and the
