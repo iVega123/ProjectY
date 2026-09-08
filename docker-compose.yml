@@ -329,16 +329,33 @@ services:
       GATEWAY_UPSTREAM_RIDER_MANAGER: http://rider-manager:8000
       GATEWAY_UPSTREAM_MOTO_HUB: http://rental-core:8200
       GATEWAY_UPSTREAM_RENTAL_OPERATIONS: http://rental-core:8200
+      # O billing vive no overlay poliglota. Sem ele de pé, /api/invoices
+      # responde 502 -- e não impede o portão de subir, que é o que importa.
+      GATEWAY_UPSTREAM_BILLING: http://billing:8094
       GATEWAY_UPSTREAM_AUTH_GATE_TIMEOUT_MS: "1500"
       GATEWAY_UPSTREAM_RIDER_MANAGER_TIMEOUT_MS: "2000"
       GATEWAY_UPSTREAM_MOTO_HUB_TIMEOUT_MS: "2000"
       GATEWAY_UPSTREAM_RENTAL_OPERATIONS_TIMEOUT_MS: "2500"
+      GATEWAY_UPSTREAM_BILLING_TIMEOUT_MS: "2000"
       GATEWAY_JWKS_URL: http://auth-gate:8080/.well-known/jwks.json
       GATEWAY_JWT_ISSUER: projecty.identity
       GATEWAY_JWT_AUDIENCE_AUTH_GATE: projecty.auth-gate
       GATEWAY_JWT_AUDIENCE_RIDER_MANAGER: projecty.rider-manager
       GATEWAY_JWT_AUDIENCE_MOTO_HUB: projecty.rental-core
       GATEWAY_JWT_AUDIENCE_RENTAL_OPERATIONS: projecty.rental-core
+      # A mesma audiência do rental-core, e não uma nova, deliberadamente.
+      #
+      # Esta string faz duas coisas: valida o aud do token e vira a audiência
+      # do envelope que o portão assina. Uma audiência própria para o billing
+      # exigiria um segundo token para a mesma tela -- o console guarda um só,
+      # e não tem credenciais para pedir outro. A fatura é a liquidação de um
+      # aluguel que o chamador já tem token para ler.
+      #
+      # É um afrouxamento real: um token do rental-core serve no billing. O
+      # #136 troca este esquema inteiro (EdDSA com JWKS, um emissor), e a
+      # fronteira certa se desenha lá, uma vez, em vez de aqui, com uma sexta
+      # chave HMAC para um esquema que já está de saída.
+      GATEWAY_JWT_AUDIENCE_BILLING: projecty.rental-core
       GATEWAY_IDENTITY_SIGNING_KEY: ${GATEWAY_IDENTITY_SIGNING_KEY:?GATEWAY_IDENTITY_SIGNING_KEY is required}
       GATEWAY_IDENTITY_SIGNING_KEY_ID: local-v1
       GATEWAY_REDIS_URL: redis://redis:6379/

@@ -808,7 +808,8 @@ mod tests {
                 auth_gate: upstream.clone(),
                 rider_manager: upstream.clone(),
                 moto_hub: upstream.clone(),
-                rental_operations: upstream,
+                rental_operations: upstream.clone(),
+                billing: upstream,
             },
             auth: AuthConfig {
                 jwks_url: Url::parse("http://127.0.0.1:1/.well-known/jwks.json").unwrap(),
@@ -818,6 +819,7 @@ mod tests {
                     rider_manager: "projecty.rider-manager".to_owned(),
                     moto_hub: "projecty.moto-hub".to_owned(),
                     rental_operations: "projecty.rental-operations".to_owned(),
+                    billing: "projecty.billing".to_owned(),
                 },
                 jwks_cache_ttl: Duration::from_secs(300),
                 unknown_kid_refresh_interval: Duration::from_secs(5),
@@ -846,6 +848,7 @@ mod tests {
                 rider_manager: test_resilience_config(),
                 moto_hub: test_resilience_config(),
                 rental_operations: test_resilience_config(),
+                billing: test_resilience_config(),
             },
         }
     }
@@ -1753,6 +1756,55 @@ mod tests {
         mac.verify_slice(&URL_SAFE_NO_PAD.decode(signature).unwrap())
             .unwrap();
         assert_eq!(state.jwks_requests.load(Ordering::SeqCst), 1);
+    }
+
+    /// A mesma prova, para o billing.
+    ///
+    /// A verificação do envelope existe duas vezes -- em C# e, desde o #137, em
+    /// Kotlin -- e a string canônica é o ponto em que as duas podem divergir sem
+    /// que nada quebre até alguém entrar. Este teste fixa o que o portão assina
+    /// para uma rota de fatura; o lado Kotlin fixa um envelope real produzido por
+    /// ele. Uma divergência falha de um dos dois lados em vez de virar acesso.
+    #[tokio::test]
+    async fn signs_invoice_reads_for_the_billing_audience() {
+        let issuer = TestIssuer::new("billing-key");
+        let (upstream, _state) = spawn_security_upstream(Some(issuer.jwks())).await;
+        let mut config = test_config(upstream.clone());
+        config.auth.jwks_url = upstream.join(".well-known/jwks.json").unwrap();
+        let app = build_app(config).unwrap();
+        let token = issuer.token("projecty.billing", &["Rider"]);
+        let response = app
+            .oneshot(
+                HttpRequest::get("/api/invoices?rentalIds=a,b")
+                    .header(AUTHORIZATION, format!("Bearer {token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response_json(response).await;
+        let issued_at = body["issued_at"].as_str().unwrap();
+        let signature = body["signature"]
+            .as_str()
+            .unwrap()
+            .strip_prefix("v1=")
+            .unwrap();
+        let canonical = format!(
+            "v1
+local-v1
+rider-123
+Rider
+{issued_at}
+GET
+/api/invoices?rentalIds=a,b
+projecty.billing"
+        );
+        let mut mac = Hmac::<Sha256>::new_from_slice(&[b'x'; 32]).unwrap();
+        mac.update(canonical.as_bytes());
+        mac.verify_slice(&URL_SAFE_NO_PAD.decode(signature).unwrap())
+            .unwrap();
     }
 
     #[tokio::test]

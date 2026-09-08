@@ -6,6 +6,8 @@ import com.zaxxer.hikari.HikariConfig
 import com.zaxxer.hikari.HikariDataSource
 import org.slf4j.LoggerFactory
 import java.net.InetSocketAddress
+import java.nio.charset.StandardCharsets
+import java.time.Duration
 import java.util.concurrent.atomic.AtomicBoolean
 
 private val log = LoggerFactory.getLogger("billing")
@@ -27,6 +29,18 @@ fun main() {
             },
         )
 
+    val identity =
+        GatewayIdentity(
+            signingKey = env("GATEWAY_IDENTITY_SIGNING_KEY").toByteArray(StandardCharsets.UTF_8),
+            signingKeyId = System.getenv("GATEWAY_IDENTITY_SIGNING_KEY_ID") ?: "local-v1",
+            // Sem padrão: a audiência do envelope precisa ser exatamente a que o
+            // portão assina para este upstream, e um padrão silencioso aqui seria
+            // um 401 sem explicação sempre que as duas divergissem.
+            audience = env("BILLING_IDENTITY_AUDIENCE"),
+            maximumAge = Duration.ofSeconds(30),
+            clockSkew = Duration.ofSeconds(5),
+        )
+
     val bootstrap = env("KAFKA_BOOTSTRAP_SERVERS")
     val invoices = Invoices(dataSource)
     val consumer = RentalClosedConsumer.kafka(bootstrap, invoices, stopping)
@@ -42,6 +56,9 @@ fun main() {
                 val idleMs = System.currentTimeMillis() - consumer.lastPollAtMs.get()
                 if (idleMs < 30_000) exchange.reply(200, "ready") else exchange.reply(503, "stalled for ${idleMs}ms")
             }
+            // As rotas de saúde não passam pelo portão e continuam abertas; a
+            // leitura da nota passa, e exige o envelope assinado.
+            createContext(InvoiceApi.BASE, InvoiceApi(InvoiceReads(dataSource), identity))
             createContext("/invoices/count") { it.reply(200, consumer.issued.get().toString()) }
             createContext("/invoices/skipped") { it.reply(200, consumer.skipped.get().toString()) }
             start()
