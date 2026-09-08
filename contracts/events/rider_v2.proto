@@ -1,0 +1,26 @@
+syntax = "proto3";
+package project_y.events;
+
+// Versioned successor of rider.proto, carried on rider.verified.v2.
+//
+// Apicurio's FULL check rejects adding a field to a governed schema: its
+// forward pass reverses the schemas and reads the new field as an unreserved
+// removal. Rather than downgrade FULL or ignore its verdict, the evolved fact
+// gets its own subject, which has no prior version to be incompatible with.
+//
+// Field numbers match rider.proto exactly, so a v1 decoder reads a v2 payload
+// and skips field 9 as unknown. That is what makes the rollout cheap: the
+// producer writes both topics, consumers move one at a time, v1 retires last.
+message RiderEventV2 {
+  optional string event_id = 1;
+  optional string rider_id = 2;
+  optional int64 occurred_at_ms = 3;
+  optional string object_key = 4;
+  optional string cnh_number = 5;
+  optional bool verified = 6;
+  optional int32 risk_score = 7;
+  optional string pricing_json = 8;
+  // rental-core does not own the rider's name. It holds it so rental.closed
+  // can describe the fact without calling identity while assembling the event.
+  optional string name = 9;
+}

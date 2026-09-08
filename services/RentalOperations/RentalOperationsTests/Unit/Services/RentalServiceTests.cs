@@ -23,12 +23,12 @@ public sealed class RentalServiceTests
         var repository = new Mock<IRentalRepository>();
         repository.Setup(r => r.HasOverlappingRentalAsync(It.IsAny<string>(), It.IsAny<DateTime>(), It.IsAny<DateTime>())).ReturnsAsync(false);
         repository.Setup(r => r.TryClaimRentalAsync(It.IsAny<string>(), It.IsAny<string>())).ReturnsAsync(MotorcycleClaimResult.Acquired);
-        var riders = new Mock<IRiderManagerService>();
-        riders.Setup(r => r.GetRiderByIdAsync("rider")).ReturnsAsync(new Rider { UserId = "rider", CNHType = "A" });
+        var riders = new Mock<IRiderProjectionStore>();
+        riders.Setup(r => r.GetAsync("rider", It.IsAny<CancellationToken>())).ReturnsAsync(new RiderView("rider", true, 1, "Ada Lovelace"));
         var motorcycles = new Mock<IMotorcycleService>();
         motorcycles.Setup(m => m.GetMotorcycleByIdAsync("ABC1D23")).ReturnsAsync(new Motorcycle { licensePlate = "ABC1D23" });
         if (stage == "database") repository.Setup(r => r.HasOverlappingRentalAsync(It.IsAny<string>(), It.IsAny<DateTime>(), It.IsAny<DateTime>())).ThrowsAsync(failure);
-        if (stage == "rider") riders.Setup(r => r.GetRiderByIdAsync("rider")).ThrowsAsync(failure);
+        if (stage == "rider") riders.Setup(r => r.GetAsync("rider", It.IsAny<CancellationToken>())).ThrowsAsync(failure);
         if (stage == "motorcycle") motorcycles.Setup(m => m.GetMotorcycleByIdAsync("ABC1D23")).ThrowsAsync(failure);
         if (stage == "claim") repository.Setup(r => r.TryClaimRentalAsync(It.IsAny<string>(), It.IsAny<string>())).ThrowsAsync(failure);
         if (stage == "insert") repository.Setup(r => r.CreateRentalAsync(It.IsAny<RentalOperations.Model.Rental>())).ThrowsAsync(failure);
@@ -60,14 +60,9 @@ public sealed class RentalServiceTests
             .ReturnsAsync(false);
         repository.Setup(candidate => candidate.TryClaimRentalAsync("RET-0001", It.IsAny<string>()))
             .ReturnsAsync(MotorcycleClaimResult.Retired);
-        var riders = new Mock<IRiderManagerService>();
-        riders.Setup(service => service.GetRiderByIdAsync("rider-1"))
-            .ReturnsAsync(new Rider
-            {
-                Id = "rider-1",
-                UserId = "rider-1",
-                CNHType = "A"
-            });
+        var riders = new Mock<IRiderProjectionStore>();
+        riders.Setup(service => service.GetAsync("rider-1", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new RiderView("rider-1", true, 1, "Ada Lovelace"));
         var motorcycles = new Mock<IMotorcycleService>();
         motorcycles.Setup(service => service.GetMotorcycleByIdAsync("RET-0001"))
             .ReturnsAsync(new Motorcycle
@@ -103,7 +98,7 @@ public sealed class RentalServiceTests
         var service = new RentalService(
             repository.Object,
             Mock.Of<IMapper>(),
-            Mock.Of<IRiderManagerService>(),
+            Mock.Of<IRiderProjectionStore>(),
             Mock.Of<IMotorcycleService>());
 
         Assert.False(await service.TryRetireMotorcycleAsync(" busy-0001 "));
@@ -120,7 +115,7 @@ public sealed class RentalServiceTests
         var service = new RentalService(
             repository.Object,
             Mock.Of<IMapper>(),
-            Mock.Of<IRiderManagerService>(),
+            Mock.Of<IRiderProjectionStore>(),
             Mock.Of<IMotorcycleService>());
 
         Assert.True(await service.TryReserveLicensePlateRenameAsync(

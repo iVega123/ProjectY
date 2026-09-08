@@ -14,19 +14,19 @@ namespace RentalOperations.Services
     {
         private readonly IRentalRepository _repository;
         private readonly IMapper _mapper;
-        private readonly IRiderManagerService _riderManagerService;
+        private readonly IRiderProjectionStore _riders;
         private readonly IMotorcycleService _motorcycleService;
 
         public RentalService(
             IRentalRepository repository,
             IMapper mapper,
-            IRiderManagerService riderManagerService,
+            IRiderProjectionStore riders,
             IMotorcycleService motorcycleService)
         {
             _repository = repository;
             _mapper = mapper;
             _motorcycleService = motorcycleService;
-            _riderManagerService = riderManagerService;
+            _riders = riders;
         }
 
         public async Task CreateRentalAsync(RentalCreateDto createDto, string userId)
@@ -46,12 +46,15 @@ namespace RentalOperations.Services
                 throw new ActiveRentalConflictException(createDto.MotocycleLicencePlate);
             }
 
-            var rider = await BeforeWriteAsync(() => _riderManagerService.GetRiderByIdAsync(userId));
+            // Read locally, never over the network. Calling identity here would put
+            // the fat event back on the request path it exists to remove, so this is
+            // asserted by a test rather than left to reviewer discipline.
+            var rider = await BeforeWriteAsync(() => _riders.GetAsync(userId, CancellationToken.None));
             if (rider == null)
             {
-                throw new ArgumentException("Rider does not exist.");
+                throw new RiderProjectionPendingException(userId);
             }
-            if (!(rider.CNHType == "A" || rider.CNHType == "AB"))
+            if (!rider.Verified)
             {
                 throw new ArgumentException("Rider does not have the correct license type.");
             }

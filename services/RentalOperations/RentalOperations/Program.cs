@@ -56,6 +56,8 @@ builder.Services.AddSingleton<MongoDbContext>(sp =>
 builder.Services.AddHostedService<MongoRentalIndexInitializer>();
 builder.Services.AddHostedService<RentalOperations.Services.RentalKafkaRelay>();
 builder.Services.AddHostedService<RentalOperations.Services.PricingProjection>();
+builder.Services.AddHostedService<RentalOperations.Services.RiderProjection>();
+builder.Services.AddSingleton<RentalOperations.Services.IRiderProjectionStore, RentalOperations.Services.MongoRiderProjectionStore>();
 builder.Services.AddSingleton(
     builder.Configuration.GetSection("Messaging:Inbox").Get<MongoInboxOptions>()
         ?? new MongoInboxOptions());
@@ -76,16 +78,6 @@ builder.Services.AddSwaggerGen(c =>
 });
 
 builder.Services
-    .AddHttpClient("rider-manager", client =>
-    {
-        client.Timeout = TimeSpan.FromSeconds(1);
-        client.BaseAddress = new Uri(
-            builder.Configuration["RiderManagerSettings:BaseUrl"]
-                ?? throw new InvalidOperationException(
-                    "RiderManagerSettings:BaseUrl is not configured."));
-    })
-    .AddGatewayIdentityPropagation("projecty.rider-manager");
-builder.Services
     .AddHttpClient("moto-hub", client =>
     {
         client.Timeout = TimeSpan.FromSeconds(1);
@@ -98,7 +90,6 @@ builder.Services
         "projecty.moto-hub",
         "service:rental-operations");
 
-builder.Services.AddScoped<IRiderManagerService, RiderManagerService>();
 
 builder.Services.AddSingleton<IRabbitMqService, RabbitMqService>();
 builder.Services.AddSingleton<IMessagingConsumerService, MessagingConsumerService>();

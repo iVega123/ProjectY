@@ -6,5 +6,6 @@ invoice.issued
 document.stored
 document.verified
 rider.verified
+rider.verified.v2
 risk.scored
 pricing.updated

@@ -61,7 +61,7 @@ public sealed class RentalEventTests : IAsyncLifetime
             .Returns(() => repository.ReleaseRentalClaimAsync(rental.MotorcycleLicencePlate, id));
         var mapper = new MapperConfiguration(c => c.AddProfile<RentalProfile>(), NullLoggerFactory.Instance).CreateMapper();
         var service = new RentalService(synchronized.Object, mapper,
-            Mock.Of<IRiderManagerService>(), Mock.Of<IMotorcycleService>());
+            Mock.Of<IRiderProjectionStore>(), Mock.Of<IMotorcycleService>());
         RentalController Controller() => new(service)
         {
             ControllerContext = new ControllerContext

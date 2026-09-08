@@ -49,13 +49,24 @@ namespace RiderManager.Repositories
         {
             rider.Id = Guid.NewGuid().ToString();
             _context.Riders.Add(rider);
+            AddVerificationEvents(rider);
             await _context.SaveChangesAsync();
         }
 
         public async Task UpdateAsync(Rider rider)
         {
             _context.Entry(rider).State = EntityState.Modified;
+            AddVerificationEvents(rider);
             await _context.SaveChangesAsync();
+        }
+
+        // The outbox rows join the rider in one SaveChanges, so a rider that exists
+        // always has its fact queued. Both topics are written during the rollout:
+        // v1 for consumers still on it, v2 for those that need the carried name.
+        private void AddVerificationEvents(Rider rider)
+        {
+            _context.EventOutbox.Add(RiderEventEnvelope.VerifiedLegacy(rider));
+            _context.EventOutbox.Add(RiderEventEnvelope.Verified(rider));
         }
 
         public async Task DeleteAsync(string id)
