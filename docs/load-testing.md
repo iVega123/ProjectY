@@ -10,7 +10,7 @@ powershell -File scripts/Run-LoadTest.ps1
 
 The runner generates ignored credentials and a dedicated `projecty-load` Compose
 model. It uses separately named volumes/images, loopback-only ports, a release
-gateway build, real .NET services, PostgreSQL, MongoDB, Redis, RabbitMQ and LGTM.
+gateway build, real .NET services, PostgreSQL, CockroachDB, Redis, RabbitMQ and LGTM.
 It seeds one rider and 10,000 motorcycles, warms up one creation, then sends
 five concurrent users for 30 seconds with 100 ms think time.
 

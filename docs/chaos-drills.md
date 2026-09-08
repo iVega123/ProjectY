@@ -7,11 +7,11 @@ that drill's named toxics; it does not restart a container or clear other drills
 
 | Drill | Injection | Expected / acceptance status | Observe |
 |---|---|---|---|
-| Slow database | 500 ms on the active MongoDB proxy | Measure increased p99. Measured 4.35% unexpected responses; acceptance failed, tracked in [#160](https://github.com/iVega123/ProjectY/issues/160). | Grafana rental SLO, Mongo spans |
-| Database down | MongoDB downstream timeout | 503 with Retry-After; gateway breaker opens after repeated failures | Gateway metrics and degraded traces |
+| Slow database | 500 ms on the CockroachDB proxy | Measure increased p99. Measured 4.35% unexpected responses; acceptance failed, tracked in [#160](https://github.com/iVega123/ProjectY/issues/160). | Grafana rental SLO, database spans |
+| Database down | CockroachDB downstream timeout | 503 with Retry-After; gateway breaker opens after repeated failures | Gateway metrics and degraded traces |
 | Redis down | Redis downstream timeout | Limiter fails open; revocation and idempotency fail closed | Degradation counter and response status |
 | Kafka down | Disabled until the rental Kafka path exists | Target: rental writes continue, outbox accumulates and drains | Blocked by #130 / event-service work |
-| Bad network | MongoDB slicer + 60,000-byte connection limit | Measure reconnects/retries and errors; unchanged error rate is not yet demonstrated | Client spans and k6 |
+| Bad network | CockroachDB slicer + 60,000-byte connection limit | Measure reconnects/retries and errors; unchanged error rate is not yet demonstrated | Client spans and k6 |
 | Service killed | Disabled until tracking/map exists | Target: map freezes, other services continue | Blocked by #10 |
 
 The two unavailable pairs are intentionally disabled in Tilt and refuse CLI
