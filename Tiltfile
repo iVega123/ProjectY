@@ -85,8 +85,10 @@ def configure_live_update(image, context, manifests, install_command, build_comm
         live_update = update_steps,
     )
 
-def configure_dotnet_live_update(name, project):
-    source = 'services/' + project + '/' + project
+def configure_dotnet_live_update(name, project, directory = None):
+    # The directory and the project stopped being the same name when moto-hub and
+    # rental-operations merged, so they are separate arguments now.
+    source = 'services/' + (directory or project) + '/' + project
     docker_build(
         'projecty/' + name + ':dev', '.',
         dockerfile = source + '/Dockerfile', target = 'development',
@@ -102,7 +104,7 @@ def configure_dotnet_live_update(name, project):
 
 configure_dotnet_live_update('auth-gate', 'AuthGate')
 configure_dotnet_live_update('rider-manager', 'RiderManager')
-configure_dotnet_live_update('rental-core', 'rental-core/RentalCore')
+configure_dotnet_live_update('rental-core', 'RentalCore', 'rental-core')
 
 configure_live_update(
     'projecty/api-gateway:dev',

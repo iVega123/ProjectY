@@ -36,7 +36,7 @@ services:
       interval: 10s
       timeout: 3s
       retries: 12
-  rental-operations:
+  rental-core:
     environment:
       Kafka__BootstrapServers: kafka:9092
       Kafka__SchemaRegistryUrl: http://schema-registry:8080/apis/ccompat/v7
