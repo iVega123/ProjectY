@@ -19,7 +19,8 @@ public interface IRentalRepository
     Task<Rental> CreateRentalAsync(Rental rental, CancellationToken token = default);
     Task<Rental?> GetRentalByIdAsync(string id, CancellationToken token = default);
     Task<CursorPage<Rental>> GetRentalsByUserId(string userId, string? cursor, int? pageSize, CancellationToken token = default);
+    Task<IReadOnlyList<Rental>> GetRentalsByIdsAsync(IReadOnlyCollection<Guid> ids, CancellationToken token = default);
     Task<bool> HasOverlappingRentalAsync(Guid motorcycleId, DateTime startDate, DateTime endDate, CancellationToken token = default);
-    Task<bool> IsMotorcycleCurrentlyRentedAsync(string licencePlate, CancellationToken token = default);
+    Task<bool> IsMotorcycleCurrentlyRentedAsync(Guid motorcycleId, CancellationToken token = default);
     Task UpdateRentalAsync(Rental rental, CancellationToken token = default);
 }

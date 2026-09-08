@@ -9,6 +9,7 @@ namespace MotoHub.Services
     {
         Task<CursorPage<MotorcycleDTO>> GetMotorcyclesAsync(string? cursor, int? pageSize);
         Task<MotorcycleDTO?> GetMotorcycleByLicensePlateAsync(string licensePlate);
+        Task<MotorcycleDTO?> GetMotorcycleByIdAsync(Guid id);
         void CreateMotorcycle(MotorcycleDTO motorcycleDto);
         Task UpdateMotorcycleAsync(string licensePlate, string newLicencePlate);
         Task<OperationResult> DeleteMotorcycle(string licensePlate);

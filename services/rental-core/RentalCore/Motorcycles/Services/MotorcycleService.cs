@@ -43,6 +43,12 @@ namespace MotoHub.Services
             return _mapper.Map<MotorcycleDTO>(motorcycle);
         }
 
+        public async Task<MotorcycleDTO?> GetMotorcycleByIdAsync(Guid id)
+        {
+            var motorcycle = await _repository.GetByIdAsync(id);
+            return _mapper.Map<MotorcycleDTO>(motorcycle);
+        }
+
         public void CreateMotorcycle(MotorcycleDTO motorcycleDto)
         {
             var motorcycle = _mapper.Map<Motorcycle>(motorcycleDto);

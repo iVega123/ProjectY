@@ -10,7 +10,8 @@ namespace RentalOperations.Mapper
         {
             CreateMap<Rental, ResponseRentalDTO>()
             .ForMember(dest => dest.RentalId, opt => opt.MapFrom(src => src.Id))
-            .ForMember(dest => dest.MotocycleLicencePlate, opt => opt.MapFrom(src => src.MotorcycleLicencePlate))
+            .ForMember(dest => dest.MotorcycleId, opt => opt.MapFrom(src => src.MotorcycleId))
+            .ForMember(dest => dest.MotorcycleLicencePlate, opt => opt.MapFrom(src => src.MotorcycleLicencePlate))
             .ForMember(dest => dest.StartDate, opt => opt.MapFrom(src => src.StartDate))
             .ForMember(dest => dest.PredictedEndDate, opt => opt.MapFrom(src => src.PredictedEndDate))
             .ForMember(dest => dest.OriginalTotalCost, opt => opt.MapFrom(src => src.InitCost))

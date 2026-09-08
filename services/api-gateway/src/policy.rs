@@ -37,11 +37,26 @@ pub fn access_for(method: &Method, path: &str, upstream: UpstreamName) -> Access
         {
             Access::Public
         }
+        UpstreamName::MotoHub if motorcycle_read_route(method, &path) => Access::Authenticated,
         UpstreamName::MotoHub => Access::Admin,
         UpstreamName::RiderManager if rider_admin_route(method, &path) => Access::Admin,
         UpstreamName::RentalOperations if rental_admin_route(method, &path) => Access::Admin,
         _ => Access::Authenticated,
     }
+}
+
+/// Ler uma moto -- uma, pelo identificador dela -- é o que um piloto precisa
+/// para alugá-la, e o serviço já tratava assim: GetByLicensePlate nunca teve
+/// [Authorize(Roles = "Admin")]. Quem recusava era este portão, com um Admin só
+/// para todo o MotoHub, e as duas camadas discordavam em silêncio.
+///
+/// O catálogo inteiro continua Admin. A diferença entre "esta moto" e "todas as
+/// motos" é a diferença entre alugar uma e inventariar a frota.
+fn motorcycle_read_route(method: &Method, path: &str) -> bool {
+    method == Method::GET
+        && path
+            .strip_prefix("/api/motorcycles/")
+            .is_some_and(|id| !id.is_empty() && !id.contains('/'))
 }
 
 fn rider_admin_route(method: &Method, path: &str) -> bool {
@@ -54,16 +69,14 @@ fn rider_admin_route(method: &Method, path: &str) -> bool {
     !id.is_empty() && !id.contains('/') && (method == Method::GET || method == Method::DELETE)
 }
 
+// A aposentadoria e a reserva de renomeação eram rotas de um protocolo entre
+// dois bancos, e saíram com ele em #135. O portão continuaria concedendo Admin a
+// caminhos que ninguém serve -- um contrato falso, que se lê como promessa.
 fn rental_admin_route(method: &Method, path: &str) -> bool {
-    (method == Method::GET
+    method == Method::GET
         && path
             .strip_prefix("/api/rental/user/")
-            .is_some_and(|id| !id.is_empty() && !id.contains('/')))
-        || (method == Method::POST
-            && (path
-                .strip_prefix("/api/rental/motorcycle-retirements/")
-                .is_some_and(|plate| !plate.is_empty() && !plate.contains('/'))
-                || path == "/api/rental/motorcycle-renames/reservations"))
+            .is_some_and(|id| !id.is_empty() && !id.contains('/'))
 }
 
 #[cfg(test)]
@@ -94,11 +107,19 @@ mod tests {
         );
         assert_eq!(
             access_for(
-                &Method::POST,
-                "/api/rental/motorcycle-retirements/ABC1234",
+                &Method::GET,
+                "/api/rental/user/rider-1",
                 UpstreamName::RentalOperations
             ),
             Access::Admin
+        );
+        assert_eq!(
+            access_for(
+                &Method::GET,
+                "/api/rental/batch",
+                UpstreamName::RentalOperations
+            ),
+            Access::Authenticated
         );
         assert_eq!(
             access_for(
@@ -109,13 +130,37 @@ mod tests {
             Access::Authenticated
         );
         assert_eq!(
+            access_for(&Method::GET, "/api/motorcycles", UpstreamName::MotoHub),
+            Access::Admin
+        );
+        assert_eq!(
+            access_for(&Method::POST, "/api/motorcycles", UpstreamName::MotoHub),
+            Access::Admin
+        );
+    }
+
+    #[test]
+    fn a_rider_may_read_one_motorcycle_but_not_the_fleet() {
+        // Alugar exige saber qual moto se está alugando. Listar a frota, não.
+        assert_eq!(
             access_for(
                 &Method::GET,
                 "/api/motorcycles/ABC1234",
                 UpstreamName::MotoHub
             ),
+            Access::Authenticated
+        );
+        assert_eq!(
+            access_for(&Method::GET, "/api/motorcycles", UpstreamName::MotoHub),
             Access::Admin
         );
+        for method in [Method::PUT, Method::DELETE, Method::POST] {
+            assert_eq!(
+                access_for(&method, "/api/motorcycles/ABC1234", UpstreamName::MotoHub),
+                Access::Admin,
+                "{method} on one motorcycle must stay Admin"
+            );
+        }
     }
 
     #[test]

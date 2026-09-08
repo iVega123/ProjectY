@@ -39,7 +39,7 @@ Content-Type: application/json
 Idempotency-Key: rental-request-001
 
 {
-  "motocycleLicencePlate": "ABC1D23",
+  "motorcycleId": "0f8b2c4e-6a1d-4b3f-9c5e-2d7a8b1c3e4f",
   "startDate": "2026-09-01T00:00:00Z",
   "predictedEndDate": "2026-09-08T00:00:00Z"
 }

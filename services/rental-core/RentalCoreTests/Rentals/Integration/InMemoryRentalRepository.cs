@@ -56,7 +56,7 @@ public sealed class InMemoryRentalRepository : IRentalRepository
                     existing.MotorcycleId == rental.MotorcycleId &&
                     existing.Status == RentalStatus.Active))
             {
-                throw new ActiveRentalConflictException(rental.MotorcycleLicencePlate);
+                throw new ActiveRentalConflictException(rental.MotorcycleId);
             }
 
             _rentals.Add(rental);
@@ -110,15 +110,26 @@ public sealed class InMemoryRentalRepository : IRentalRepository
         }
     }
 
+    public Task<IReadOnlyList<Rental>> GetRentalsByIdsAsync(
+        IReadOnlyCollection<Guid> ids,
+        CancellationToken token = default)
+    {
+        lock (_gate)
+        {
+            return Task.FromResult<IReadOnlyList<Rental>>(
+                _rentals.Where(rental => ids.Contains(rental.Id)).ToList());
+        }
+    }
+
     public Task<bool> IsMotorcycleCurrentlyRentedAsync(
-        string licencePlate,
+        Guid motorcycleId,
         CancellationToken token = default)
     {
         lock (_gate)
         {
             var now = DateTime.UtcNow;
             return Task.FromResult(_rentals.Any(rental =>
-                rental.MotorcycleLicencePlate == licencePlate &&
+                rental.MotorcycleId == motorcycleId &&
                 rental.Status == RentalStatus.Active &&
                 rental.StartDate <= now &&
                 rental.PredictedEndDate >= now));

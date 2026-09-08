@@ -22,7 +22,7 @@ const action=await create('KAA8'+suffix);
 let cursor='',rental;
 for(let page=0;page<100;page++) {
   const session=await get('/api/session'+(cursor?'?cursor='+encodeURIComponent(cursor):''));
-  rental=session.rentals.items.find(r=>r.motocycleLicencePlate===action.plate);
+  rental=session.rentals.items.find(r=>r.motorcycleLicencePlate===action.plate);
   if(rental || !session.rentals.nextCursor) break;
   cursor=session.rentals.nextCursor;
 }

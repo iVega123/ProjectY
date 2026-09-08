@@ -8,6 +8,7 @@ namespace MotoHub.Repositories
     {
         Task<CursorPage<Motorcycle>> GetPageAsync(string? cursor, int? pageSize);
         Motorcycle? GetById(Guid id);
+        Task<Motorcycle?> GetByIdAsync(Guid id);
         void Add(Motorcycle motorcycle);
         void Update(Motorcycle motorcycle);
         bool LicensePlateExists(string licensePlate);
