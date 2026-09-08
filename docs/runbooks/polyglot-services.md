@@ -112,6 +112,25 @@ if another request has already closed the rental, the losing request returns
 HTTP 409. Closing again returns the stored rental unchanged; only the winning
 update enqueues `rental.closed`.
 
+The invoice itself is read through the gateway, from billing:
+
+```
+GET /api/invoices/{rentalId}
+GET /api/invoices?rentalIds=a,b,c
+```
+
+Both are read-only and both filter to the caller unless the identity envelope
+carries the `Admin` role. Someone else's invoice answers 404, not 403: the
+difference between those two responses tells a scanner which ids exist.
+
+billing verifies the gateway identity envelope of ADR 0008 the same way the .NET
+services do — it is a second implementation of that check, in Kotlin, and the
+canonical string is pinned on both sides: a test in the gateway asserts what it
+signs for an invoice route, and `GatewayIdentityTest` in billing asserts what it
+accepts, against an envelope the gateway actually produced. Its audience must
+equal `GATEWAY_JWT_AUDIENCE_BILLING`; today both are `projecty.rental-core`, and
+`docker-compose.yml` says why.
+
 Since #137 that endpoint is `POST /api/Rental/close`, and it computes no money.
 It records the end date and the status; what is owed is decided by billing from
 the event, which makes the amount eventually consistent by design. Closing

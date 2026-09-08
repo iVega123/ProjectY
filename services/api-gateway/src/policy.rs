@@ -41,6 +41,10 @@ pub fn access_for(method: &Method, path: &str, upstream: UpstreamName) -> Access
         UpstreamName::MotoHub => Access::Admin,
         UpstreamName::RiderManager if rider_admin_route(method, &path) => Access::Admin,
         UpstreamName::RentalOperations if rental_admin_route(method, &path) => Access::Admin,
+        // O billing não tem API de escrita, e o portão não deveria fingir que
+        // tem. Qualquer coisa que não seja leitura para lá só faz sentido vinda
+        // de um administrador -- e hoje não faz sentido nenhum.
+        UpstreamName::Billing if method != Method::GET => Access::Admin,
         _ => Access::Authenticated,
     }
 }
@@ -137,6 +141,35 @@ mod tests {
             access_for(&Method::POST, "/api/motorcycles", UpstreamName::MotoHub),
             Access::Admin
         );
+    }
+
+    /// A fatura é do piloto, e ler a própria não exige ser administrador.
+    ///
+    /// Quem filtra por dono é o billing, com a identidade que este portão
+    /// assina -- aqui a decisão é só "precisa estar autenticado". O que o portão
+    /// nega é escrita: o billing não tem API de escrita, e rotear uma para lá
+    /// fingiria que tem.
+    #[test]
+    fn a_rider_may_read_invoices_but_not_write_them() {
+        assert_eq!(
+            access_for(
+                &Method::GET,
+                "/api/invoices/rental-1",
+                UpstreamName::Billing
+            ),
+            Access::Authenticated
+        );
+        assert_eq!(
+            access_for(&Method::GET, "/api/invoices", UpstreamName::Billing),
+            Access::Authenticated
+        );
+        for method in [Method::POST, Method::PUT, Method::DELETE, Method::PATCH] {
+            assert_eq!(
+                access_for(&method, "/api/invoices/rental-1", UpstreamName::Billing),
+                Access::Admin,
+                "{method} on an invoice must not be a rider route"
+            );
+        }
     }
 
     #[test]

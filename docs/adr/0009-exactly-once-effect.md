@@ -141,6 +141,11 @@ than a recomputed projection, and because it crosses a process and language
 boundary: billing shares no transaction, connection pool, or runtime with the
 producer, so it can only hold if the outbox and inbox contract is real.
 
+billing exposes no write route, and that is part of the guarantee rather than an
+omission. An invoice is issued only by consuming `rental.closed`, inside the
+inbox transaction; an HTTP endpoint that could also issue one would be a second
+path to the same effect, and a second path is where exactly-once leaks.
+
 A second, independent guard sits under it. The inbox deduplicates *messages*;
 `one_invoice_per_rental` deduplicates *rentals*. They fail differently — a
 replay from offset zero after inbox retention has swept the row carries a new

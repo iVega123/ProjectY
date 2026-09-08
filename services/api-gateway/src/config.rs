@@ -22,6 +22,7 @@ pub struct ResilienceConfig {
     pub rider_manager: UpstreamResilienceConfig,
     pub moto_hub: UpstreamResilienceConfig,
     pub rental_operations: UpstreamResilienceConfig,
+    pub billing: UpstreamResilienceConfig,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -71,6 +72,7 @@ pub struct Audiences {
     pub rider_manager: String,
     pub moto_hub: String,
     pub rental_operations: String,
+    pub billing: String,
 }
 
 #[derive(Clone)]
@@ -120,6 +122,7 @@ pub struct Upstreams {
     pub rider_manager: Url,
     pub moto_hub: Url,
     pub rental_operations: Url,
+    pub billing: Url,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -128,6 +131,7 @@ pub enum UpstreamName {
     RiderManager,
     MotoHub,
     RentalOperations,
+    Billing,
 }
 
 impl Config {
@@ -148,6 +152,7 @@ impl Config {
                 rider_manager: required_url("GATEWAY_UPSTREAM_RIDER_MANAGER")?,
                 moto_hub: required_url("GATEWAY_UPSTREAM_MOTO_HUB")?,
                 rental_operations: required_url("GATEWAY_UPSTREAM_RENTAL_OPERATIONS")?,
+                billing: required_url("GATEWAY_UPSTREAM_BILLING")?,
             },
             auth: AuthConfig {
                 jwks_url: required_absolute_url("GATEWAY_JWKS_URL")?,
@@ -157,6 +162,7 @@ impl Config {
                     rider_manager: required_value("GATEWAY_JWT_AUDIENCE_RIDER_MANAGER")?,
                     moto_hub: required_value("GATEWAY_JWT_AUDIENCE_MOTO_HUB")?,
                     rental_operations: required_value("GATEWAY_JWT_AUDIENCE_RENTAL_OPERATIONS")?,
+                    billing: required_value("GATEWAY_JWT_AUDIENCE_BILLING")?,
                 },
                 jwks_cache_ttl: duration_from_env("GATEWAY_JWKS_CACHE_TTL_SECS", 300)?,
                 unknown_kid_refresh_interval: duration_from_env(
@@ -191,6 +197,10 @@ impl Config {
                 rider_manager: upstream_resilience_from_env("RIDER_MANAGER", 2000)?,
                 moto_hub: upstream_resilience_from_env("MOTO_HUB", 2000)?,
                 rental_operations: upstream_resilience_from_env("RENTAL_OPERATIONS", 2500)?,
+                // A leitura da nota é uma consulta por chave primária numa JVM
+                // que já está de pé. Ela não merece o orçamento da criação de
+                // aluguel, que fala com o banco, a projeção e o outbox.
+                billing: upstream_resilience_from_env("BILLING", 2000)?,
             },
         })
     }
@@ -218,6 +228,8 @@ impl Upstreams {
             Some((UpstreamName::MotoHub, &self.moto_hub))
         } else if path == "/api/rental" || path.starts_with("/api/rental/") {
             Some((UpstreamName::RentalOperations, &self.rental_operations))
+        } else if path == "/api/invoices" || path.starts_with("/api/invoices/") {
+            Some((UpstreamName::Billing, &self.billing))
         } else {
             None
         }
@@ -231,6 +243,7 @@ impl Audiences {
             UpstreamName::RiderManager => &self.rider_manager,
             UpstreamName::MotoHub => &self.moto_hub,
             UpstreamName::RentalOperations => &self.rental_operations,
+            UpstreamName::Billing => &self.billing,
         }
     }
 }
@@ -242,16 +255,18 @@ impl ResilienceConfig {
             UpstreamName::RiderManager => self.rider_manager,
             UpstreamName::MotoHub => self.moto_hub,
             UpstreamName::RentalOperations => self.rental_operations,
+            UpstreamName::Billing => self.billing,
         }
     }
 }
 
 impl UpstreamName {
-    pub const ALL: [Self; 4] = [
+    pub const ALL: [Self; 5] = [
         Self::AuthGate,
         Self::RiderManager,
         Self::MotoHub,
         Self::RentalOperations,
+        Self::Billing,
     ];
 
     pub const fn as_str(self) -> &'static str {
@@ -260,6 +275,7 @@ impl UpstreamName {
             Self::RiderManager => "rider_manager",
             Self::MotoHub => "moto_hub",
             Self::RentalOperations => "rental_operations",
+            Self::Billing => "billing",
         }
     }
 }
@@ -453,6 +469,7 @@ mod tests {
             rider_manager: Url::parse("http://rider-manager:8000/").unwrap(),
             moto_hub: Url::parse("http://moto-hub:8100/").unwrap(),
             rental_operations: Url::parse("http://rental-operations:8200/").unwrap(),
+            billing: Url::parse("http://billing:8094/").unwrap(),
         }
     }
 
@@ -476,7 +493,12 @@ mod tests {
             upstreams.resolve("/api/rental/user").map(|route| route.0),
             Some(UpstreamName::RentalOperations)
         );
+        assert_eq!(
+            upstreams.resolve("/api/invoices/abc").map(|route| route.0),
+            Some(UpstreamName::Billing)
+        );
         assert!(upstreams.resolve("/api/authentic-looking").is_none());
+        assert!(upstreams.resolve("/api/invoiced").is_none());
         assert!(upstreams.resolve("/api/rider/123").is_none());
         assert!(upstreams.resolve("/api/motorcycle/ABC1234").is_none());
         assert!(upstreams.resolve("/health/ready").is_none());

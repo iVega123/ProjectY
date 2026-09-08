@@ -1,21 +1,10 @@
 package projecty.billing
 
-import com.zaxxer.hikari.HikariConfig
-import com.zaxxer.hikari.HikariDataSource
-import org.junit.jupiter.api.AfterAll
-import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.Tag
-import org.junit.jupiter.api.TestInstance
-import org.testcontainers.containers.GenericContainer
-import org.testcontainers.utility.DockerImageName
 import project_y.events.Invoice.InvoiceIssued
-import java.nio.file.Files
-import java.nio.file.Path
 import java.sql.Connection
-import java.sql.DriverManager
 import java.sql.SQLException
 import java.util.UUID
-import javax.sql.DataSource
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
@@ -30,54 +19,9 @@ import kotlin.test.assertTrue
  * competindo pela mesma mensagem terminarem com uma nota, não duas. Em READ
  * COMMITTED este teste passaria por sorte.
  */
-@TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class ExactlyOnceTest {
-    private var container: GenericContainer<*>? = null
-    private lateinit var endpoint: String
-    private lateinit var dataSource: HikariDataSource
-    private lateinit var invoices: Invoices
-
-    @BeforeAll
-    fun start() {
-        // Um CockroachDB já de pé, quando houver, e um container quando não.
-        //
-        // O Testcontainers precisa falar com o daemon, e nem toda máquina de
-        // desenvolvimento expõe o socket de dentro de um container -- o Docker
-        // Desktop no Windows não expõe. O CI roda pelo caminho de cima; a
-        // variável existe para rodar o teste à mão sem ele.
-        endpoint = System.getenv("BILLING_TEST_COCKROACH") ?: startCockroach()
-
-        val root = url("defaultdb")
-        awaitReady(root)
-        applyFile(root, "000_bootstrap.cockroach.sql")
-        val app = url("projecty")
-        for (file in listOf("001_schema.sql", "002_rental_core.sql", "003_billing.sql")) applyFile(app, file)
-
-        dataSource =
-            HikariDataSource(
-                HikariConfig().apply {
-                    jdbcUrl = app
-                    maximumPoolSize = 4
-                },
-            )
-        invoices = Invoices(dataSource)
-    }
-
-    private fun startCockroach(): String {
-        val started =
-            GenericContainer(DockerImageName.parse("cockroachdb/cockroach:v26.3.1"))
-                .withCommand("start-single-node", "--insecure")
-                .withExposedPorts(26257)
-        started.start()
-        container = started
-        return "${started.host}:${started.getMappedPort(26257)}"
-    }
-
-    @AfterAll
-    fun stop() {
-        if (this::dataSource.isInitialized) dataSource.close()
-        container?.stop()
-    }
+    private val dataSource = TestDatabase.dataSource
+    private val invoices = Invoices(dataSource)
 
     @Test
     @Tag("ADR-0009#settlement-inbox")
@@ -215,33 +159,5 @@ class ExactlyOnceTest {
             }
         }
 
-    private fun <T> query(body: (Connection) -> T): T = (dataSource as DataSource).connection.use(body)
-
-    private fun url(database: String) = "jdbc:postgresql://$endpoint/$database?sslmode=disable&user=root"
-
-    private fun awaitReady(url: String) {
-        var last: Exception? = null
-        repeat(60) {
-            try {
-                DriverManager.getConnection(url).use { connection ->
-                    connection.createStatement().use { it.execute("SELECT 1") }
-                }
-                return
-            } catch (error: SQLException) {
-                last = error
-                Thread.sleep(1_000)
-            }
-        }
-        throw IllegalStateException("CockroachDB did not become ready", last)
-    }
-
-    private fun applyFile(
-        url: String,
-        file: String,
-    ) {
-        val sql = Files.readString(Path.of("../../deploy/db/sql", file))
-        DriverManager.getConnection(url).use { connection ->
-            connection.createStatement().use { it.execute(sql) }
-        }
-    }
+    private fun <T> query(body: (Connection) -> T): T = dataSource.connection.use(body)
 }

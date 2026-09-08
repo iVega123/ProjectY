@@ -106,6 +106,7 @@ pub struct ResilienceRegistry {
     rider_manager: Arc<UpstreamPolicy>,
     moto_hub: Arc<UpstreamPolicy>,
     rental_operations: Arc<UpstreamPolicy>,
+    billing: Arc<UpstreamPolicy>,
 }
 
 impl ResilienceRegistry {
@@ -115,6 +116,7 @@ impl ResilienceRegistry {
             rider_manager: Arc::new(UpstreamPolicy::new(config.rider_manager)),
             moto_hub: Arc::new(UpstreamPolicy::new(config.moto_hub)),
             rental_operations: Arc::new(UpstreamPolicy::new(config.rental_operations)),
+            billing: Arc::new(UpstreamPolicy::new(config.billing)),
         }
     }
 
@@ -124,6 +126,7 @@ impl ResilienceRegistry {
             UpstreamName::RiderManager => self.rider_manager.clone(),
             UpstreamName::MotoHub => self.moto_hub.clone(),
             UpstreamName::RentalOperations => self.rental_operations.clone(),
+            UpstreamName::Billing => self.billing.clone(),
         }
     }
 
