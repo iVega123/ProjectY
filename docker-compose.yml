@@ -543,6 +543,8 @@ services:
       Redis__ConnectionString: "redis:6379"
       GatewayIdentity__SigningKey: "${GATEWAY_IDENTITY_SIGNING_KEY:?Set GATEWAY_IDENTITY_SIGNING_KEY in .env}"
       GatewayIdentity__SigningKeyId: local-v1
+      # Empty disables the dual write, so a stack without the target engine still runs.
+      ConnectionStrings__TargetSchema: "Host=cockroachdb;Port=26257;Database=projecty;Username=root;SSL Mode=Disable"
     healthcheck:
       test: ["CMD", "dotnet", "RentalOperations.dll", "--healthcheck", "http://localhost:8200/health/ready"]
       interval: 10s
@@ -554,6 +556,8 @@ services:
         condition: service_healthy
       mongodb:
         condition: service_healthy
+      cockroach-init:
+        condition: service_completed_successfully
       moto-hub:
         condition: service_healthy
       rabbitmq:

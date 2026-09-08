@@ -97,7 +97,16 @@ builder.Services.AddHostedService<ConsumerHostedService>();
 
 builder.Services.AddScoped<IMotorcycleService, MotorcycleService>();
 
-builder.Services.AddScoped<IRentalRepository, RentalRepository>();
+builder.Services.AddScoped<RentalRepository>();
+// Dual write only where the target engine is configured. Without it the service
+// runs on Mongo alone, which is what every stack does until #135 finishes.
+builder.Services.AddScoped<IRentalRepository>(provider =>
+{
+    var target = builder.Configuration.GetConnectionString("TargetSchema");
+    var mongo = provider.GetRequiredService<RentalRepository>();
+    return string.IsNullOrWhiteSpace(target) ? mongo : new DualWriteRentalRepository(
+        mongo, target, provider.GetRequiredService<ILogger<DualWriteRentalRepository>>());
+});
 builder.Services.AddScoped<IRentalService, RentalService>();
 
 var app = builder.Build();
