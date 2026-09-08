@@ -14,6 +14,13 @@ namespace RentalOperations.Controllers
     {
         private readonly IRentalService _rentalService;
 
+        private static ProblemDetails Problem400(string detail) => new()
+        {
+            Status = StatusCodes.Status400BadRequest,
+            Title = "Invalid batch request",
+            Detail = detail
+        };
+
         private ObjectResult Unavailable(Exception exception)
         {
             DependencyFailure.Record(exception);
@@ -159,12 +166,68 @@ namespace RentalOperations.Controllers
             }
         }
 
-        [HttpGet("is-rented/{licencePlate}")]
-        public async Task<IActionResult> IsMotorcycleRented(string licencePlate)
+        /// <summary>
+        /// Leitura em lote, para que compor uma tela não custe uma requisição
+        /// por linha.
+        ///
+        /// O #138 trata isto como contrato, não como otimização: sem o lote o
+        /// N+1 não desaparece, apenas se muda do navegador para o BFF. O teto
+        /// existe porque um lote ilimitado é uma consulta arbitrária escrita
+        /// pelo cliente.
+        /// </summary>
+        [HttpGet("batch")]
+        public async Task<IActionResult> GetRentalsByIds([FromQuery] string? ids)
+        {
+            var requested = (ids ?? string.Empty)
+                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            if (requested.Length == 0)
+            {
+                return BadRequest(Problem400("At least one rental id is required."));
+            }
+            if (requested.Length > RentalService.MaxBatchSize)
+            {
+                return BadRequest(Problem400(
+                    $"A batch may request at most {RentalService.MaxBatchSize} rental ids."));
+            }
+
+            var parsed = new List<Guid>(requested.Length);
+            foreach (var candidate in requested)
+            {
+                if (!Guid.TryParse(candidate, out var id))
+                {
+                    return BadRequest(Problem400($"'{candidate}' is not a rental id."));
+                }
+                parsed.Add(id);
+            }
+
+            try
+            {
+                var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier);
+                if (userIdClaim == null)
+                {
+                    return Forbid();
+                }
+                return Ok(await _rentalService.GetRentalsByIdsAsync(
+                    parsed,
+                    userIdClaim.Value,
+                    User.IsInRole("Admin")));
+            }
+            catch (Exception ex) when (DependencyFailure.IsUnavailable(ex))
+            {
+                return Unavailable(ex);
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(ex.Message);
+            }
+        }
+
+        [HttpGet("is-rented/{motorcycleId:guid}")]
+        public async Task<IActionResult> IsMotorcycleRented(Guid motorcycleId)
         {
             try
             {
-                bool isRented = await _rentalService.IsMotorcycleCurrentlyRentedAsync(licencePlate);
+                bool isRented = await _rentalService.IsMotorcycleCurrentlyRentedAsync(motorcycleId);
                 return Ok(isRented);
             }
             catch (Exception ex) when (DependencyFailure.IsUnavailable(ex))

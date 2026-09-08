@@ -96,7 +96,7 @@ public sealed class SqlRentalRepository(NpgsqlDataSource database) : IRentalRepo
         catch (PostgresException conflict) when (IsActiveRentalConflict(conflict))
         {
             await transaction.RollbackAsync(token);
-            throw new ActiveRentalConflictException(rental.MotorcycleLicencePlate, conflict);
+            throw new ActiveRentalConflictException(rental.MotorcycleId, conflict);
         }
         catch (PostgresException missing)
             when (missing.SqlState == PostgresErrorCodes.ForeignKeyViolation)
@@ -163,6 +163,45 @@ public sealed class SqlRentalRepository(NpgsqlDataSource database) : IRentalRepo
         command.Parameters.AddWithValue("id", rentalId);
         await using var reader = await command.ExecuteReaderAsync(token);
         return await reader.ReadAsync(token) ? Read(reader) : null;
+    }
+
+    /// <summary>
+    /// Um SELECT para muitos ids, em vez de um SELECT por id.
+    ///
+    /// O tamanho do lote é limitado antes de chegar aqui; o `= ANY` recebe um
+    /// arranjo, e não uma lista de parâmetros montada por concatenação, para que
+    /// o plano seja o mesmo qualquer que seja a quantidade de ids -- e para que
+    /// não haja string de SQL sendo construída a partir de entrada do cliente.
+    ///
+    /// Ids desconhecidos simplesmente não voltam. Quem pediu compara o que
+    /// recebeu com o que pediu; o banco não precisa opinar sobre a diferença.
+    /// </summary>
+    public async Task<IReadOnlyList<Rental>> GetRentalsByIdsAsync(
+        IReadOnlyCollection<Guid> ids,
+        CancellationToken token = default)
+    {
+        if (ids.Count == 0)
+        {
+            return [];
+        }
+
+        await using var connection = await database.OpenConnectionAsync(token);
+        await using var command = new NpgsqlCommand(
+            SelectRental + " WHERE r.id = ANY(@ids) ORDER BY r.created_at DESC, r.id DESC",
+            connection);
+        command.Parameters.Add(new NpgsqlParameter("ids", NpgsqlDbType.Array | NpgsqlDbType.Uuid)
+        {
+            Value = ids.ToArray()
+        });
+
+        var rentals = new List<Rental>(ids.Count);
+        await using var reader = await command.ExecuteReaderAsync(token);
+        while (await reader.ReadAsync(token))
+        {
+            rentals.Add(Read(reader));
+        }
+
+        return rentals;
     }
 
     public async Task<CursorPage<Rental>> GetRentalsByUserId(
@@ -245,21 +284,22 @@ public sealed class SqlRentalRepository(NpgsqlDataSource database) : IRentalRepo
     }
 
     public async Task<bool> IsMotorcycleCurrentlyRentedAsync(
-        string licencePlate,
+        Guid motorcycleId,
         CancellationToken token = default)
     {
+        // A junção com motorcycles saiu junto com a placa: a pergunta é sobre o
+        // id, que a própria tabela de aluguéis já guarda.
         await using var connection = await database.OpenConnectionAsync(token);
         await using var command = new NpgsqlCommand("""
             SELECT 1
-              FROM rentals AS r
-              JOIN motorcycles AS m ON m.id = r.motorcycle_id
-             WHERE m.license_plate = @plate
-               AND r.status = 'active'
-               AND r.starts_at <= now()
-               AND r.predicted_ends_at >= now()
+              FROM rentals
+             WHERE motorcycle_id = @motorcycle
+               AND status = 'active'
+               AND starts_at <= now()
+               AND predicted_ends_at >= now()
              LIMIT 1
             """, connection);
-        command.Parameters.AddWithValue("plate", licencePlate);
+        command.Parameters.AddWithValue("motorcycle", motorcycleId);
         return await command.ExecuteScalarAsync(token) is not null;
     }
 
@@ -275,10 +315,10 @@ public sealed class SqlRentalRepository(NpgsqlDataSource database) : IRentalRepo
     {
         await using var connection = await database.OpenConnectionAsync(token);
         await using var command = new NpgsqlCommand(
-            "SELECT license_plate FROM motorcycles WHERE id = @id", connection);
+            "SELECT 1 FROM motorcycles WHERE id = @id", connection);
         command.Parameters.AddWithValue("id", rental.MotorcycleId);
-        return await command.ExecuteScalarAsync(token) is string plate
-            ? new MotorcycleRetiredException(plate)
+        return await command.ExecuteScalarAsync(token) is not null
+            ? new MotorcycleRetiredException(rental.MotorcycleId)
             : new ArgumentException("Motorcycle does not exist.");
     }
 

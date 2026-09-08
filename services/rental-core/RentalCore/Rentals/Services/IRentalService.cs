@@ -13,7 +13,11 @@ namespace RentalOperations.Services
             string userId,
             string? cursor,
             int? pageSize);
-        Task<bool> IsMotorcycleCurrentlyRentedAsync(string licencePlate);
+        Task<IReadOnlyList<ResponseRentalDTO>> GetRentalsByIdsAsync(
+            IReadOnlyCollection<Guid> ids,
+            string userId,
+            bool isAdmin);
+        Task<bool> IsMotorcycleCurrentlyRentedAsync(Guid motorcycleId);
     }
 }
 

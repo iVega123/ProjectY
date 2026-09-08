@@ -45,6 +45,11 @@ namespace MotoHub.Repositories
             return _context.Motorcycles.Find(id);
         }
 
+        public async Task<Motorcycle?> GetByIdAsync(Guid id)
+        {
+            return await _context.Motorcycles.FindAsync(id);
+        }
+
         public void Add(Motorcycle motorcycle)
         {
             _context.Motorcycles.Add(motorcycle);

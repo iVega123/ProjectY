@@ -22,9 +22,16 @@ export const options = {
   summaryTrendStats: ["avg", "min", "med", "max", "p(95)", "p(99)"],
 };
 
-function create(token, plate, key, name) {
+// A fixture semeia a moto n com um id determinístico (load/fixtures/seed-rental-core.sql).
+// O benchmark o calcula em vez de perguntar: um GET a mais por iteração mediria
+// a busca da moto junto com a criação do aluguel, que não é o que este teste afirma.
+function motorcycleId(index) {
+  return "00000000-0000-4000-8000-" + String(index).padStart(12, "0");
+}
+
+function create(token, motorcycle, key, name) {
   return http.post(base + "/api/Rental/create", JSON.stringify({
-    motocycleLicencePlate: plate,
+    motorcycleId: motorcycle,
     startDate: "2026-10-01T00:00:00Z",
     predictedEndDate: "2026-10-08T00:00:00Z",
   }), {
@@ -50,7 +57,7 @@ export function setup() {
   const readyUntil = Date.now() + 40000;
   let warmup;
   do {
-    warmup = create(token, "KAA9999", "warmup-" + run, "warmup");
+    warmup = create(token, motorcycleId(9999), "warmup-" + run, "warmup");
     if (warmup.status === 200 || warmup.status === 201) break;
     sleep(1); // Allow a previously opened breaker to enter half-open after a cleared drill.
   } while (Date.now() < readyUntil);
@@ -74,7 +81,7 @@ export default function(data) {
   // Each VU retains renewed credentials; setup time is included in the expiry check.
   if (!vuCredentials) vuCredentials = data.credentials;
   if (Date.now() >= vuCredentials.expiresAt * 1000 - 30000) vuCredentials = fetchCredentials();
-  const response = create(vuCredentials.token, "KAA" + String(index).padStart(4, "0"),
+  const response = create(vuCredentials.token, motorcycleId(index),
     data.run + "-" + index, "rental-create");
   const created = response.status === 200 || response.status === 201;
   accepted.add(created ? 1 : 0);

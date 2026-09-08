@@ -202,7 +202,11 @@ Partition keys are **always an immutable id, and always per topic**. Never the
 plate: it has already been rewritten in this system
 (`CanonicalizeLegacyMotorcyclePlates`), and a mutable business key would reshard
 the topic at the moment of the correction. For the same reason `rentals` now
-references `motorcycles (id)`.
+references `motorcycles (id)` — in the API as well as in the schema. Creating a
+rental takes a `motorcycleId`; the plate comes back on reads, resolved through
+the join, because a screen needs something a human recognises. Turning a plate
+someone typed into an id is the BFF's job, not the write path's -- see
+[ADR 0014](adr/0014-read-aggregation-at-the-bff.md).
 
 Compatibility is **FULL** — an old consumer survives the producer's upgrade, and
 a new consumer can replay the history. **Protobuf** is the encoding, under

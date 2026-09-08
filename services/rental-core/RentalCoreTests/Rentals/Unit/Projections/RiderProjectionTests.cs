@@ -15,7 +15,7 @@ public sealed class RiderProjectionTests
 {
     private static RentalCreateDto Request() => new()
     {
-        MotocycleLicencePlate = "ABC1D23",
+        MotorcycleId = Guid.NewGuid(),
         StartDate = DateTime.UtcNow.Date.AddDays(1),
         PredictedEndDate = DateTime.UtcNow.Date.AddDays(8)
     };
