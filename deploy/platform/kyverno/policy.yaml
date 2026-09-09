@@ -24,7 +24,7 @@ spec:
         - imageReferences:
             - ghcr.io/ivega123/projecty/*
           failureAction: Audit
-          mutateDigest: true
+          mutateDigest: false
           required: true
           verifyDigest: true
           attestors:
@@ -33,3 +33,5 @@ spec:
                 - keyless:
                     subject: https://github.com/iVega123/ProjectY/.github/workflows/ci.yml@refs/heads/main
                     issuer: https://token.actions.githubusercontent.com
+                    rekor:
+                      url: https://rekor.sigstore.dev

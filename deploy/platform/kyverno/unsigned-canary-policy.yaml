@@ -27,3 +27,5 @@ spec:
                 - keyless:
                     subject: https://github.com/iVega123/ProjectY/.github/workflows/ci.yml@refs/heads/main
                     issuer: https://token.actions.githubusercontent.com
+                    rekor:
+                      url: https://rekor.sigstore.dev

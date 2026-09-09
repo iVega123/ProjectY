@@ -12,3 +12,6 @@ patches:
       - op: replace
         path: /spec/rules/0/verifyImages/0/failureAction
         value: Enforce
+      - op: replace
+        path: /spec/rules/0/verifyImages/0/mutateDigest
+        value: true
