@@ -21,6 +21,7 @@ spec:
           mutateDigest: false
           required: true
           verifyDigest: false
+          cosignOCI11: true
           attestors:
             - count: 1
               entries:
