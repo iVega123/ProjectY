@@ -696,7 +696,7 @@ jobs:
         run: |
           $tools = ./scripts/kind/Install-ProjectYKubernetesTools.ps1
           $policy = (& $tools.Kubectl kustomize deploy/platform/kyverno) -join "`n"
-          if ($LASTEXITCODE -ne 0 -or $policy -notmatch 'validationFailureAction: Enforce') {
+          if ($LASTEXITCODE -ne 0 -or $policy -notmatch 'failureAction: Enforce') {
             throw 'The signed-image admission policy is not enforced.'
           }
 
