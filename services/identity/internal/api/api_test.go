@@ -2,21 +2,31 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"crypto/ed25519"
+	"crypto/hmac"
 	cryptorand "crypto/rand"
+	"crypto/sha256"
+	"database/sql"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"math/rand"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/iVega123/ProjectY/services/identity/internal/accounts"
+	"github.com/iVega123/ProjectY/services/identity/internal/gateway"
 	"github.com/iVega123/ProjectY/services/identity/internal/keys"
+	"github.com/iVega123/ProjectY/services/identity/internal/media"
+	"github.com/iVega123/ProjectY/services/identity/internal/riders"
 	"github.com/iVega123/ProjectY/services/identity/internal/sessions"
 	"github.com/iVega123/ProjectY/services/identity/internal/testdb"
 	"github.com/iVega123/ProjectY/services/identity/internal/tokens"
@@ -200,9 +210,38 @@ func TestOnlyTheDeclaredMethodsAnswer(t *testing.T) {
 
 type fixture struct {
 	routes    *http.ServeMux
+	database  *sql.DB
 	key       keys.Key
+	objects   *fakeObjects
 	lastCnpj  string
 	lastEmail string
+	lastID    string
+}
+
+// envelopeKey é a chave com que o portão assina o envelope do ADR 0008. Os
+// testes das rotas de piloto assinam com ela; que o formato concorda com o
+// portão de verdade é o que o internal/gateway prova, contra um vetor que saiu
+// de lá.
+var envelopeKey = bytes.Repeat([]byte("x"), 32)
+
+// fakeObjects substitui o MinIO. A rota não deveria precisar de armazenamento
+// de objetos de pé para provar quem pode ler o quê.
+type fakeObjects struct {
+	stored map[string][]byte
+	fail   bool
+}
+
+func (f *fakeObjects) Put(_ context.Context, riderID string, sanitized media.Sanitized) (string, error) {
+	if f.fail {
+		return "", errors.New("armazenamento fora do ar")
+	}
+	key := "riders/" + riderID + "/objeto.png"
+	f.stored[key] = sanitized.Image
+	return key, nil
+}
+
+func (f *fakeObjects) Presign(_ context.Context, key string, _ time.Duration) (string, error) {
+	return "https://objetos.example.test/" + key + "?assinado=1", nil
 }
 
 func start(t *testing.T) *fixture {
@@ -222,16 +261,52 @@ func start(t *testing.T) *fixture {
 		t.Fatal(err)
 	}
 
-	service := New(
-		accounts.NewStore(database),
-		sessions.NewStore(database, 7*24*time.Hour),
-		ring,
-		tokens.NewMinter("projecty.identity", []string{"projecty.rental-core"}, 5*time.Minute),
-		"projecty.identity",
-		"http://identity:8095",
-		slog.New(slog.DiscardHandler),
-	)
-	return &fixture{routes: service.Routes(), key: key}
+	envelope, err := gateway.New(envelopeKey, "local-v1", "projecty.identity")
+	if err != nil {
+		t.Fatal(err)
+	}
+	objects := &fakeObjects{stored: map[string][]byte{}}
+
+	service := New(Dependencies{
+		Accounts:  accounts.NewStore(database),
+		Sessions:  sessions.NewStore(database, 7*24*time.Hour),
+		Riders:    riders.NewStore(database),
+		Gateway:   envelope,
+		Guard:     media.NewGuard(sanitizer(t)),
+		Objects:   objects,
+		Ring:      ring,
+		Minter:    tokens.NewMinter("projecty.identity", []string{"projecty.rental-core"}, 5*time.Minute),
+		Issuer:    "projecty.identity",
+		PublicURL: "http://identity:8095",
+		Logger:    slog.New(slog.DiscardHandler),
+	})
+	return &fixture{routes: service.Routes(), database: database, key: key, objects: objects}
+}
+
+// sanitizer sobe um media-guard de mentira que devolve um PNG. O que o
+// media-guard faz de verdade é assunto dele e tem teste lá; o que importa aqui
+// é que o identity só grava o que ele devolveu.
+func sanitizer(t *testing.T) string {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(
+		func(writer http.ResponseWriter, request *http.Request) {
+			if request.URL.Path != "/sanitize" {
+				writer.WriteHeader(http.StatusNotFound)
+				return
+			}
+			body, _ := io.ReadAll(io.LimitReader(request.Body, 1<<20))
+			if bytes.Equal(body, []byte("isto não é uma imagem")) {
+				writer.WriteHeader(http.StatusUnprocessableEntity)
+				return
+			}
+			_ = json.NewEncoder(writer).Encode(map[string]string{
+				"image":       base64.StdEncoding.EncodeToString([]byte("PNG saneado")),
+				"thumbnail":   base64.StdEncoding.EncodeToString([]byte("PNG miniatura")),
+				"contentType": "image/png",
+			})
+		}))
+	t.Cleanup(server.Close)
+	return server.URL
 }
 
 func (f *fixture) body(email, cnpj string) map[string]string {
@@ -253,7 +328,43 @@ func (f *fixture) register(t *testing.T, expected int) string {
 	if response.Code != expected {
 		t.Fatalf("cadastro devolveu %d: %s", response.Code, response.Body)
 	}
+	if response.Code == http.StatusCreated {
+		var created struct {
+			ID string `json:"id"`
+		}
+		decodeInto(t, response.Body.Bytes(), &created)
+		f.lastID = created.ID
+	}
 	return f.lastEmail
+}
+
+// envelope assina como o portão assinaria, para o caminho e o método dados.
+func (f *fixture) envelope(
+	t *testing.T,
+	method, pathAndQuery, subject, roles string,
+) *http.Request {
+	t.Helper()
+	stamp := strconv.FormatInt(time.Now().Unix(), 10)
+	canonical := strings.Join([]string{
+		"v1", "local-v1", subject, roles, stamp, method, pathAndQuery, "projecty.identity",
+	}, "\n")
+	mac := hmac.New(sha256.New, envelopeKey)
+	mac.Write([]byte(canonical))
+
+	request := httptest.NewRequest(method, pathAndQuery, nil)
+	request.Header.Set(gateway.KeyIDHeader, "local-v1")
+	request.Header.Set(gateway.SubjectHeader, subject)
+	request.Header.Set(gateway.RolesHeader, roles)
+	request.Header.Set(gateway.IssuedAtHeader, stamp)
+	request.Header.Set(gateway.SignatureHeader,
+		"v1="+base64.RawURLEncoding.EncodeToString(mac.Sum(nil)))
+	return request
+}
+
+func (f *fixture) send(request *http.Request) *httptest.ResponseRecorder {
+	response := httptest.NewRecorder()
+	f.routes.ServeHTTP(response, request)
+	return response
 }
 
 func (f *fixture) session(t *testing.T) string {

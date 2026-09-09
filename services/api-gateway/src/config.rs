@@ -18,8 +18,7 @@ pub struct Config {
 
 #[derive(Clone, Debug)]
 pub struct ResilienceConfig {
-    pub auth_gate: UpstreamResilienceConfig,
-    pub rider_manager: UpstreamResilienceConfig,
+    pub identity: UpstreamResilienceConfig,
     pub moto_hub: UpstreamResilienceConfig,
     pub rental_operations: UpstreamResilienceConfig,
     pub billing: UpstreamResilienceConfig,
@@ -68,8 +67,7 @@ pub struct AuthConfig {
 
 #[derive(Clone, Debug)]
 pub struct Audiences {
-    pub auth_gate: String,
-    pub rider_manager: String,
+    pub identity: String,
     pub moto_hub: String,
     pub rental_operations: String,
     pub billing: String,
@@ -118,8 +116,7 @@ impl fmt::Debug for SensitiveString {
 
 #[derive(Clone, Debug)]
 pub struct Upstreams {
-    pub auth_gate: Url,
-    pub rider_manager: Url,
+    pub identity: Url,
     pub moto_hub: Url,
     pub rental_operations: Url,
     pub billing: Url,
@@ -127,8 +124,7 @@ pub struct Upstreams {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum UpstreamName {
-    AuthGate,
-    RiderManager,
+    Identity,
     MotoHub,
     RentalOperations,
     Billing,
@@ -148,8 +144,7 @@ impl Config {
             )?,
             healthcheck_timeout: Duration::from_millis(parse_timeout_ms()?),
             upstreams: Upstreams {
-                auth_gate: required_url("GATEWAY_UPSTREAM_AUTH_GATE")?,
-                rider_manager: required_url("GATEWAY_UPSTREAM_RIDER_MANAGER")?,
+                identity: required_url("GATEWAY_UPSTREAM_IDENTITY")?,
                 moto_hub: required_url("GATEWAY_UPSTREAM_MOTO_HUB")?,
                 rental_operations: required_url("GATEWAY_UPSTREAM_RENTAL_OPERATIONS")?,
                 billing: required_url("GATEWAY_UPSTREAM_BILLING")?,
@@ -158,8 +153,7 @@ impl Config {
                 jwks_url: required_absolute_url("GATEWAY_JWKS_URL")?,
                 issuer: required_value("GATEWAY_JWT_ISSUER")?,
                 audiences: Audiences {
-                    auth_gate: required_value("GATEWAY_JWT_AUDIENCE_AUTH_GATE")?,
-                    rider_manager: required_value("GATEWAY_JWT_AUDIENCE_RIDER_MANAGER")?,
+                    identity: required_value("GATEWAY_JWT_AUDIENCE_IDENTITY")?,
                     moto_hub: required_value("GATEWAY_JWT_AUDIENCE_MOTO_HUB")?,
                     rental_operations: required_value("GATEWAY_JWT_AUDIENCE_RENTAL_OPERATIONS")?,
                     billing: required_value("GATEWAY_JWT_AUDIENCE_BILLING")?,
@@ -193,8 +187,7 @@ impl Config {
                 auth: token_bucket_from_env("AUTH", 10, 5)?,
             },
             resilience: ResilienceConfig {
-                auth_gate: upstream_resilience_from_env("AUTH_GATE", 1500)?,
-                rider_manager: upstream_resilience_from_env("RIDER_MANAGER", 2000)?,
+                identity: upstream_resilience_from_env("IDENTITY", 2000)?,
                 moto_hub: upstream_resilience_from_env("MOTO_HUB", 2000)?,
                 rental_operations: upstream_resilience_from_env("RENTAL_OPERATIONS", 2500)?,
                 // A leitura da nota é uma consulta por chave primária numa JVM
@@ -217,13 +210,16 @@ impl Config {
 impl Upstreams {
     pub fn resolve(&self, path: &str) -> Option<(UpstreamName, &Url)> {
         let path = path.to_ascii_lowercase();
-        if path == "/api/auth" || path.starts_with("/api/auth/") {
-            Some((UpstreamName::AuthGate, &self.auth_gate))
-        } else if path == "/api/riders"
+        // Credencial e piloto saem do mesmo processo desde o #136: o `sub` do
+        // token É o identificador do piloto, e mantê-los separados obrigava um
+        // dos dois lados a guardar uma cópia do outro.
+        if path == "/api/auth"
+            || path.starts_with("/api/auth/")
+            || path == "/api/riders"
             || path.starts_with("/api/riders/")
             || path == "/update-image"
         {
-            Some((UpstreamName::RiderManager, &self.rider_manager))
+            Some((UpstreamName::Identity, &self.identity))
         } else if path == "/api/motorcycles" || path.starts_with("/api/motorcycles/") {
             Some((UpstreamName::MotoHub, &self.moto_hub))
         } else if path == "/api/rental" || path.starts_with("/api/rental/") {
@@ -239,8 +235,7 @@ impl Upstreams {
 impl Audiences {
     pub fn for_upstream(&self, upstream: UpstreamName) -> &str {
         match upstream {
-            UpstreamName::AuthGate => &self.auth_gate,
-            UpstreamName::RiderManager => &self.rider_manager,
+            UpstreamName::Identity => &self.identity,
             UpstreamName::MotoHub => &self.moto_hub,
             UpstreamName::RentalOperations => &self.rental_operations,
             UpstreamName::Billing => &self.billing,
@@ -251,8 +246,7 @@ impl Audiences {
 impl ResilienceConfig {
     pub fn for_upstream(&self, upstream: UpstreamName) -> UpstreamResilienceConfig {
         match upstream {
-            UpstreamName::AuthGate => self.auth_gate,
-            UpstreamName::RiderManager => self.rider_manager,
+            UpstreamName::Identity => self.identity,
             UpstreamName::MotoHub => self.moto_hub,
             UpstreamName::RentalOperations => self.rental_operations,
             UpstreamName::Billing => self.billing,
@@ -261,9 +255,8 @@ impl ResilienceConfig {
 }
 
 impl UpstreamName {
-    pub const ALL: [Self; 5] = [
-        Self::AuthGate,
-        Self::RiderManager,
+    pub const ALL: [Self; 4] = [
+        Self::Identity,
         Self::MotoHub,
         Self::RentalOperations,
         Self::Billing,
@@ -271,8 +264,7 @@ impl UpstreamName {
 
     pub const fn as_str(self) -> &'static str {
         match self {
-            Self::AuthGate => "auth_gate",
-            Self::RiderManager => "rider_manager",
+            Self::Identity => "identity",
             Self::MotoHub => "moto_hub",
             Self::RentalOperations => "rental_operations",
             Self::Billing => "billing",
@@ -465,8 +457,7 @@ mod tests {
 
     fn upstreams() -> Upstreams {
         Upstreams {
-            auth_gate: Url::parse("http://auth-gate:8080/").unwrap(),
-            rider_manager: Url::parse("http://rider-manager:8000/").unwrap(),
+            identity: Url::parse("http://identity:8095/").unwrap(),
             moto_hub: Url::parse("http://moto-hub:8100/").unwrap(),
             rental_operations: Url::parse("http://rental-operations:8200/").unwrap(),
             billing: Url::parse("http://billing:8094/").unwrap(),
@@ -479,11 +470,15 @@ mod tests {
 
         assert_eq!(
             upstreams.resolve("/api/auth/login").map(|route| route.0),
-            Some(UpstreamName::AuthGate)
+            Some(UpstreamName::Identity)
         );
         assert_eq!(
             upstreams.resolve("/api/Riders/123").map(|route| route.0),
-            Some(UpstreamName::RiderManager)
+            Some(UpstreamName::Identity)
+        );
+        assert_eq!(
+            upstreams.resolve("/update-image").map(|route| route.0),
+            Some(UpstreamName::Identity)
         );
         assert_eq!(
             upstreams.resolve("/api/motorcycles").map(|route| route.0),

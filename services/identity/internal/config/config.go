@@ -47,6 +47,32 @@ type Config struct {
 
 	AdminEmail    string
 	AdminPassword string
+
+	// O envelope do ADR 0008: a chave com que o portão assina, e a audiência
+	// deste serviço. Precisam bater com GATEWAY_IDENTITY_SIGNING_KEY e
+	// GATEWAY_JWT_AUDIENCE_IDENTITY, ou nenhuma rota de piloto responde.
+	EnvelopeKey      []byte
+	EnvelopeKeyID    string
+	EnvelopeAudience string
+
+	MediaGuardURL string
+	ObjectStore   ObjectStore
+
+	// Kafka é opcional: sem broker o identity serve login e leitura
+	// normalmente, e os fatos ficam retidos no outbox até haver para onde
+	// mandá-los.
+	KafkaBrokers      []string
+	SchemaRegistryURL string
+	Contracts         string
+}
+
+// ObjectStore é onde a foto da CNH mora depois de saneada.
+type ObjectStore struct {
+	Endpoint  string
+	AccessKey string
+	SecretKey string
+	Bucket    string
+	Secure    bool
 }
 
 // Load monta a configuração a partir do ambiente.
@@ -102,6 +128,33 @@ func Load() (Config, error) {
 	// aleatórios em base64url), então já tem a entropia toda; o que falta é ele
 	// ter exatamente os 32 bytes que o AES-256 exige.
 	config.KeyEncryptionKey = sha256.Sum256([]byte(sealingSecret))
+
+	envelopeKey, err := required("GATEWAY_IDENTITY_SIGNING_KEY")
+	if err != nil {
+		return Config{}, err
+	}
+	config.EnvelopeKey = []byte(envelopeKey)
+	config.EnvelopeKeyID = value("GATEWAY_IDENTITY_SIGNING_KEY_ID", "local-v1")
+	if config.EnvelopeAudience, err = required("IDENTITY_ENVELOPE_AUDIENCE"); err != nil {
+		return Config{}, err
+	}
+
+	config.MediaGuardURL = strings.TrimRight(value("MEDIA_GUARD_URL", "http://media-guard:8080"), "/")
+	config.ObjectStore = ObjectStore{
+		Endpoint:  value("MINIO_ENDPOINT", "minio:9000"),
+		AccessKey: value("MINIO_ACCESS_KEY", ""),
+		SecretKey: value("MINIO_SECRET_KEY", ""),
+		Bucket:    value("MINIO_BUCKET", "my-bucket"),
+		Secure:    value("MINIO_SECURE", "false") == "true",
+	}
+
+	for _, broker := range strings.Split(value("KAFKA_BOOTSTRAP_SERVERS", ""), ",") {
+		if trimmed := strings.TrimSpace(broker); trimmed != "" {
+			config.KafkaBrokers = append(config.KafkaBrokers, trimmed)
+		}
+	}
+	config.SchemaRegistryURL = strings.TrimRight(value("SCHEMA_REGISTRY_URL", ""), "/")
+	config.Contracts = value("IDENTITY_CONTRACTS_DIR", "/event-contracts")
 
 	config.AdminEmail = value("IDENTITY_ADMIN_EMAIL", "")
 	config.AdminPassword = value("IDENTITY_ADMIN_PASSWORD", "")

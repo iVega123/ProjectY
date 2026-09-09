@@ -83,19 +83,8 @@ function New-RabbitMqPasswordHash {
 $localSuffix = (New-RandomValue -ByteCount 6).ToLowerInvariant()
 $values = [ordered]@{
     SWAGGER_ENABLED                   = "true"
-    AUTH_GATE_POSTGRES_DB             = "AuthGateDB"
-    MOTO_HUB_POSTGRES_DB              = "MotoHubDB"
-    RIDER_MANAGER_POSTGRES_DB         = "RiderManagerDB"
-    POSTGRES_USER                     = "projecty_$localSuffix"
-    POSTGRES_PASSWORD                 = (New-RandomValue)
-    PGADMIN_EMAIL                     = "admin@projecty.local"
-    PGADMIN_PASSWORD                  = (New-RandomValue)
     RABBITMQ_ADMIN_USER               = "projecty_admin_$localSuffix"
     RABBITMQ_ADMIN_PASSWORD           = (New-RandomValue)
-    AUTH_GATE_RABBITMQ_USER           = "auth_gate_$localSuffix"
-    AUTH_GATE_RABBITMQ_PASSWORD       = (New-RandomValue)
-    RIDER_MANAGER_RABBITMQ_USER       = "rider_manager_$localSuffix"
-    RIDER_MANAGER_RABBITMQ_PASSWORD   = (New-RandomValue)
     MOTO_HUB_RABBITMQ_USER            = "moto_hub_$localSuffix"
     MOTO_HUB_RABBITMQ_PASSWORD        = (New-RandomValue)
     RENTAL_OPERATIONS_RABBITMQ_USER   = "rental_operations_$localSuffix"
@@ -109,9 +98,7 @@ $values = [ordered]@{
     MINIO_PASSWORD                    = (New-RandomValue)
     GRAFANA_USER                      = "projecty_$localSuffix"
     GRAFANA_PASSWORD                  = (New-RandomValue)
-    AUTH_GATE_JWT_SIGNING_KEY         = (New-RandomValue)
     MOTO_HUB_JWT_SIGNING_KEY          = (New-RandomValue)
-    RIDER_MANAGER_JWT_SIGNING_KEY     = (New-RandomValue)
     RENTAL_OPERATIONS_JWT_SIGNING_KEY = (New-RandomValue)
     GATEWAY_IDENTITY_SIGNING_KEY      = (New-RandomValue)
     # Sela a semente Ed25519 que o identity guarda em signing_keys. Não é a
@@ -131,20 +118,6 @@ $rabbitMqUsers = @(
         password_hash = (New-RabbitMqPasswordHash -Password $values.RABBITMQ_ADMIN_PASSWORD)
         hashing_algorithm = "rabbit_password_hashing_sha256"
         tags = @("administrator")
-        limits = @{}
-    },
-    [ordered]@{
-        name = $values.AUTH_GATE_RABBITMQ_USER
-        password_hash = (New-RabbitMqPasswordHash -Password $values.AUTH_GATE_RABBITMQ_PASSWORD)
-        hashing_algorithm = "rabbit_password_hashing_sha256"
-        tags = @()
-        limits = @{}
-    },
-    [ordered]@{
-        name = $values.RIDER_MANAGER_RABBITMQ_USER
-        password_hash = (New-RabbitMqPasswordHash -Password $values.RIDER_MANAGER_RABBITMQ_PASSWORD)
-        hashing_algorithm = "rabbit_password_hashing_sha256"
-        tags = @()
         limits = @{}
     },
     [ordered]@{
@@ -179,10 +152,7 @@ $rabbitMqUsers = @(
 
 $rabbitMqPermissions = @(
     [ordered]@{ user = $values.RABBITMQ_ADMIN_USER; vhost = "projecty"; configure = ".*"; write = ".*"; read = ".*" },
-    [ordered]@{ user = $values.RABBITMQ_ADMIN_USER; vhost = "projecty-rider"; configure = ".*"; write = ".*"; read = ".*" },
     [ordered]@{ user = $values.RABBITMQ_ADMIN_USER; vhost = "projecty-rental"; configure = ".*"; write = ".*"; read = ".*" },
-    [ordered]@{ user = $values.AUTH_GATE_RABBITMQ_USER; vhost = "projecty-rider"; configure = "^(cmd\.rider\.register|cmd\.rider\.store-document)$"; write = "^(amq\.default|cmd\.rider\.register|cmd\.rider\.store-document)$"; read = "^$" },
-    [ordered]@{ user = $values.RIDER_MANAGER_RABBITMQ_USER; vhost = "projecty-rider"; configure = "^(cmd\.rider\.register(\.(retry\.[1-3]|redelivery|dead))?|cmd\.rider\.store-document(\.(retry\.[1-3]|redelivery|dead))?|cmd\.rider\.dead)$"; write = "^(amq\.default|cmd\.rider\.register(\.(retry\.[1-3]|redelivery|dead))?|cmd\.rider\.store-document(\.(retry\.[1-3]|redelivery|dead))?|cmd\.rider\.dead)$"; read = "^(cmd\.rider\.register(\.(retry\.[1-3]|redelivery|dead))?|cmd\.rider\.store-document(\.(retry\.[1-3]|redelivery|dead))?|cmd\.rider\.dead)$" },
     [ordered]@{ user = $values.MOTO_HUB_RABBITMQ_USER; vhost = "projecty-rental"; configure = "^cmd\.rental\.update-licence$"; write = "^(amq\.default|cmd\.rental\.update-licence)$"; read = "^$" },
     [ordered]@{ user = $values.RENTAL_OPERATIONS_RABBITMQ_USER; vhost = "projecty-rental"; configure = "^(cmd\.rental\.update-licence(\.(retry\.[1-3]|redelivery|dead))?|cmd\.rental\.licence-update\.dead)$"; write = "^(amq\.default|cmd\.rental\.update-licence(\.(retry\.[1-3]|redelivery|dead))?|cmd\.rental\.licence-update\.dead)$"; read = "^(cmd\.rental\.update-licence(\.(retry\.[1-3]|redelivery|dead))?|cmd\.rental\.licence-update\.dead)$" },
     [ordered]@{ user = $values.RENTAL_CORE_RABBITMQ_USER; vhost = "projecty"; configure = ".*"; write = ".*"; read = ".*" },
@@ -193,7 +163,6 @@ $rabbitMqDefinitions = [ordered]@{
     users = $rabbitMqUsers
     vhosts = @(
         [ordered]@{ name = "projecty" },
-        [ordered]@{ name = "projecty-rider" },
         [ordered]@{ name = "projecty-rental" }
     )
     permissions = $rabbitMqPermissions
@@ -202,8 +171,6 @@ $rabbitMqDefinitions = [ordered]@{
     global_parameters = @()
     policies = @()
     queues = @(
-        [ordered]@{ name = "cmd.rider.register"; vhost = "projecty-rider"; durable = $true; auto_delete = $false; arguments = @{} },
-        [ordered]@{ name = "cmd.rider.store-document"; vhost = "projecty-rider"; durable = $true; auto_delete = $false; arguments = @{} },
         [ordered]@{ name = "cmd.rental.update-licence"; vhost = "projecty-rental"; durable = $true; auto_delete = $false; arguments = @{} }
     )
     exchanges = @()

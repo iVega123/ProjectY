@@ -48,7 +48,7 @@ source locations are in the
 
 | Area | Current state |
 |---|---|
-| Audited baseline | Four ASP.NET Core services under `services/`: `AuthGate`, `MotoHub`, `RiderManager`, and `RentalOperations` |
+| Audited baseline | Four ASP.NET Core services under `services/`: `AuthGate`, `MotoHub`, `RiderManager`, and `RentalOperations`. None of the four remains: they were merged into `rental-core` (#135) and `identity` (#136). |
 | Data and messaging | CockroachDB for `rental-core`, PostgreSQL for the rest, RabbitMQ, and MinIO |
 | Active observability | Application OTLP exporters, OpenTelemetry Collector, Prometheus, Tempo, Loki, and Grafana |
 | Retired observability | The unauthenticated Elasticsearch, Logstash, and Kibana stack |
@@ -150,7 +150,7 @@ commit SHA and `latest` tags. Verification should use the immutable digest print
 by the workflow or returned by `docker buildx imagetools inspect`:
 
 ```bash
-IMAGE=ghcr.io/ivega123/projecty/auth-gate
+IMAGE=ghcr.io/ivega123/projecty/identity
 DIGEST=sha256:<published-digest>
 
 cosign verify "$IMAGE@$DIGEST" \
@@ -160,7 +160,7 @@ cosign verify "$IMAGE@$DIGEST" \
 gh attestation verify "oci://$IMAGE@$DIGEST" --repo iVega123/ProjectY
 ```
 
-The same commands apply to `moto-hub`, `rental-operations`, and `rider-manager`
+The same commands apply to `rental-core`, `billing`, `media-guard` and the rest
 under `ghcr.io/ivega123/projecty/`. The keyless signature binds the image to this
 repository's `main` workflow identity; the second command retrieves and verifies
 its GitHub-hosted SLSA build provenance. See the

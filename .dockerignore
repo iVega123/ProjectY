@@ -1,13 +1,7 @@
 **
-!services/AuthGate/
-!services/AuthGate/AuthGate/
-!services/AuthGate/AuthGate/**
 !services/rental-core/
 !services/rental-core/RentalCore/
 !services/rental-core/RentalCore/**
-!services/RiderManager/
-!services/RiderManager/RiderManager/
-!services/RiderManager/RiderManager/**
 !Shared/
 !Shared/**
 !contracts/

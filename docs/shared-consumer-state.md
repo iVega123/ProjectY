@@ -32,7 +32,6 @@ Validation:
 Reproduce:
 
 ```sh
-dotnet test services/RiderManager/RiderManagerTests/RiderManagerTests.csproj --filter FullyQualifiedName~InboxProcessorTests
 dotnet test services/rental-core/RentalCoreTests/RentalCoreTests.csproj --filter FullyQualifiedName~PublisherChannelSoakTests
 ```
 

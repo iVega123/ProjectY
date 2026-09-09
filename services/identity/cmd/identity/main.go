@@ -29,9 +29,13 @@ import (
 	"github.com/iVega123/ProjectY/services/identity/internal/accounts"
 	"github.com/iVega123/ProjectY/services/identity/internal/api"
 	"github.com/iVega123/ProjectY/services/identity/internal/config"
+	"github.com/iVega123/ProjectY/services/identity/internal/gateway"
+	"github.com/iVega123/ProjectY/services/identity/internal/kafka"
 	"github.com/iVega123/ProjectY/services/identity/internal/keys"
 	"github.com/iVega123/ProjectY/services/identity/internal/legacy"
+	"github.com/iVega123/ProjectY/services/identity/internal/media"
 	"github.com/iVega123/ProjectY/services/identity/internal/passwords"
+	"github.com/iVega123/ProjectY/services/identity/internal/riders"
 	"github.com/iVega123/ProjectY/services/identity/internal/sessions"
 	"github.com/iVega123/ProjectY/services/identity/internal/telemetry"
 	"github.com/iVega123/ProjectY/services/identity/internal/tokens"
@@ -147,16 +151,61 @@ func serve(settings config.Config, database *sql.DB, logger *slog.Logger) error 
 		}
 	}
 
+	envelope, err := gateway.New(
+		settings.EnvelopeKey, settings.EnvelopeKeyID, settings.EnvelopeAudience)
+	if err != nil {
+		return err
+	}
+
+	riderStore := riders.NewStore(database)
+	objects, err := media.NewObjects(
+		settings.ObjectStore.Endpoint, settings.ObjectStore.AccessKey,
+		settings.ObjectStore.SecretKey, settings.ObjectStore.Bucket, settings.ObjectStore.Secure)
+	if err != nil {
+		return fmt.Errorf("abrindo o armazenamento de objetos: %w", err)
+	}
+	if err := objects.EnsureBucket(ctx); err != nil {
+		// Não é motivo para não subir: o bucket pode aparecer depois, e o
+		// resto do serviço -- login, JWKS -- não depende dele.
+		logger.Warn("bucket da CNH indisponível na subida", slog.Any("error", err))
+	}
+
 	sessionStore := sessions.NewStore(database, settings.RefreshTokenTTL)
-	service := api.New(
-		accountStore,
-		sessionStore,
-		ring,
-		tokens.NewMinter(settings.Issuer, settings.Audiences, settings.AccessTokenTTL),
-		settings.Issuer,
-		settings.PublicURL,
-		logger,
-	)
+	service := api.New(api.Dependencies{
+		Accounts:  accountStore,
+		Sessions:  sessionStore,
+		Riders:    riderStore,
+		Gateway:   envelope,
+		Guard:     media.NewGuard(settings.MediaGuardURL),
+		Objects:   objects,
+		Ring:      ring,
+		Minter:    tokens.NewMinter(settings.Issuer, settings.Audiences, settings.AccessTokenTTL),
+		Issuer:    settings.Issuer,
+		PublicURL: settings.PublicURL,
+		Logger:    logger,
+	})
+
+	// Kafka é opcional na subida. Sem broker configurado o identity serve
+	// login e leitura normalmente, e apenas não conta nada -- o que é a
+	// degradação certa para um serviço que está no caminho de toda entrada.
+	if len(settings.KafkaBrokers) > 0 {
+		registry := kafka.NewRegistry(settings.SchemaRegistryURL, settings.Contracts)
+		relay, err := kafka.NewRelay(database, settings.KafkaBrokers, registry, logger)
+		if err != nil {
+			return fmt.Errorf("abrindo o produtor: %w", err)
+		}
+		defer relay.Close()
+		go relay.Run(ctx)
+
+		consumer, err := kafka.NewConsumer(settings.KafkaBrokers, riderStore, logger)
+		if err != nil {
+			return fmt.Errorf("abrindo o consumidor: %w", err)
+		}
+		defer consumer.Close()
+		go consumer.Run(ctx)
+	} else {
+		logger.Warn("sem KAFKA_BOOTSTRAP_SERVERS: os fatos do piloto ficam no outbox")
+	}
 
 	mux := service.Routes()
 	mux.HandleFunc("GET /health/live", func(writer http.ResponseWriter, _ *http.Request) {

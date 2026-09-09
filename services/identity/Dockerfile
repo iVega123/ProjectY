@@ -10,6 +10,10 @@ COPY services/identity/go.mod services/identity/go.sum ./
 RUN go mod download
 COPY services/identity ./
 COPY deploy/db/sql /src/deploy/db/sql
+# Os contratos vão para a imagem final: a relay resolve o id de schema lendo
+# topics.json e o .proto, e o registry só serve para recusar um contrato
+# incompatível no momento do registro -- não para estar no caminho da mensagem.
+COPY contracts /src/contracts
 # gofmt é o `dotnet format --verify-no-changes` desta linguagem, e `go vet` pega
 # a classe de erro que o compilador deixa passar. Os dois rodam no build para o
 # desenvolvedor não descobrir só no CI.
@@ -25,6 +29,7 @@ RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/identity ./cmd/ide
 FROM gcr.io/distroless/static-debian13:nonroot AS final
 WORKDIR /app
 COPY --from=builder --chown=nonroot:nonroot /out/identity /app/identity
+COPY --from=builder /src/contracts /event-contracts
 USER nonroot:nonroot
 EXPOSE 8095
 # Sem curl e sem shell: o probe do Compose é `identity healthcheck`, o próprio

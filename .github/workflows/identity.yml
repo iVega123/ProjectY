@@ -30,6 +30,16 @@ jobs:
       - name: Check formatting
         run: test -z "$(gofmt -l .)"
       - run: go vet ./...
+      # O código gerado a partir de contracts/events é versionado, ao contrário
+      # do que fazem o billing e o rental-core, que geram no build: sem isso,
+      # quem roda "go test ./..." precisaria de protoc instalado, e a linguagem
+      # inteira parte do princípio de que "go test" funciona sozinho. Este passo
+      # é o que impede a cópia versionada de envelhecer em silêncio.
+      - name: Check the generated event types are current
+        working-directory: .
+        run: |
+          ./services/identity/generate-events.sh
+          git diff --exit-code -- services/identity/internal/events
       # -p 1 porque os pacotes dividem um banco só, e aplicar o schema em
       # paralelo faz o CockroachDB recusar com "table is being added". Um banco
       # por pacote custaria mais tempo do que a paralelização devolveria.

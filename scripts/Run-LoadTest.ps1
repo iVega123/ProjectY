@@ -92,8 +92,6 @@ try {
     if ($Polyglot) { $startServices += @('console', 'telemetry', 'risk-pricing') }
     Compose up @build -d --wait --wait-timeout 300 @startServices
     # Only this generated project and its fresh, separately named volumes are touched.
-    Get-Content load/fixtures/seed-rider.sql -Raw | docker compose -p $project -f $fixture exec -T postgres sh -c 'exec psql -U "$POSTGRES_USER" -d "$RIDER_MANAGER_POSTGRES_DB" -v ON_ERROR_STOP=1'
-    if ($LASTEXITCODE) { throw 'Rider fixture failed.' }
     Get-Content load/fixtures/seed-rental-core.sql -Raw | docker compose -p $project -f $fixture exec -T cockroachdb cockroach sql --insecure --database=projecty
     if ($LASTEXITCODE) { throw 'Rental-core fixture failed.' }
     Compose exec -T redis redis-cli FLUSHDB

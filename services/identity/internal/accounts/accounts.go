@@ -73,6 +73,13 @@ type Registration struct {
 	DateOfBirth  time.Time
 	CNHNumber    string
 	CNHType      string
+	// Verified é o que o tipo de CNH já permite dizer no momento do cadastro.
+	//
+	// A linha nasce com o mesmo valor que o fato `rider.verified` carrega. Deixar
+	// a coluna em false e o evento em true faria a leitura do registro e a
+	// projeção do rental-core discordarem sobre o mesmo piloto -- e as duas
+	// estariam "certas", cada uma segundo a sua fonte.
+	Verified bool
 }
 
 // Store é o acesso às tabelas de identidade.
@@ -96,7 +103,16 @@ func Normalize(email string) string {
 // nada, e um usuário sem registro de piloto é um piloto que o risk-pricing não
 // consegue cruzar com a CNH que o OCR leu. Meio cadastro é pior que nenhum,
 // porque parece completo.
-func (s *Store) RegisterRider(ctx context.Context, registration Registration) (User, error) {
+//
+// O `within` roda DENTRO da mesma transação, e existe para o fato do cadastro
+// entrar no outbox junto com a linha. Um cadastro que grava e não conta deixa a
+// projeção do rental-core sem o piloto -- ou seja, alguém que se cadastrou e
+// não consegue alugar, sem nenhum erro em lugar nenhum.
+func (s *Store) RegisterRider(
+	ctx context.Context,
+	registration Registration,
+	within func(context.Context, *sql.Tx, User) error,
+) (User, error) {
 	user := User{
 		Email:        strings.TrimSpace(registration.Email),
 		Name:         registration.Name,
@@ -120,12 +136,18 @@ func (s *Store) RegisterRider(ctx context.Context, registration Registration) (U
 		); err != nil {
 			return err
 		}
-		_, err := transaction.ExecContext(ctx,
-			`INSERT INTO riders (user_id, cnpj, date_of_birth, cnh_number, cnh_type)
-			 VALUES ($1, $2, $3, $4, $5)`,
+		if _, err := transaction.ExecContext(ctx,
+			`INSERT INTO riders (user_id, cnpj, date_of_birth, cnh_number, cnh_type, verified)
+			 VALUES ($1, $2, $3, $4, $5, $6)`,
 			user.ID, registration.CNPJ, registration.DateOfBirth,
-			registration.CNHNumber, registration.CNHType)
-		return err
+			registration.CNHNumber, registration.CNHType, registration.Verified,
+		); err != nil {
+			return err
+		}
+		if within == nil {
+			return nil
+		}
+		return within(ctx, transaction, user)
 	})
 	if err != nil {
 		return User{}, translate(err)

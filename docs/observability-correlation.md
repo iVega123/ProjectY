@@ -9,7 +9,7 @@ Compose environment.
 ![Tempo trace correlated with Loki logs](images/observability-correlation.png)
 
 The capture shows the expected `401` authentication probe crossing
-`api-gateway` and `auth-gate`, followed by the Tempo **Logs for this trace**
+`api-gateway` and `identity`, followed by the Tempo **Logs for this trace**
 navigation. Loki returns the request log lines filtered by the same trace ID.
 
 ## Generate a trace with a known ID
@@ -75,7 +75,7 @@ $exemplars.data.exemplars | Where-Object { $_.labels.trace_id -eq $traceId }
 
 ## Trace to logs
 
-1. In Tempo, select the `auth-gate` server span.
+1. In Tempo, select the `identity` server span.
 2. Select **Logs for this trace** (called **Logs for this span** in earlier
    Grafana versions).
 3. Confirm that the generated Loki query contains both `service_name` and the
@@ -86,7 +86,7 @@ Loki's `service_name` label. A raw equivalent is:
 
 ```powershell
 $logql = [uri]::EscapeDataString(
-    "{service_name=~`"api-gateway|auth-gate`"} | trace_id = `"$traceId`""
+    "{service_name=~`"api-gateway|identity`"} | trace_id = `"$traceId`""
 )
 $logs = Invoke-RestMethod `
     -Uri "http://localhost:3100/loki/api/v1/query_range?query=$logql&limit=100"
@@ -101,11 +101,11 @@ $logs.data.result
 
 To prove the error path, register a unique local rider twice while supplying a
 known `traceparent` on the second request. The duplicate request returns `400`
-and AuthGate emits `Failed to create rider user` at error level. This query must
+and identity logs the failure at error level. This query must
 return that line, and its **TraceID** link must open the corresponding trace:
 
 ```logql
-{service_name="auth-gate"} | detected_level = "error" | trace_id = "<trace-id>"
+{service_name="identity"} | detected_level = "error" | trace_id = "<trace-id>"
 ```
 
 This drill creates a test account in the local database; use unique email,
@@ -115,8 +115,9 @@ CNPJ, and CNH values or reset only the disposable local environment first.
 
 The Tempo datasource obtains its service map from metrics generated from
 traces. After the authentication request, the graph must include
-`user -> api-gateway -> auth-gate`. A successful rider registration also flows
-through the transactional outbox and must add `auth-gate -> rider-manager`.
+`user -> api-gateway -> identity`. A successful rider registration also writes
+the fact to the transactional outbox, and the relay carries the same trace to
+Kafka.
 
 Check the generated graph series directly with:
 

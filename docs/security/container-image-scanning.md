@@ -1,13 +1,14 @@
 # Container image SBOM and vulnerability gate
 
-The root CI workflow builds every changed service that currently has a Dockerfile:
-AuthGate, MotoHub, RentalOperations, and RiderManager. A change to the CI workflow
-builds all four. References in `deploy/overlays/selfhost/compose.yaml` whose
-build contexts do not yet exist are outside this gate until their Dockerfiles
-are added.
+The root CI workflow builds every changed service that has a Dockerfile:
+`rental-core`, `identity`, `api-gateway`, `media-guard`, `telemetry`,
+`risk-pricing`, `console` and `billing`. A change to the CI workflow builds all
+of them.
 
-Each current image uses the repository root as its build context, and the root
-`.dockerignore` limits that context to the four application projects and `Shared/`.
+The images that need generated code or the shared schema — `rental-core`,
+`identity`, `billing` and `risk-pricing` — use the repository root as their build
+context, and the root `.dockerignore` limits that context to the projects that
+belong in it plus `contracts/`, `Shared/` and `deploy/db/sql`.
 This makes the Dockerfiles self-contained for Visual Studio and command-line builds
 without sending `.git/` or local secrets. The equivalent standalone commands are:
 

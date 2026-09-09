@@ -28,18 +28,26 @@ pub fn requires_revocation_check(method: &Method, path: &str, upstream: Upstream
 pub fn access_for(method: &Method, path: &str, upstream: UpstreamName) -> Access {
     let path = path.to_ascii_lowercase();
     match upstream {
-        UpstreamName::AuthGate
+        // Sair é apresentar o refresh token, e renovar também. Os dois são
+        // públicos aqui porque o portão NÃO sabe validar um refresh token --
+        // ele é opaco, e a prova de posse é o identity procurá-lo. Exigir um
+        // access token nessas rotas quebraria justamente o caso normal: quem
+        // renova é quem já está com o access token vencido.
+        UpstreamName::Identity
             if method == Method::POST
                 && matches!(
                     path.as_str(),
-                    "/api/auth/login" | "/api/auth/register/rider"
+                    "/api/auth/login"
+                        | "/api/auth/register/rider"
+                        | "/api/auth/refresh"
+                        | "/api/auth/logout"
                 ) =>
         {
             Access::Public
         }
         UpstreamName::MotoHub if motorcycle_read_route(method, &path) => Access::Authenticated,
         UpstreamName::MotoHub => Access::Admin,
-        UpstreamName::RiderManager if rider_admin_route(method, &path) => Access::Admin,
+        UpstreamName::Identity if rider_admin_route(method, &path) => Access::Admin,
         UpstreamName::RentalOperations if rental_admin_route(method, &path) => Access::Admin,
         // O billing não tem API de escrita, e o portão não deveria fingir que
         // tem. Qualquer coisa que não seja leitura para lá só faz sentido vinda
@@ -88,13 +96,27 @@ mod tests {
     use super::*;
 
     #[test]
-    fn only_login_and_registration_are_public() {
+    fn the_public_routes_are_the_ones_reached_without_a_token() {
+        for path in [
+            "/api/auth/login",
+            "/api/auth/register/rider",
+            "/api/auth/refresh",
+            "/api/auth/logout",
+        ] {
+            assert_eq!(
+                access_for(&Method::POST, path, UpstreamName::Identity),
+                Access::Public,
+                "{path}"
+            );
+        }
+        // Tudo o mais no identity exige token, inclusive um POST inventado
+        // dentro do mesmo prefixo.
         assert_eq!(
-            access_for(&Method::POST, "/api/auth/login", UpstreamName::AuthGate),
-            Access::Public
+            access_for(&Method::POST, "/api/auth/promote", UpstreamName::Identity),
+            Access::Authenticated
         );
         assert_eq!(
-            access_for(&Method::POST, "/api/auth/logout", UpstreamName::AuthGate),
+            access_for(&Method::PUT, "/update-image", UpstreamName::Identity),
             Access::Authenticated
         );
     }
@@ -102,11 +124,7 @@ mod tests {
     #[test]
     fn maps_legacy_admin_routes_at_the_edge() {
         assert_eq!(
-            access_for(
-                &Method::GET,
-                "/api/riders/user-1",
-                UpstreamName::RiderManager
-            ),
+            access_for(&Method::GET, "/api/riders/user-1", UpstreamName::Identity),
             Access::Admin
         );
         assert_eq!(
