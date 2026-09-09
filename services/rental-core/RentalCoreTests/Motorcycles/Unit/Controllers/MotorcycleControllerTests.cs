@@ -6,6 +6,7 @@ using MotoHub.Controllers;
 using MotoHub.DTOs;
 using MotoHub.Entities;
 using MotoHub.Services;
+using RentalCore.Errors;
 using ProjectY.Shared.Pagination;
 using System.Security.Claims;
 
@@ -95,15 +96,18 @@ namespace MotoHubTests.Unit.Controllers
             motorcycleService.Setup(service => service.GetMotorcycleByLicensePlateAsync("ABC123"))
                 .ReturnsAsync(new MotorcycleDTO { LicensePlate = "ABC123" });
             motorcycleService.Setup(service => service.UpdateMotorcycleAsync("ABC123", "XYZ987"))
-                .ThrowsAsync(new InvalidOperationException("Plate is already claimed."));
+                .ThrowsAsync(new BusinessRuleException(
+                    ProblemTypes.PlateTaken, "Licence plate taken", "Plate is already claimed."));
             var controller = new MotorcyclesController(
                 motorcycleService.Object,
                 Mock.Of<ILogger<MotorcyclesController>>());
 
-            var result = await controller.Update("abc123", "xyz987");
-
-            var conflict = Assert.IsType<ConflictObjectResult>(result);
-            Assert.Equal("Plate is already claimed.", conflict.Value);
+            // O controlador não traduz mais: ele deixa subir, e o
+            // ProblemDetailsExceptionHandler responde 409 em problem+json. O
+            // teste do formato mora com o tratador.
+            var refused = await Assert.ThrowsAsync<BusinessRuleException>(
+                () => controller.Update("abc123", "xyz987"));
+            Assert.Equal(409, refused.Status);
         }
 
         [Fact]

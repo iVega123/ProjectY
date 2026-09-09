@@ -1,12 +1,27 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using RentalCore.Errors;
 using RentalOperations.DTOs;
 using RentalOperations.Services;
-using RentalOperations.Domain;
 using System.Security.Claims;
 
 namespace RentalOperations.Controllers
 {
+    /// <summary>
+    /// Sem try/catch.
+    ///
+    /// Cada endpoint terminava em <c>catch (Exception ex) { return
+    /// BadRequest(ex.Message); }</c> -- o achado A9. Aquela linha não sabia a
+    /// diferença entre uma frase escrita para o cliente e a mensagem de uma
+    /// exceção do Npgsql, que carrega host, banco e usuário; e transformava
+    /// toda falha interna em 400, dizendo ao cliente para corrigir uma
+    /// requisição que estava certa.
+    ///
+    /// Quem responde agora é o <see cref="ProblemDetailsExceptionHandler"/>, um
+    /// lugar só, em <c>application/problem+json</c> com identificador de
+    /// correlação. O que decide o que o cliente vê é o TIPO da exceção -- ver
+    /// <see cref="ClientProblemException"/>.
+    /// </summary>
     [ApiController]
     [Route("api/[controller]")]
     [Authorize]
@@ -14,72 +29,26 @@ namespace RentalOperations.Controllers
     {
         private readonly IRentalService _rentalService;
 
-        private static ProblemDetails Problem400(string detail) => new()
-        {
-            Status = StatusCodes.Status400BadRequest,
-            Title = "Invalid batch request",
-            Detail = detail
-        };
-
-        private ObjectResult Unavailable(Exception exception)
-        {
-            DependencyFailure.Record(exception);
-            if (exception is PreWriteDependencyException)
-            {
-                ProjectY.Shared.Idempotency.RedisIdempotencyMiddleware.AllowRetryBeforeSideEffects(HttpContext);
-            }
-            Response.Headers.RetryAfter = "1";
-            return StatusCode(StatusCodes.Status503ServiceUnavailable, new ProblemDetails
-            {
-                Status = StatusCodes.Status503ServiceUnavailable,
-                Title = "Dependency unavailable",
-                Detail = "A required dependency is temporarily unavailable. Retry later."
-            });
-        }
         public RentalController(IRentalService rentalService)
         {
             _rentalService = rentalService;
         }
 
+        private BadRequestObjectResult Invalid(string detail) =>
+            BadRequest(ProblemFactory.Create(
+                HttpContext, StatusCodes.Status400BadRequest,
+                ProblemTypes.InvalidRequest, "Invalid request", detail));
+
         [HttpPost("create")]
         public async Task<IActionResult> CreateRental([FromBody] RentalCreateDto createDto)
         {
-            try
+            var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier);
+            if (userIdClaim == null)
             {
-                var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier);
-                if (userIdClaim == null)
-                {
-                    return Forbid();
-                }
-                await _rentalService.CreateRentalAsync(createDto, userIdClaim.Value);
-                return Ok("Created with Success!");
+                return Forbid();
             }
-            catch (ActiveRentalConflictException ex)
-            {
-                return Conflict(new ProblemDetails
-                {
-                    Status = StatusCodes.Status409Conflict,
-                    Title = "Active rental conflict",
-                    Detail = ex.Message
-                });
-            }
-            catch (MotorcycleRetiredException ex)
-            {
-                return Conflict(new ProblemDetails
-                {
-                    Status = StatusCodes.Status409Conflict,
-                    Title = "Motorcycle retired",
-                    Detail = ex.Message
-                });
-            }
-            catch (Exception ex) when (DependencyFailure.IsUnavailable(ex))
-            {
-                return Unavailable(ex);
-            }
-            catch (Exception ex)
-            {
-                return BadRequest(ex.Message);
-            }
+            await _rentalService.CreateRentalAsync(createDto, userIdClaim.Value);
+            return Ok("Created with Success!");
         }
 
         [HttpGet("user")]
@@ -87,26 +56,15 @@ namespace RentalOperations.Controllers
             [FromQuery] string? cursor,
             [FromQuery] int? pageSize)
         {
-            try
+            var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier);
+            if (userIdClaim == null)
             {
-                var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier);
-                if (userIdClaim == null)
-                {
-                    return Forbid();
-                }
-                return Ok(await _rentalService.GetRentalsByUserIdAsync(
-                    userIdClaim.Value,
-                    cursor,
-                    pageSize));
+                return Forbid();
             }
-            catch (Exception ex) when (DependencyFailure.IsUnavailable(ex))
-            {
-                return Unavailable(ex);
-            }
-            catch (Exception ex)
-            {
-                return BadRequest(ex.Message);
-            }
+            return Ok(await Cursors.Paged(() => _rentalService.GetRentalsByUserIdAsync(
+                userIdClaim.Value,
+                cursor,
+                pageSize)));
         }
 
         [Authorize(Roles = "Admin")]
@@ -116,18 +74,8 @@ namespace RentalOperations.Controllers
             [FromQuery] string? cursor,
             [FromQuery] int? pageSize)
         {
-            try
-            {
-                return Ok(await _rentalService.GetRentalsByUserIdAsync(userId, cursor, pageSize));
-            }
-            catch (Exception ex) when (DependencyFailure.IsUnavailable(ex))
-            {
-                return Unavailable(ex);
-            }
-            catch (Exception ex)
-            {
-                return BadRequest(ex.Message);
-            }
+            return Ok(await Cursors.Paged(
+                () => _rentalService.GetRentalsByUserIdAsync(userId, cursor, pageSize)));
         }
 
         /// <summary>
@@ -140,36 +88,22 @@ namespace RentalOperations.Controllers
         [HttpPost("close")]
         public async Task<IActionResult> Close([FromQuery] string rentalId, [FromQuery] DateTime actualEndDate)
         {
-            try
-            {
-                var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier);
-                if (userIdClaim == null)
-                {
-                    return Forbid();
-                }
-                var response = await _rentalService.CloseRentalAsync(rentalId, userIdClaim.Value, actualEndDate);
-                return Ok(response);
-            }
-            catch (UnauthorizedAccessException)
+            var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier);
+            if (userIdClaim == null)
             {
                 return Forbid();
             }
-            catch (RentalSettlementConflictException ex)
+            try
             {
-                return Conflict(new ProblemDetails
-                {
-                    Status = StatusCodes.Status409Conflict,
-                    Title = "Rental settlement conflict",
-                    Detail = ex.Message
-                });
+                return Ok(await _rentalService.CloseRentalAsync(
+                    rentalId, userIdClaim.Value, actualEndDate));
             }
-            catch (Exception ex) when (DependencyFailure.IsUnavailable(ex))
+            catch (UnauthorizedAccessException)
             {
-                return Unavailable(ex);
-            }
-            catch (Exception ex)
-            {
-                return BadRequest(ex.Message);
+                // O único catch que sobra, e ele não formata nada: `Forbid` é
+                // uma decisão de autorização, e o pipeline é que sabe como
+                // desafiar o chamador.
+                return Forbid();
             }
         }
 
@@ -189,12 +123,12 @@ namespace RentalOperations.Controllers
                 .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
             if (requested.Length == 0)
             {
-                return BadRequest(Problem400("At least one rental id is required."));
+                return Invalid("At least one rental id is required.");
             }
             if (requested.Length > RentalService.MaxBatchSize)
             {
-                return BadRequest(Problem400(
-                    $"A batch may request at most {RentalService.MaxBatchSize} rental ids."));
+                return Invalid(
+                    $"A batch may request at most {RentalService.MaxBatchSize} rental ids.");
             }
 
             var parsed = new List<Guid>(requested.Length);
@@ -202,50 +136,28 @@ namespace RentalOperations.Controllers
             {
                 if (!Guid.TryParse(candidate, out var id))
                 {
-                    return BadRequest(Problem400($"'{candidate}' is not a rental id."));
+                    // O identificador recusado NÃO volta na resposta: ele é
+                    // entrada do cliente, e devolvê-lo é um refletor pronto.
+                    return Invalid("Every rental id must be a UUID.");
                 }
                 parsed.Add(id);
             }
 
-            try
+            var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier);
+            if (userIdClaim == null)
             {
-                var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier);
-                if (userIdClaim == null)
-                {
-                    return Forbid();
-                }
-                return Ok(await _rentalService.GetRentalsByIdsAsync(
-                    parsed,
-                    userIdClaim.Value,
-                    User.IsInRole("Admin")));
+                return Forbid();
             }
-            catch (Exception ex) when (DependencyFailure.IsUnavailable(ex))
-            {
-                return Unavailable(ex);
-            }
-            catch (Exception ex)
-            {
-                return BadRequest(ex.Message);
-            }
+            return Ok(await _rentalService.GetRentalsByIdsAsync(
+                parsed,
+                userIdClaim.Value,
+                User.IsInRole("Admin")));
         }
 
         [HttpGet("is-rented/{motorcycleId:guid}")]
         public async Task<IActionResult> IsMotorcycleRented(Guid motorcycleId)
         {
-            try
-            {
-                bool isRented = await _rentalService.IsMotorcycleCurrentlyRentedAsync(motorcycleId);
-                return Ok(isRented);
-            }
-            catch (Exception ex) when (DependencyFailure.IsUnavailable(ex))
-            {
-                return Unavailable(ex);
-            }
-            catch (Exception ex)
-            {
-                return BadRequest($"Error checking rental status: {ex.Message}");
-            }
+            return Ok(await _rentalService.IsMotorcycleCurrentlyRentedAsync(motorcycleId));
         }
-
     }
 }

@@ -3,6 +3,7 @@ using MotoHub.DTOs;
 using MotoHub.Entities;
 using MotoHub.Models;
 using MotoHub.Repositories;
+using RentalCore.Errors;
 using MotoHub.Services.RabbitMQ;
 
 using ProjectY.Shared.Pagination;
@@ -102,7 +103,9 @@ namespace MotoHub.Services
 
             if (_repository.LicensePlateExists(newLicencePlate))
             {
-                throw new InvalidOperationException(
+                throw new BusinessRuleException(
+                    ProblemTypes.PlateTaken,
+                    "Licence plate taken",
                     $"Motorcycle with plate {newLicencePlate} already exists.");
             }
 

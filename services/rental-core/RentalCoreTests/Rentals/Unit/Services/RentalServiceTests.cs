@@ -1,5 +1,6 @@
 using AutoMapper;
 using Moq;
+using RentalCore.Errors;
 using RentalOperations.CrossCutting.Model;
 using RentalOperations.CrossCutting.Services;
 using RentalOperations.Domain;
@@ -209,7 +210,7 @@ public sealed class RentalServiceTests
         var service = new RentalService(
             repository.Object, Mock.Of<IMapper>(), Mock.Of<IRiderProjectionStore>(), Mock.Of<IMotorcycleService>());
 
-        await Assert.ThrowsAsync<ArgumentException>(() =>
+        await Assert.ThrowsAsync<InvalidRequestException>(() =>
             service.CloseRentalAsync(rental.Id.ToString(), "rider-1", start.AddDays(-1)));
         repository.Verify(r => r.UpdateRentalAsync(
             It.IsAny<RentalOperations.Model.Rental>(), It.IsAny<CancellationToken>()), Times.Never);

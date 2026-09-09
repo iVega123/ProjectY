@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using MotoHub.DTOs;
 using MotoHub.Services;
+using RentalCore.Errors;
 using ProjectY.Shared.Validation;
 
 namespace MotoHub.Controllers
@@ -15,6 +16,11 @@ namespace MotoHub.Controllers
 
         private readonly ILogger<MotorcyclesController> _logger;
 
+        private BadRequestObjectResult Invalid(string detail) =>
+            BadRequest(ProblemFactory.Create(
+                HttpContext, StatusCodes.Status400BadRequest,
+                ProblemTypes.InvalidRequest, "Invalid request", detail));
+
         public MotorcyclesController(IMotorcycleService motorcycleService, ILogger<MotorcyclesController> logger)
         {
             _motorcycleService = motorcycleService;
@@ -26,14 +32,8 @@ namespace MotoHub.Controllers
         public async Task<IActionResult> GetAll([FromQuery] string? cursor, [FromQuery] int? pageSize)
         {
             _logger.LogInformation("Fetching a page of motorcycles.");
-            try
-            {
-                return Ok(await _motorcycleService.GetMotorcyclesAsync(cursor, pageSize));
-            }
-            catch (FormatException exception)
-            {
-                return BadRequest(exception.Message);
-            }
+            return Ok(await Cursors.Paged(
+                () => _motorcycleService.GetMotorcyclesAsync(cursor, pageSize)));
         }
 
         /// <summary>
@@ -70,11 +70,11 @@ namespace MotoHub.Controllers
                 .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
             if (requested.Length == 0)
             {
-                return BadRequest("At least one motorcycle id is required.");
+                return Invalid("At least one motorcycle id is required.");
             }
             if (requested.Length > MotorcycleService.MaxBatchSize)
             {
-                return BadRequest(
+                return Invalid(
                     $"A batch may request at most {MotorcycleService.MaxBatchSize} motorcycle ids.");
             }
 
@@ -83,7 +83,9 @@ namespace MotoHub.Controllers
             {
                 if (!Guid.TryParse(candidate, out var id))
                 {
-                    return BadRequest($"'{candidate}' is not a motorcycle id.");
+                    // O identificador recusado NÃO volta na resposta: ele é
+                    // entrada do cliente, e devolvê-lo é um refletor pronto.
+                    return Invalid("Every motorcycle id must be a UUID.");
                 }
                 parsed.Add(id);
             }
@@ -145,15 +147,8 @@ namespace MotoHub.Controllers
                 return NotFound();
             }
 
-            try
-            {
-                await _motorcycleService.UpdateMotorcycleAsync(licensePlate, newLicencePlate);
-                return NoContent();
-            }
-            catch (InvalidOperationException exception)
-            {
-                return Conflict(exception.Message);
-            }
+            await _motorcycleService.UpdateMotorcycleAsync(licensePlate, newLicencePlate);
+            return NoContent();
         }
 
         [Authorize(Roles = "Admin")]

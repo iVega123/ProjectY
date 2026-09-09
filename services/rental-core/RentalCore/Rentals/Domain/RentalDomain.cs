@@ -1,4 +1,5 @@
-﻿using RentalOperations.DTOs;
+﻿using RentalCore.Errors;
+using RentalOperations.DTOs;
 
 namespace RentalOperations.Domain
 {
@@ -18,7 +19,7 @@ namespace RentalOperations.Domain
             ValidateDates(dto.StartDate, dto.PredictedEndDate);
             if (dto.MotorcycleId == Guid.Empty)
             {
-                throw new ArgumentException("A motorcycle id is required.");
+                throw new InvalidRequestException("A motorcycle id is required.");
             }
 
             var domain = new RentalDomain
@@ -37,7 +38,7 @@ namespace RentalOperations.Domain
         private static void ValidateDates(DateTime startDate, DateTime predictedEndDate)
         {
             if (startDate >= predictedEndDate)
-                throw new ArgumentException("Start date must be before the end and predicted end dates.");
+                throw new InvalidRequestException("Start date must be before the end and predicted end dates.");
         }
 
         private static decimal CalculateTotalCost(DateTime startDate, DateTime predictedEndDate, string rider)

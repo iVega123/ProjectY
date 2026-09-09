@@ -2,6 +2,7 @@ using Confluent.Kafka;
 using Npgsql;
 using ProjectY.Events;
 using RentalOperations.Services.RabbitMQService;
+using RentalCore.Errors;
 
 namespace RentalOperations.Services;
 
@@ -20,7 +21,9 @@ public interface IRiderProjectionStore
 /// different fact and a permanent one.
 /// </summary>
 public sealed class RiderProjectionPendingException(string riderId)
-    : Exception($"Rider {riderId} is awaiting processing.");
+    : NotYetAvailableException(
+        ProblemTypes.RiderProjectionPending,
+        $"Rider {riderId} is awaiting processing. Retry shortly.");
 
 public sealed class SqlRiderProjectionStore(NpgsqlDataSource database) : IRiderProjectionStore
 {

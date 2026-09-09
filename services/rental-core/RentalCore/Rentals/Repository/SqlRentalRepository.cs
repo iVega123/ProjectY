@@ -4,6 +4,7 @@ using NpgsqlTypes;
 using ProjectY.Shared.Pagination;
 using RentalOperations.Domain;
 using RentalOperations.Model;
+using RentalCore.Errors;
 
 namespace RentalOperations.Repository;
 
@@ -96,7 +97,7 @@ public sealed class SqlRentalRepository(NpgsqlDataSource database) : IRentalRepo
             when (missing.SqlState == PostgresErrorCodes.ForeignKeyViolation)
         {
             await transaction.RollbackAsync(token);
-            throw new ArgumentException("Motorcycle does not exist.", missing);
+            throw new ResourceNotFoundException("The motorcycle does not exist.");
         }
     }
 

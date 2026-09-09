@@ -104,6 +104,31 @@ jobs:
           grep --fixed-strings --quiet 'cockroach-data:/cockroach/cockroach-data' docker-compose.yml
           grep --fixed-strings --quiet 'amq\.default|cmd\.rental\.update-licence' scripts/New-LocalSecrets.ps1
 
+      # O achado A9 não volta em silêncio.
+      #
+      # A correção é um tratador só, e a forma de ela se desfazer é alguém
+      # acrescentar um catch-all num controlador -- o que compila, passa nos
+      # testes existentes e devolve a mensagem do Npgsql ao cliente de novo.
+      # Este passo recusa o PR em vez de esperar a próxima auditoria.
+      - name: Refuse exception text in responses
+        shell: bash
+        run: |
+          # A linha de comentário que DESCREVE o defeito não é o defeito: os
+          # próprios ClientProblem.cs e o controlador citam o catch-all antigo
+          # para explicar por que ele saiu.
+          leaks=$(grep -rn --include='*.cs' \
+            -E '(BadRequest|Conflict|NotFound|StatusCode|Problem)\([^)]*\b(ex|exception|error)\.Message' \
+            services/rental-core/RentalCore Shared \
+            | grep -v -E ':[[:space:]]*(///|//|\*)' || true)
+          if [ -n "$leaks" ]; then
+            echo "$leaks"
+            echo "A9: an exception message must not reach a client. Throw a ClientProblemException instead."
+            exit 1
+          fi
+          # E o tratador continua ligado: registrado E no pipeline.
+          grep --quiet 'AddExceptionHandler<RentalCore.Errors.ProblemDetailsExceptionHandler>' services/rental-core/RentalCore/Program.cs
+          grep --quiet 'app.UseExceptionHandler()' services/rental-core/RentalCore/Program.cs
+
       - name: Validate command queue upgrade
         shell: pwsh
         run: ./scripts/Test-CommandQueueNames.ps1

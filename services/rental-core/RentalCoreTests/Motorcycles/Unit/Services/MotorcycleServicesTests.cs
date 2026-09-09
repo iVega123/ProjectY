@@ -7,6 +7,7 @@ using MotoHub.Entities;
 using MotoHub.Models;
 using MotoHub.Repositories;
 using MotoHub.Services;
+using RentalCore.Errors;
 using MotoHub.Services.RabbitMQ;
 using ProjectY.Shared.Pagination;
 
@@ -174,8 +175,9 @@ namespace MotoHubTests.Unit.Services
                 publisher.Object,
                 Mock.Of<IMotorcycleRetirement>());
 
-            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            var refused = await Assert.ThrowsAsync<BusinessRuleException>(() =>
                 service.UpdateMotorcycleAsync(existingLicensePlate, newLicensePlate));
+            Assert.Equal(409, refused.Status);
 
             Assert.Equal(existingLicensePlate, motorcycle.LicensePlate);
             repository.Verify(instance => instance.Update(It.IsAny<Motorcycle>()), Times.Never);

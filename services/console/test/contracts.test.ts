@@ -12,3 +12,20 @@ test('OTLP trace keeps actual duration, service and parent relationship',()=>{
   assert.equal(result[0].duration,3.5);assert.equal(result[0].service,'telemetry');assert.equal(result[0].parentId,'parent');
   assert.deepEqual(traceSpans({}),[]);
 });
+
+/**
+ * O achado B9: um segmento de caminho vindo do cliente não pode reescrever a
+ * requisição interna. Aqui há duas barreiras, e o teste quer as duas.
+ *
+ * A placa é validada contra o formato brasileiro antes de virar caminho, e o
+ * que atravessa vai por `encodeURIComponent`. A segunda existe porque a
+ * primeira é uma regra de negócio: no dia em que alguém aceitar uma placa de
+ * outro país, a barreira que sobra tem de ser a que trata caminho como caminho.
+ */
+test('a plate cannot rewrite the internal request path',()=>{
+  for (const hostile of ['../riders','..%2friders','ABC/1234','ABC 1234','../../admin']) {
+    assert.throws(()=>plates([hostile]),Error,hostile);
+  }
+  // E o que passa pela validação ainda é escapado antes de virar caminho.
+  assert.equal('/api/motorcycles/'+encodeURIComponent('../riders'),'/api/motorcycles/..%2Friders');
+});
