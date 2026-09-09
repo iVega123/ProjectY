@@ -1,0 +1,31 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: projecty
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: 32m
+spec:
+  ingressClassName: nginx
+  rules:
+    - http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend:
+              service: {name: api-gateway, port: {name: http}}
+          - path: /.well-known
+            pathType: Prefix
+            backend:
+              service: {name: api-gateway, port: {name: http}}
+          - path: /health
+            pathType: Prefix
+            backend:
+              service: {name: api-gateway, port: {name: http}}
+          - path: /socket
+            pathType: Prefix
+            backend:
+              service: {name: telemetry, port: {name: http}}
+          - path: /
+            pathType: Prefix
+            backend:
+              service: {name: console, port: {name: http}}

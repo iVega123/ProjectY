@@ -43,7 +43,9 @@ $checksumPath = Join-Path $toolDirectory "$kubectlName.sha256"
 if (-not (Test-Path -LiteralPath $kubectlPath)) {
     Invoke-WebRequest -Uri $kubectlUrl -OutFile $kubectlPath
 }
-Invoke-WebRequest -Uri "$kubectlUrl.sha256" -OutFile $checksumPath
+if (-not (Test-Path -LiteralPath $checksumPath)) {
+    Invoke-WebRequest -Uri "$kubectlUrl.sha256" -OutFile $checksumPath
+}
 $expected = (Get-Content -LiteralPath $checksumPath -Raw).Trim().ToLowerInvariant()
 $actual = (Get-FileHash -LiteralPath $kubectlPath -Algorithm SHA256).Hash.ToLowerInvariant()
 if ($actual -ne $expected) {

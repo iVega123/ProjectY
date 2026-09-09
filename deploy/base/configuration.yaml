@@ -1,0 +1,91 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: projecty-runtime
+data:
+  OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+  OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
+  GATEWAY_BIND: 0.0.0.0:8090
+  GATEWAY_HEALTH_URL: http://127.0.0.1:8090/health/ready
+  GATEWAY_UPSTREAM_IDENTITY: http://identity:8095
+  GATEWAY_UPSTREAM_MOTO_HUB: http://rental-core:8200
+  GATEWAY_UPSTREAM_RENTAL_OPERATIONS: http://rental-core:8200
+  GATEWAY_UPSTREAM_BILLING: http://billing:8094
+  GATEWAY_UPSTREAM_IDENTITY_TIMEOUT_MS: "2000"
+  GATEWAY_UPSTREAM_MOTO_HUB_TIMEOUT_MS: "2000"
+  GATEWAY_UPSTREAM_RENTAL_OPERATIONS_TIMEOUT_MS: "2500"
+  GATEWAY_UPSTREAM_BILLING_TIMEOUT_MS: "2000"
+  GATEWAY_JWKS_URL: http://identity:8095/.well-known/jwks.json
+  GATEWAY_JWT_ISSUER: projecty.identity
+  GATEWAY_JWT_AUDIENCE_IDENTITY: projecty.identity
+  GATEWAY_JWT_AUDIENCE_MOTO_HUB: projecty.rental-core
+  GATEWAY_JWT_AUDIENCE_RENTAL_OPERATIONS: projecty.rental-core
+  GATEWAY_JWT_AUDIENCE_BILLING: projecty.billing
+  GATEWAY_IDENTITY_SIGNING_KEY_ID: local-v1
+  GATEWAY_REDIS_URL: redis://redis:6379/
+  GATEWAY_RATE_LIMIT_REDIS_TIMEOUT_MS: "100"
+  GATEWAY_RATE_LIMIT_GENERAL_CAPACITY: "120"
+  GATEWAY_RATE_LIMIT_GENERAL_REFILL_PER_MINUTE: "120"
+  GATEWAY_RATE_LIMIT_AUTH_CAPACITY: "10"
+  GATEWAY_RATE_LIMIT_AUTH_REFILL_PER_MINUTE: "5"
+  RUST_LOG: info,api_gateway=debug
+  IDENTITY_BIND: 0.0.0.0:8095
+  IDENTITY_DATABASE_URL: postgres://root@cockroachdb:26257/projecty?sslmode=disable
+  IDENTITY_PUBLIC_URL: http://identity:8095
+  IDENTITY_ISSUER: projecty.identity
+  IDENTITY_AUDIENCES: projecty.identity,projecty.rental-core,projecty.billing
+  IDENTITY_ENVELOPE_AUDIENCE: projecty.identity
+  IDENTITY_HEALTH_URL: http://127.0.0.1:8095/health/ready
+  MEDIA_GUARD_URL: http://media-guard:8092
+  MINIO_ENDPOINT: minio:9000
+  MINIO_BUCKET: my-bucket
+  KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+  SCHEMA_REGISTRY_URL: http://schema-registry:8080/apis/ccompat/v7
+  ASPNETCORE_ENVIRONMENT: Production
+  ASPNETCORE_URLS: http://+:8200
+  ConnectionStrings__Postgresql: Host=cockroachdb;Port=26257;Database=projecty;Username=root;SSL Mode=Disable
+  Redis__ConnectionString: redis:6379
+  GatewayIdentity__SigningKeyId: local-v1
+  Kafka__BootstrapServers: kafka:9092
+  Kafka__SchemaRegistryUrl: http://schema-registry:8080/apis/ccompat/v7
+  BILLING_DATABASE_URL: jdbc:postgresql://cockroachdb:26257/projecty?sslmode=disable&user=root
+  BILLING_IDENTITY_AUDIENCE: projecty.billing
+  GATEWAY_URL: http://api-gateway:8090
+  CONSOLE_ORIGIN: http://localhost:8080
+  TELEMETRY_PUBLIC_URL: ws://localhost:8080/socket/websocket
+  TEMPO_URL: http://tempo:3200
+  PROMETHEUS_URL: http://prometheus:9090
+  REDIS_URL: redis://redis:6379
+  CASSANDRA_HOST: cassandra
+  KAFKA_HOST: kafka
+  TELEMETRY_ORIGINS: //localhost:8080
+  S3_ENDPOINT: http://minio:9000
+  S3_BUCKET: my-bucket
+  AWS_DEFAULT_REGION: us-east-1
+  STATE_PATH: /data/risk.db
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: rabbitmq-runtime
+data:
+  RABBITMQ_DEFAULT_VHOST: projecty-rental
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kafka-runtime
+data:
+  KAFKA_NODE_ID: "1"
+  KAFKA_PROCESS_ROLES: broker,controller
+  KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+  KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+  KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+  KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+  KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+  KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+  KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "1"
+  KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: "1"
+  KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: "1"
+  KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+  CLUSTER_ID: 5L6g3nShT-eMCtK--X86sw
