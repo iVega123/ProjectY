@@ -102,8 +102,7 @@ impl UpstreamPolicy {
 }
 
 pub struct ResilienceRegistry {
-    auth_gate: Arc<UpstreamPolicy>,
-    rider_manager: Arc<UpstreamPolicy>,
+    identity: Arc<UpstreamPolicy>,
     moto_hub: Arc<UpstreamPolicy>,
     rental_operations: Arc<UpstreamPolicy>,
     billing: Arc<UpstreamPolicy>,
@@ -112,8 +111,7 @@ pub struct ResilienceRegistry {
 impl ResilienceRegistry {
     pub fn new(config: &ResilienceConfig) -> Self {
         Self {
-            auth_gate: Arc::new(UpstreamPolicy::new(config.auth_gate)),
-            rider_manager: Arc::new(UpstreamPolicy::new(config.rider_manager)),
+            identity: Arc::new(UpstreamPolicy::new(config.identity)),
             moto_hub: Arc::new(UpstreamPolicy::new(config.moto_hub)),
             rental_operations: Arc::new(UpstreamPolicy::new(config.rental_operations)),
             billing: Arc::new(UpstreamPolicy::new(config.billing)),
@@ -122,8 +120,7 @@ impl ResilienceRegistry {
 
     pub fn policy(&self, upstream: UpstreamName) -> Arc<UpstreamPolicy> {
         match upstream {
-            UpstreamName::AuthGate => self.auth_gate.clone(),
-            UpstreamName::RiderManager => self.rider_manager.clone(),
+            UpstreamName::Identity => self.identity.clone(),
             UpstreamName::MotoHub => self.moto_hub.clone(),
             UpstreamName::RentalOperations => self.rental_operations.clone(),
             UpstreamName::Billing => self.billing.clone(),

@@ -4,33 +4,6 @@ x-otel-environment: &otel-environment
   OTEL_TRACES_SAMPLER: parentbased_traceidratio
   OTEL_TRACES_SAMPLER_ARG: "1.0"
 
-x-auth-gate-environment: &auth-gate-environment
-  ASPNETCORE_ENVIRONMENT: Production
-  Swagger__Enabled: "${SWAGGER_ENABLED:-false}"
-  ConnectionStrings__Postgresql: "Host=postgres;Port=5432;Database=${AUTH_GATE_POSTGRES_DB:?Set AUTH_GATE_POSTGRES_DB in .env};Username=${POSTGRES_USER:?Set POSTGRES_USER in .env};Password=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}"
-  RabbitMQ__UserName: "${AUTH_GATE_RABBITMQ_USER:?Set AUTH_GATE_RABBITMQ_USER in .env}"
-  RabbitMQ__Password: "${AUTH_GATE_RABBITMQ_PASSWORD:?Set AUTH_GATE_RABBITMQ_PASSWORD in .env}"
-  Messaging__SigningKey: "${RIDER_EVENTS_SIGNING_KEY:?Set RIDER_EVENTS_SIGNING_KEY in .env}"
-  Redis__ConnectionString: "redis:6379"
-  Jwt__SigningKeys__AuthGate: "${AUTH_GATE_JWT_SIGNING_KEY:?Set AUTH_GATE_JWT_SIGNING_KEY in .env}"
-  Jwt__SigningKeys__MotoHub: "${MOTO_HUB_JWT_SIGNING_KEY:?Set MOTO_HUB_JWT_SIGNING_KEY in .env}"
-  Jwt__SigningKeys__RiderManager: "${RIDER_MANAGER_JWT_SIGNING_KEY:?Set RIDER_MANAGER_JWT_SIGNING_KEY in .env}"
-  Jwt__SigningKeys__RentalOperations: "${RENTAL_OPERATIONS_JWT_SIGNING_KEY:?Set RENTAL_OPERATIONS_JWT_SIGNING_KEY in .env}"
-
-x-rider-manager-environment: &rider-manager-environment
-  ASPNETCORE_ENVIRONMENT: Production
-  Swagger__Enabled: "${SWAGGER_ENABLED:-false}"
-  ASPNETCORE_URLS: http://+:8000
-  ConnectionStrings__Postgresql: "Host=postgres;Port=5432;Database=${RIDER_MANAGER_POSTGRES_DB:?Set RIDER_MANAGER_POSTGRES_DB in .env};Username=${POSTGRES_USER:?Set POSTGRES_USER in .env};Password=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}"
-  RabbitMQ__UserName: "${RIDER_MANAGER_RABBITMQ_USER:?Set RIDER_MANAGER_RABBITMQ_USER in .env}"
-  RabbitMQ__Password: "${RIDER_MANAGER_RABBITMQ_PASSWORD:?Set RIDER_MANAGER_RABBITMQ_PASSWORD in .env}"
-  Messaging__SigningKey: "${RIDER_EVENTS_SIGNING_KEY:?Set RIDER_EVENTS_SIGNING_KEY in .env}"
-  Redis__ConnectionString: "redis:6379"
-  MinIO__AccessKey: "${MINIO_USER:?Set MINIO_USER in .env}"
-  MinIO__SecretKey: "${MINIO_PASSWORD:?Set MINIO_PASSWORD in .env}"
-  GatewayIdentity__SigningKey: "${GATEWAY_IDENTITY_SIGNING_KEY:?Set GATEWAY_IDENTITY_SIGNING_KEY in .env}"
-  GatewayIdentity__SigningKeyId: local-v1
-
 x-rental-core-environment: &rental-core-environment
   ASPNETCORE_ENVIRONMENT: Production
   Swagger__Enabled: "${SWAGGER_ENABLED:-false}"
@@ -184,29 +157,6 @@ services:
       retries: 12
       start_period: 10s
 
-  postgres:
-    image: postgres:18
-    container_name: postgres
-    environment:
-      POSTGRES_USER: "${POSTGRES_USER:?Set POSTGRES_USER in .env}"
-      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}"
-      AUTH_GATE_POSTGRES_DB: "${AUTH_GATE_POSTGRES_DB:?Set AUTH_GATE_POSTGRES_DB in .env}"
-      MOTO_HUB_POSTGRES_DB: "${MOTO_HUB_POSTGRES_DB:?Set MOTO_HUB_POSTGRES_DB in .env}"
-      RIDER_MANAGER_POSTGRES_DB: "${RIDER_MANAGER_POSTGRES_DB:?Set RIDER_MANAGER_POSTGRES_DB in .env}"
-    ports:
-      - "5432:5432"
-    networks:
-      - projecty
-    volumes:
-      - postgres-data:/var/lib/postgresql
-      - ./deploy/postgres/init-databases.sh:/docker-entrypoint-initdb.d/10-create-service-databases.sh:ro
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d postgres && psql -U \"$${POSTGRES_USER}\" -d postgres -tAc \"SELECT 1 WHERE (SELECT count(*) FROM pg_database WHERE datname IN ('$${AUTH_GATE_POSTGRES_DB}', '$${MOTO_HUB_POSTGRES_DB}', '$${RIDER_MANAGER_POSTGRES_DB}')) = 3\" | grep -qx 1"]
-      interval: 5s
-      timeout: 5s
-      retries: 12
-      start_period: 10s
-
   redis:
     image: redis:8.10-alpine
     container_name: redis
@@ -222,19 +172,6 @@ services:
       interval: 5s
       timeout: 3s
       retries: 12
-
-  pgadmin:
-    image: dpage/pgadmin4:9.17
-    container_name: pgadmin
-    environment:
-      PGADMIN_DEFAULT_EMAIL: "${PGADMIN_EMAIL:?Set PGADMIN_EMAIL in .env}"
-      PGADMIN_DEFAULT_PASSWORD: "${PGADMIN_PASSWORD:?Set PGADMIN_PASSWORD in .env}"
-    ports:
-      - "5050:80"
-    depends_on:
-      - postgres
-    networks:
-      - projecty
 
   # The engine the target schema is written for. It arrives before any row does:
   # #135 moves rentals across with both uniqueness guarantees live at once, and
@@ -325,27 +262,24 @@ services:
       OTEL_SERVICE_NAME: api-gateway
       GATEWAY_BIND: 0.0.0.0:8090
       GATEWAY_HEALTH_URL: http://127.0.0.1:8090/health/ready
-      GATEWAY_UPSTREAM_AUTH_GATE: http://auth-gate:8080
-      GATEWAY_UPSTREAM_RIDER_MANAGER: http://rider-manager:8000
+      # Um upstream onde havia dois. O `sub` do token É o identificador do
+      # piloto, e manter credencial e piloto em processos separados obrigava
+      # um dos dois lados a guardar uma cópia do outro -- ver ADR 0023.
+      GATEWAY_UPSTREAM_IDENTITY: http://identity:8095
       GATEWAY_UPSTREAM_MOTO_HUB: http://rental-core:8200
       GATEWAY_UPSTREAM_RENTAL_OPERATIONS: http://rental-core:8200
       # O billing vive no overlay poliglota. Sem ele de pé, /api/invoices
       # responde 502 -- e não impede o portão de subir, que é o que importa.
       GATEWAY_UPSTREAM_BILLING: http://billing:8094
-      GATEWAY_UPSTREAM_AUTH_GATE_TIMEOUT_MS: "1500"
-      GATEWAY_UPSTREAM_RIDER_MANAGER_TIMEOUT_MS: "2000"
+      GATEWAY_UPSTREAM_IDENTITY_TIMEOUT_MS: "2000"
       GATEWAY_UPSTREAM_MOTO_HUB_TIMEOUT_MS: "2000"
       GATEWAY_UPSTREAM_RENTAL_OPERATIONS_TIMEOUT_MS: "2500"
       GATEWAY_UPSTREAM_BILLING_TIMEOUT_MS: "2000"
-      # O emissor é o identity, que vive no overlay poliglota junto do
-      # CockroachDB de onde ele lê as chaves. Sem o overlay de pé o JWKS não
-      # resolve e o portão recusa todo token -- que é a postura do ADR 0013,
-      # e é a mesma coisa que já acontecia quando esta linha apontava para um
-      # AuthGate que nunca serviu JWKS nenhum.
+      # O emissor. Sem ele de pé o JWKS não resolve e o portão recusa todo
+      # token -- falhar fechado é a postura que o ADR 0013 escolheu.
       GATEWAY_JWKS_URL: http://identity:8095/.well-known/jwks.json
       GATEWAY_JWT_ISSUER: projecty.identity
-      GATEWAY_JWT_AUDIENCE_AUTH_GATE: projecty.auth-gate
-      GATEWAY_JWT_AUDIENCE_RIDER_MANAGER: projecty.rider-manager
+      GATEWAY_JWT_AUDIENCE_IDENTITY: projecty.identity
       GATEWAY_JWT_AUDIENCE_MOTO_HUB: projecty.rental-core
       GATEWAY_JWT_AUDIENCE_RENTAL_OPERATIONS: projecty.rental-core
       # O billing volta a ter audiência própria.
@@ -378,100 +312,70 @@ services:
     depends_on:
       otel-collector:
         condition: service_healthy
-      auth-gate:
-        condition: service_healthy
-      rider-manager:
+      identity:
         condition: service_healthy
       rental-core:
         condition: service_healthy
 
-  auth-gate-migrations:
-    image: projecty/auth-gate:dev
-    build:
-      context: .
-      dockerfile: services/AuthGate/AuthGate/Dockerfile
-    command: ["--migrate=true"]
-    networks:
-      - projecty
-    environment: *auth-gate-environment
-    depends_on:
-      postgres:
-        condition: service_healthy
-
-  auth-gate:
-    image: projecty/auth-gate:dev
-    build:
-      context: .
-      dockerfile: services/AuthGate/AuthGate/Dockerfile
-    container_name: auth-gate
+  # O emissor dos tokens e o dono do domínio do piloto.
+  #
+  # Ele fica no modelo base, e não no overlay poliglota, porque o portão depende
+  # dele para resolver o JWKS: sem ele de pé, nenhuma requisição autenticada
+  # passa. O CockroachDB de onde ele lê já mora aqui.
+  identity:
+    image: projecty/identity:dev
+    build: {context: ., dockerfile: services/identity/Dockerfile}
+    container_name: identity
     ports:
-      - "8080:8080"
-      - "8181:8181"
+      - "127.0.0.1:8095:8095"
     networks:
       - projecty
     environment:
-      <<: [*auth-gate-environment, *otel-environment]
-      OTEL_SERVICE_NAME: auth-gate
+      <<: *otel-environment
+      OTEL_SERVICE_NAME: identity
+      IDENTITY_BIND: 0.0.0.0:8095
+      # Como o rental-core e o billing, conecta como root. O papel `identity` e
+      # os seus GRANTs existem em 005_identity.sql; passar a usá-lo depende do
+      # GRANT CONNECT no bootstrap, que é a dívida registrada no #134.
+      IDENTITY_DATABASE_URL: postgres://root@cockroachdb:26257/projecty?sslmode=disable
+      IDENTITY_PUBLIC_URL: http://localhost:8095
+      IDENTITY_ISSUER: projecty.identity
+      # As audiências que um token carrega, e o portão valida a do upstream
+      # chamado. Uma lista, e não uma por token -- ver ADR 0024.
+      IDENTITY_AUDIENCES: projecty.identity,projecty.rental-core,projecty.billing
+      # A audiência DESTE serviço no envelope que o portão assina. Precisa bater
+      # com GATEWAY_JWT_AUDIENCE_IDENTITY, ou nenhuma rota de piloto responde.
+      IDENTITY_ENVELOPE_AUDIENCE: projecty.identity
+      GATEWAY_IDENTITY_SIGNING_KEY: "${GATEWAY_IDENTITY_SIGNING_KEY:?Set GATEWAY_IDENTITY_SIGNING_KEY in .env}"
+      GATEWAY_IDENTITY_SIGNING_KEY_ID: local-v1
+      # Sela a semente Ed25519 no banco. Sem esta chave, quem lê signing_keys não
+      # consegue assinar nada -- que é a afirmação do ADR 0013 valendo também
+      # para quem tem o backup.
+      IDENTITY_KEY_ENCRYPTION_KEY: "${IDENTITY_KEY_ENCRYPTION_KEY:?Set IDENTITY_KEY_ENCRYPTION_KEY in .env}"
+      IDENTITY_ADMIN_EMAIL: admin@projecty.local
+      IDENTITY_ADMIN_PASSWORD: "${IDENTITY_ADMIN_PASSWORD:?Set IDENTITY_ADMIN_PASSWORD in .env}"
+      IDENTITY_HEALTH_URL: http://127.0.0.1:8095/health/ready
+      MEDIA_GUARD_URL: http://media-guard:8080
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: "${MINIO_USER:?Set MINIO_USER in .env}"
+      MINIO_SECRET_KEY: "${MINIO_PASSWORD:?Set MINIO_PASSWORD in .env}"
+      MINIO_BUCKET: my-bucket
     healthcheck:
-      test: ["CMD", "dotnet", "AuthGate.dll", "--healthcheck", "http://localhost:8080/health/ready"]
+      # O próprio binário, porque a imagem final não tem shell nem curl.
+      test: ["CMD", "/app/identity", "healthcheck"]
       interval: 10s
-      timeout: 5s
-      retries: 6
+      timeout: 3s
+      retries: 12
       start_period: 10s
     depends_on:
       otel-collector:
         condition: service_healthy
-      auth-gate-migrations:
-        condition: service_completed_successfully
-      rabbitmq:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-  
-  rider-manager-migrations:
-    image: projecty/rider-manager:dev
-    build:
-      context: .
-      dockerfile: services/RiderManager/RiderManager/Dockerfile
-    command: ["--migrate=true"]
-    networks:
-      - projecty
-    environment: *rider-manager-environment
-    depends_on:
-      postgres:
-        condition: service_healthy
-
-  rider-manager:
-    image: projecty/rider-manager:dev
-    build:
-      context: .
-      dockerfile: services/RiderManager/RiderManager/Dockerfile
-    container_name: rider-manager
-    ports:
-      - "8000:8000"
-      - "8001:8001"
-    networks:
-      - projecty
-    environment:
-      <<: [*rider-manager-environment, *otel-environment]
-      OTEL_SERVICE_NAME: rider-manager
-    healthcheck:
-      test: ["CMD", "dotnet", "RiderManager.dll", "--healthcheck", "http://localhost:8000/health/ready"]
-      interval: 10s
-      timeout: 5s
-      retries: 6
-      start_period: 10s
-    depends_on:
-      otel-collector:
-        condition: service_healthy
-      rider-manager-migrations:
-        condition: service_completed_successfully
       media-guard:
         condition: service_healthy
-      rabbitmq:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
+      minio:
+        condition: service_started
+      cockroach-init:
+        condition: service_completed_successfully
 
   # One service where there were two. The gateway sends both /api/motorcycles and
   # /api/rentals here, under one audience, because they are one process now.
@@ -535,7 +439,6 @@ networks:
     driver: bridge
 
 volumes:
-  postgres-data:
   cockroach-data:
   redis-data:
   rabbitmq-data:

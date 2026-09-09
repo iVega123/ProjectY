@@ -6,9 +6,7 @@ services:
     restart: unless-stopped
     healthcheck:
       test: [CMD, /app/api-gateway, --healthcheck]
-  auth-gate:
-    restart: unless-stopped
-  rider-manager:
+  identity:
     restart: unless-stopped
   rental-core:
     restart: unless-stopped

@@ -20,40 +20,12 @@ services:
     depends_on:
       toxiproxy:
         condition: service_healthy
-  auth-gate-migrations:
+  # O emissor atravessa o proxy como todo o resto: um ensaio de latência no
+  # banco precisa atingir o login, que é o primeiro passo de quase todo fluxo.
+  identity:
     environment:
-      ConnectionStrings__Postgresql: "Host=toxiproxy;Port=5432;Database=${AUTH_GATE_POSTGRES_DB};Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD}"
-      Redis__ConnectionString: toxiproxy:6379
-      RabbitMQ__HostName: toxiproxy
-    depends_on:
-      toxiproxy:
-        condition: service_healthy
-
-  auth-gate:
-    environment:
-      ConnectionStrings__Postgresql: "Host=toxiproxy;Port=5432;Database=${AUTH_GATE_POSTGRES_DB};Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD}"
-      Redis__ConnectionString: toxiproxy:6379
-      RabbitMQ__HostName: toxiproxy
-    depends_on:
-      toxiproxy:
-        condition: service_healthy
-
-  rider-manager-migrations:
-    environment:
-      ConnectionStrings__Postgresql: "Host=toxiproxy;Port=5432;Database=${RIDER_MANAGER_POSTGRES_DB};Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD}"
-      Redis__ConnectionString: toxiproxy:6379
-      RabbitMQ__HostName: toxiproxy
-      MinIO__Endpoint: toxiproxy
-    depends_on:
-      toxiproxy:
-        condition: service_healthy
-
-  rider-manager:
-    environment:
-      ConnectionStrings__Postgresql: "Host=toxiproxy;Port=5432;Database=${RIDER_MANAGER_POSTGRES_DB};Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD}"
-      Redis__ConnectionString: toxiproxy:6379
-      RabbitMQ__HostName: toxiproxy
-      MinIO__Endpoint: toxiproxy
+      IDENTITY_DATABASE_URL: postgres://root@toxiproxy:26257/projecty?sslmode=disable
+      MINIO_ENDPOINT: toxiproxy:9000
     depends_on:
       toxiproxy:
         condition: service_healthy

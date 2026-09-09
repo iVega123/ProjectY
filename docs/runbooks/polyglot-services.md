@@ -16,7 +16,7 @@ docker compose -f docker-compose.yml -f docker-compose.chaos.yml -f docker-compo
 
 Console: http://localhost:3001. Tracking: localhost:4000. The BFF accepts an
 access token from the gateway's configured JWKS identity provider and stores it
-in a HttpOnly cookie. Legacy AuthGate login is not compatible with that gateway
+in a HttpOnly cookie. A token from any other issuer is not compatible with that gateway
 contract; replacing identity remains #136. This is explicit in ADR 0021.
 
 ## Isolated acceptance environment
@@ -80,7 +80,7 @@ requires; temporary compiler dependencies are removed after installation.
   In the isolated running worker, `python smoke_document.py` additionally proves
   the real media-guard → MinIO → Kafka → OCR path and removes its own test objects.
 * .NET: `dotnet test services/rental-core/RentalCore.sln` and
-  `dotnet test services/RiderManager/RiderManager.sln` use isolated Testcontainers.
+  `dotnet test services/rental-core/RentalCore.sln` use isolated Testcontainers.
 * Console: `npm ci`, `npm test`, `npm run build` in services/console.
 * Kotlin: `gradle ktlintCheck test` in services/billing, with a JDK 21 and
   Gradle 8.14.3 — there is no `gradlew` here; the version is pinned in the
@@ -128,6 +128,71 @@ An empty or unreachable document means the gateway fails closed, which is the
 posture ADR 0013 chose. A token whose `kid` is not in that document was signed
 by a key that has already been retired.
 
+### The rider domain
+
+Since #136 the rider record lives here too, in its own table beside the
+credential — [ADR 0023](../adr/0023-the-rider-record-lives-with-the-credential.md)
+explains why `rider-core` was dropped and what the merge costs.
+
+```
+GET    /api/riders?ids=a,b,c     admin, capped at 100
+GET    /api/riders/{userId}      the rider, or an admin
+DELETE /api/riders/{userId}      admin
+PUT    /update-image             the rider named by the envelope
+```
+
+All four require the gateway identity envelope of ADR 0008, verified here in Go
+— the third implementation of that check, after C# and Kotlin. The canonical
+string is pinned on both sides: `signs_rider_reads_for_the_identity_audience` in
+the gateway, `TestAcceptsAnEnvelopeTheGatewaySigned` in identity, against an
+envelope the gateway actually produced.
+
+Someone else's record answers 404, not 403. The difference between those two
+responses tells a scanner which identifiers exist. The single-rider GET is
+**Authenticated** at the gateway, not Admin: the ownership check lives in
+identity, and rejecting the rider at the edge would put that check out of reach.
+
+`DELETE` answers 204 whether or not the rider was still there. The gateway
+retries DELETE on a transport failure — it is an idempotent method — so a 404
+on the second attempt would turn a lost response into a client-visible error.
+
+The CNH object is removed after the pointer changes, and when the rider is
+deleted. That cleanup runs outside the transaction: a bucket that is down must
+not block deleting a rider. When it fails you get `objeto da CNH ficou órfão`
+in the log with the key, which is what to grep for before deleting objects by
+hand.
+
+### What identity publishes, and what it listens to
+
+| Direction | Topic | When |
+|---|---|---|
+| out | `rider.registered` | registration |
+| out | `rider.verified`, `rider.verified.v2` | registration, OCR verdict, deletion |
+| out | `document.stored` | a CNH image is stored |
+| in | `document.verified` | risk-pricing cross-checked the OCR'd number |
+
+Every one of those is written to the shared `outbox` **inside the transaction
+that changed the row**, and a relay sends them. Deleting a rider publishes
+`verified = false` rather than only deleting the row: rental-core authorizes
+from its local projection, so without a new fact it would keep answering
+"verified" for a rider who no longer exists.
+
+The OCR verdict can only take entitlement **away**. A document that does not
+match revokes; one that matches returns what the licence type already said.
+Letting the OCR grant would make a category-B licence rentable by sending a
+legible photo.
+
+If facts stop arriving, the outbox is where they are:
+
+```sql
+SELECT topic, count(*) FROM outbox
+ WHERE aggregate_type = 'rider' AND published_at IS NULL
+ GROUP BY topic;
+```
+
+A growing count means Kafka or the schema registry is unreachable — identity
+serves login and reads normally while that lasts, and only stops telling.
+
 Rotating the signing key is a command, not a database edit:
 
 ```bash
@@ -151,6 +216,13 @@ It preserves each user's identifier — that value is the JWT `sub` and
 Those passwords keep working: the first successful login verifies the old format
 and rewrites it as Argon2id. Re-running the import is safe; it skips what is
 already there and reports what it could not map.
+
+Each imported rider is announced on the same topics a fresh registration uses,
+written to the outbox in the transaction that inserts the row. Without that,
+imported riders could log in and never rent: rental-core authorizes from its
+local projection, and the projection only fills from events. If the import runs
+with no broker configured the facts wait in the outbox, and the relay publishes
+them once Kafka is reachable.
 
 The invoice itself is read through the gateway, from billing:
 

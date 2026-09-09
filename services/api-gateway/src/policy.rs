@@ -28,18 +28,26 @@ pub fn requires_revocation_check(method: &Method, path: &str, upstream: Upstream
 pub fn access_for(method: &Method, path: &str, upstream: UpstreamName) -> Access {
     let path = path.to_ascii_lowercase();
     match upstream {
-        UpstreamName::AuthGate
+        // Sair é apresentar o refresh token, e renovar também. Os dois são
+        // públicos aqui porque o portão NÃO sabe validar um refresh token --
+        // ele é opaco, e a prova de posse é o identity procurá-lo. Exigir um
+        // access token nessas rotas quebraria justamente o caso normal: quem
+        // renova é quem já está com o access token vencido.
+        UpstreamName::Identity
             if method == Method::POST
                 && matches!(
                     path.as_str(),
-                    "/api/auth/login" | "/api/auth/register/rider"
+                    "/api/auth/login"
+                        | "/api/auth/register/rider"
+                        | "/api/auth/refresh"
+                        | "/api/auth/logout"
                 ) =>
         {
             Access::Public
         }
         UpstreamName::MotoHub if motorcycle_read_route(method, &path) => Access::Authenticated,
         UpstreamName::MotoHub => Access::Admin,
-        UpstreamName::RiderManager if rider_admin_route(method, &path) => Access::Admin,
+        UpstreamName::Identity if rider_admin_route(method, &path) => Access::Admin,
         UpstreamName::RentalOperations if rental_admin_route(method, &path) => Access::Admin,
         // O billing não tem API de escrita, e o portão não deveria fingir que
         // tem. Qualquer coisa que não seja leitura para lá só faz sentido vinda
@@ -63,6 +71,18 @@ fn motorcycle_read_route(method: &Method, path: &str) -> bool {
             .is_some_and(|id| !id.is_empty() && !id.contains('/'))
 }
 
+/// Ler UM piloto não é rota de administrador, pelo mesmo motivo que ler uma
+/// moto não é: quem decide de quem é o registro é o identity, comparando o
+/// sujeito do envelope com o identificador do caminho, e respondendo 404 -- não
+/// 403 -- para o registro de outro.
+///
+/// Deixar isto em Admin recusaria o piloto no portão, antes de a conferência de
+/// dono existir, e a rota de auto-leitura só funcionaria chamando o identity
+/// direto. É a mesma discordância silenciosa entre duas camadas que o
+/// motorcycle_read_route acima documenta.
+///
+/// O lote continua Admin -- "este piloto" e "estes N pilotos" são perguntas
+/// diferentes -- e apagar também.
 fn rider_admin_route(method: &Method, path: &str) -> bool {
     if method == Method::GET && path == "/api/riders" {
         return true;
@@ -70,7 +90,7 @@ fn rider_admin_route(method: &Method, path: &str) -> bool {
     let Some(id) = path.strip_prefix("/api/riders/") else {
         return false;
     };
-    !id.is_empty() && !id.contains('/') && (method == Method::GET || method == Method::DELETE)
+    method == Method::DELETE && !id.is_empty() && !id.contains('/')
 }
 
 // A aposentadoria e a reserva de renomeação eram rotas de um protocolo entre
@@ -88,13 +108,27 @@ mod tests {
     use super::*;
 
     #[test]
-    fn only_login_and_registration_are_public() {
+    fn the_public_routes_are_the_ones_reached_without_a_token() {
+        for path in [
+            "/api/auth/login",
+            "/api/auth/register/rider",
+            "/api/auth/refresh",
+            "/api/auth/logout",
+        ] {
+            assert_eq!(
+                access_for(&Method::POST, path, UpstreamName::Identity),
+                Access::Public,
+                "{path}"
+            );
+        }
+        // Tudo o mais no identity exige token, inclusive um POST inventado
+        // dentro do mesmo prefixo.
         assert_eq!(
-            access_for(&Method::POST, "/api/auth/login", UpstreamName::AuthGate),
-            Access::Public
+            access_for(&Method::POST, "/api/auth/promote", UpstreamName::Identity),
+            Access::Authenticated
         );
         assert_eq!(
-            access_for(&Method::POST, "/api/auth/logout", UpstreamName::AuthGate),
+            access_for(&Method::PUT, "/update-image", UpstreamName::Identity),
             Access::Authenticated
         );
     }
@@ -103,9 +137,9 @@ mod tests {
     fn maps_legacy_admin_routes_at_the_edge() {
         assert_eq!(
             access_for(
-                &Method::GET,
+                &Method::DELETE,
                 "/api/riders/user-1",
-                UpstreamName::RiderManager
+                UpstreamName::Identity
             ),
             Access::Admin
         );
@@ -194,6 +228,28 @@ mod tests {
                 "{method} on one motorcycle must stay Admin"
             );
         }
+    }
+
+    /// Um piloto lê o próprio registro, e o identity é quem confere o dono.
+    /// O lote e a remoção ficam com o administrador.
+    #[test]
+    fn a_rider_may_read_one_rider_but_not_the_batch() {
+        assert_eq!(
+            access_for(&Method::GET, "/api/riders/user-1", UpstreamName::Identity),
+            Access::Authenticated
+        );
+        assert_eq!(
+            access_for(&Method::GET, "/api/riders", UpstreamName::Identity),
+            Access::Admin
+        );
+        assert_eq!(
+            access_for(
+                &Method::DELETE,
+                "/api/riders/user-1",
+                UpstreamName::Identity
+            ),
+            Access::Admin
+        );
     }
 
     #[test]

@@ -3,12 +3,18 @@
 This guide starts the original four-service system that was reviewed in the
 [architecture and security audit](AUDITORIA-ARQUITETURA-SEGURANCA.md), with the
 Rust gateway in front and the LGTM observability stack running as the first
-strangler-migration components. All four .NET projects now live under `services/`.
-`deploy/base/compose.yaml` imports the same application model as the root
-entrypoint; the self-hosted overlay selects the gateway's production image.
-There is no second, unimplemented application topology. PostgreSQL serves
-auth-gate and rider-manager; rental-core runs on CockroachDB, whose schema is
-`deploy/db/sql`, applied by `cockroach-init`.
+strangler-migration components. `deploy/base/compose.yaml` imports the same
+application model as the root entrypoint; the self-hosted overlay selects the
+gateway's production image. There is no second, unimplemented application
+topology.
+
+**The strangler migration is finished.** None of the four audited ASP.NET
+services is left: `MotoHub` and `RentalOperations` became `rental-core` (#135),
+and `AuthGate` and `RiderManager` became the Go `identity` service (#136). Every
+application store is now CockroachDB, whose schema lives in `deploy/db/sql` and
+is applied by `cockroach-init`. PostgreSQL and pgAdmin left with the last
+services that used them; the CockroachDB console on
+[localhost:26080](http://localhost:26080) replaces pgAdmin.
 
 `tilt up` enables live updates for the .NET services, gateway and media service.
 `tilt up -- --full` adds the existing telemetry, risk-pricing and console services.
@@ -66,8 +72,9 @@ host-side mapping in `docker-compose.yml` before starting the stack.
 ## Start the stack
 
 Clone the repository, then create fresh local credentials. The generated `.env`
-is ignored by Git and includes the legacy AuthGate JWT issuer keys, the gateway
-identity-envelope key, and RabbitMQ credentials for every service:
+is ignored by Git and includes the gateway identity-envelope key, the key that
+seals identity's signing seeds, the bootstrap administrator password, and
+RabbitMQ credentials for every service that still uses the broker:
 
 ```bash
 git clone https://github.com/iVega123/ProjectY.git
@@ -82,12 +89,10 @@ On PowerShell 7, `pwsh -File scripts/New-LocalSecrets.ps1` is equivalent. If a
 local `.env` already exists, the script refuses to overwrite it. Use `-Force`
 only for an intentional full rotation, and recreate persistent volumes that
 were initialized with the previous database, broker, or storage credentials.
-The PostgreSQL bootstrap creates independent databases for AuthGate,
-RiderManager, and MotoHub so that each EF context owns its schema. The same
-command creates an ignored `.rabbitmq-definitions.json` containing salted
-password hashes, isolated vhosts, and service-specific queue permissions. The
-rider and rental message flows use separate vhosts so access to the AMQP
-default exchange cannot cross domain boundaries. Both ignored files are
+The same command creates an ignored `.rabbitmq-definitions.json` containing
+salted password hashes, isolated vhosts, and service-specific queue permissions.
+The rental message flow has its own vhost so access to the AMQP default exchange
+cannot cross domain boundaries. Both ignored files are
 required before the first Compose startup.
 
 RabbitMQ does not publish its AMQP or management ports to the host. To inspect
@@ -110,11 +115,10 @@ Tilt uses the same Compose model and adds live update for the Rust gateway:
 tilt up
 ```
 
-PostgreSQL must become healthy before the one-shot AuthGate, MotoHub, and
-RiderManager migration containers run. Each application starts only after its
-migration container exits successfully. See
-[PostgreSQL migration operations](database-migrations.md) for baseline adoption,
-schema changes, and rollback.
+`cockroach-init` applies `deploy/db/sql` before any application starts, and
+each service is health-gated on the dependencies it actually needs. There are no
+migration containers left: the schema is a set of files the CI proves portable,
+not a set of EF migrations per service.
 
 The first build downloads the service and infrastructure images, so its duration
 depends on the network connection and Docker cache.
@@ -173,7 +177,7 @@ services do not parse JWTs; they verify that envelope and apply only role and
 resource-ownership rules. Calls between domain services propagate the verified
 identity through the same signed envelope, replacing the former API keys.
 
-The Go `identity` service issues those tokens. It signs with Ed25519, publishes
+Tokens come from the Go `identity` service, which also owns the rider domain. It signs with Ed25519, publishes
 its public keys at `/.well-known/jwks.json`, and the gateway selects the key by
 `kid` from a bounded cache. It runs in the polyglot overlay, next to the
 CockroachDB it reads its keys from, and listens on `8095`.
@@ -188,12 +192,10 @@ route. The refresh token is opaque, single-use, and stored hashed in
 CockroachDB — reusing one after it has been exchanged revokes the whole session,
 because there is no way to tell the victim from the thief.
 
-The gateway still routes `/api/auth/**` to the legacy .NET AuthGate, which still
-emits HMAC tokens that the gateway rejects. That is deliberate and temporary:
-AuthGate's registration is what feeds RiderManager the rider record over
-RabbitMQ, and the two retire together in the second half of #136. Until they do,
-tokens come from `identity` on port `8095` and everything else goes through the
-gateway on `8090`.
+The gateway routes `/api/auth/**`, `/api/riders/**` and `/update-image` there.
+Credential and rider live in one process because the token's `sub` **is** the
+rider identifier — keeping them apart forced one side to hold a copy of the
+other, which is [ADR 0023](adr/0023-the-rider-record-lives-with-the-credential.md).
 
 Once the identity issuer is available, rental creation also requires Redis for
 the immediate-revocation check defined by ADR 0017. The denylist key is
@@ -216,39 +218,14 @@ jitter. Saturated or open dependencies are shed with `503` and `Retry-After`;
 an open breaker is visible in `/health/ready`, `/metrics`, and Grafana without
 making the whole gateway unready.
 
-## Bootstrap the first administrator
+## The first administrator
 
-Administrator creation is deliberately unavailable over HTTP. Open a second
-terminal in the repository root after the Compose stack is running. Set the
-bootstrap credentials only in that shell, then start a one-off AuthGate
-container in bootstrap mode:
-
-```powershell
-$env:BootstrapAdmin__Email = Read-Host "Administrator email"
-$bootstrapPassword = Read-Host "Administrator password" -AsSecureString
-$env:BootstrapAdmin__Password = [System.Net.NetworkCredential]::new('', $bootstrapPassword).Password
-
-try {
-    docker compose run --rm `
-        -e BootstrapAdmin__Email `
-        -e BootstrapAdmin__Password `
-        auth-gate --bootstrap-admin
-}
-finally {
-    Remove-Item Env:BootstrapAdmin__Email -ErrorAction SilentlyContinue
-    Remove-Item Env:BootstrapAdmin__Password -ErrorAction SilentlyContinue
-}
-```
-
-Compose passes the two shell variables only to the one-off process. That
-container joins the same Compose network and reuses the AuthGate service
-configuration, so the PostgreSQL hostname `postgres` resolves correctly. It
-does not publish another copy of the AuthGate ports and is removed after the
-command exits.
-
-The command creates the `Admin` role when needed, creates or promotes the
-configured account, and exits. The `finally` block removes both plaintext
-values from the shell even if bootstrap fails.
+There is no HTTP route that creates one, and there is no one-off container
+either. `identity` reads `IDENTITY_ADMIN_EMAIL` and `IDENTITY_ADMIN_PASSWORD` on
+start and creates that account if it does not exist — idempotent, because a
+stack that restarts must neither fail nor overwrite the password of someone who
+has already signed in. `scripts/New-LocalSecrets.ps1` generates the password
+into `.env`; the account is `admin@projecty.local`.
 
 ## Verify health probes
 

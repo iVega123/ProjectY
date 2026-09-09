@@ -300,7 +300,7 @@ async fn proxy_inner(state: Arc<AppState>, request: Request) -> Response {
         }
     };
 
-    let (bucket_name, bucket) = rate_limit_bucket(&state.config, upstream_name);
+    let (bucket_name, bucket) = rate_limit_bucket(&state.config, &path);
     let principal = rate_limit_principal(&request, identity_subject);
     let rate_limit_key = rate_limit_key(bucket_name, &principal);
     let remaining = match state.rate_limiter.check(&rate_limit_key, bucket).await {
@@ -351,8 +351,15 @@ fn rate_limit_key(bucket: &str, principal: &str) -> String {
     format!("projecty:ratelimit:{bucket}:{digest:x}")
 }
 
-fn rate_limit_bucket(config: &Config, upstream: UpstreamName) -> (&'static str, TokenBucketConfig) {
-    if upstream == UpstreamName::AuthGate {
+/// A cesta estrita é das rotas de credencial, e não do processo que as serve.
+///
+/// Ela seguia o upstream, e isso funcionava enquanto um upstream inteiro era o
+/// AuthGate. Com o identity servindo `/api/auth` e `/api/riders` no mesmo
+/// processo, seguir o upstream limitaria leitura de piloto a cinco por minuto
+/// -- uma regra de força bruta de senha aplicada a uma consulta.
+fn rate_limit_bucket(config: &Config, path: &str) -> (&'static str, TokenBucketConfig) {
+    let path = path.to_ascii_lowercase();
+    if path == "/api/auth" || path.starts_with("/api/auth/") {
         ("auth", config.rate_limit.auth)
     } else {
         ("general", config.rate_limit.general)
@@ -805,8 +812,7 @@ mod tests {
             health_url: Url::parse("http://127.0.0.1/health/ready").unwrap(),
             healthcheck_timeout: Duration::from_secs(1),
             upstreams: Upstreams {
-                auth_gate: upstream.clone(),
-                rider_manager: upstream.clone(),
+                identity: upstream.clone(),
                 moto_hub: upstream.clone(),
                 rental_operations: upstream.clone(),
                 billing: upstream,
@@ -815,8 +821,7 @@ mod tests {
                 jwks_url: Url::parse("http://127.0.0.1:1/.well-known/jwks.json").unwrap(),
                 issuer: "projecty.identity".to_owned(),
                 audiences: Audiences {
-                    auth_gate: "projecty.auth-gate".to_owned(),
-                    rider_manager: "projecty.rider-manager".to_owned(),
+                    identity: "projecty.identity".to_owned(),
                     moto_hub: "projecty.moto-hub".to_owned(),
                     rental_operations: "projecty.rental-operations".to_owned(),
                     billing: "projecty.billing".to_owned(),
@@ -844,8 +849,7 @@ mod tests {
                 },
             },
             resilience: ResilienceConfig {
-                auth_gate: test_resilience_config(),
-                rider_manager: test_resilience_config(),
+                identity: test_resilience_config(),
                 moto_hub: test_resilience_config(),
                 rental_operations: test_resilience_config(),
                 billing: test_resilience_config(),
@@ -877,7 +881,7 @@ mod tests {
             let body = to_bytes(request.into_body(), 1024).await.unwrap();
             (
                 StatusCode::CREATED,
-                [("x-upstream", "auth-gate")],
+                [("x-upstream", "identity")],
                 format!("{uri}|{marker}|{}", String::from_utf8_lossy(&body)),
             )
                 .into_response()
@@ -1057,7 +1061,7 @@ mod tests {
         serde_json::from_slice(&body).unwrap()
     }
 
-    async fn auth_gate_circuit_state(app: &Router) -> String {
+    async fn identity_circuit_state(app: &Router) -> String {
         let readiness = app
             .clone()
             .oneshot(
@@ -1072,7 +1076,7 @@ mod tests {
             .as_array()
             .unwrap()
             .iter()
-            .find(|entry| entry["upstream"] == "auth_gate")
+            .find(|entry| entry["upstream"] == "identity")
             .and_then(|entry| entry["state"].as_str())
             .unwrap()
             .to_owned()
@@ -1174,11 +1178,16 @@ mod tests {
         let config = test_config(Url::parse("http://127.0.0.1:1/").unwrap());
 
         assert_eq!(
-            rate_limit_bucket(&config, UpstreamName::AuthGate),
+            rate_limit_bucket(&config, "/api/auth/login"),
             ("auth", config.rate_limit.auth)
         );
+        // Mesmo processo, cesta diferente: ler piloto não é tentar senha.
         assert_eq!(
-            rate_limit_bucket(&config, UpstreamName::RentalOperations),
+            rate_limit_bucket(&config, "/api/riders?ids=a,b"),
+            ("general", config.rate_limit.general)
+        );
+        assert_eq!(
+            rate_limit_bucket(&config, "/api/rental/create"),
             ("general", config.rate_limit.general)
         );
         assert!(config.rate_limit.auth.capacity < config.rate_limit.general.capacity);
@@ -1345,8 +1354,8 @@ mod tests {
         ])
         .await;
         let mut config = test_config(upstream);
-        config.resilience.auth_gate.breaker_failure_threshold = 2;
-        config.resilience.auth_gate.max_retries = 2;
+        config.resilience.identity.breaker_failure_threshold = 2;
+        config.resilience.identity.max_retries = 2;
         let (app, _) = app_with_rate_limit(
             config,
             Ok(RateLimitDecision {
@@ -1367,7 +1376,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(first.status(), StatusCode::INTERNAL_SERVER_ERROR);
-        assert_eq!(auth_gate_circuit_state(&app).await, "closed");
+        assert_eq!(identity_circuit_state(&app).await, "closed");
 
         let second = app
             .clone()
@@ -1380,7 +1389,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(second.status(), StatusCode::INTERNAL_SERVER_ERROR);
-        assert_eq!(auth_gate_circuit_state(&app).await, "open");
+        assert_eq!(identity_circuit_state(&app).await, "open");
         assert_eq!(state.requests.load(Ordering::SeqCst), 6);
 
         let shed = app
@@ -1402,8 +1411,8 @@ mod tests {
         let unused_address = unused_listener.local_addr().unwrap();
         drop(unused_listener);
         let mut config = test_config(Url::parse(&format!("http://{unused_address}/")).unwrap());
-        config.resilience.auth_gate.breaker_failure_threshold = 2;
-        config.resilience.auth_gate.max_retries = 2;
+        config.resilience.identity.breaker_failure_threshold = 2;
+        config.resilience.identity.max_retries = 2;
         let (app, _) = app_with_rate_limit(
             config,
             Ok(RateLimitDecision {
@@ -1424,7 +1433,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(first.status(), StatusCode::SERVICE_UNAVAILABLE);
-        assert_eq!(auth_gate_circuit_state(&app).await, "closed");
+        assert_eq!(identity_circuit_state(&app).await, "closed");
 
         let second = app
             .clone()
@@ -1437,7 +1446,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(second.status(), StatusCode::SERVICE_UNAVAILABLE);
-        assert_eq!(auth_gate_circuit_state(&app).await, "open");
+        assert_eq!(identity_circuit_state(&app).await, "open");
     }
 
     #[tokio::test]
@@ -1449,8 +1458,8 @@ mod tests {
         ])
         .await;
         let mut config = test_config(upstream);
-        config.resilience.auth_gate.breaker_failure_threshold = 1;
-        config.resilience.auth_gate.breaker_open_duration = Duration::from_millis(1);
+        config.resilience.identity.breaker_failure_threshold = 1;
+        config.resilience.identity.breaker_open_duration = Duration::from_millis(1);
         let (app, _) = app_with_rate_limit(
             config,
             Ok(RateLimitDecision {
@@ -1471,7 +1480,7 @@ mod tests {
             .unwrap();
         assert_eq!(failure.status(), StatusCode::INTERNAL_SERVER_ERROR);
         drop(failure);
-        assert_eq!(auth_gate_circuit_state(&app).await, "open");
+        assert_eq!(identity_circuit_state(&app).await, "open");
 
         tokio::time::sleep(Duration::from_millis(2)).await;
         let probe = app
@@ -1484,11 +1493,11 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(probe.status(), StatusCode::NO_CONTENT);
-        assert_eq!(auth_gate_circuit_state(&app).await, "half_open");
+        assert_eq!(identity_circuit_state(&app).await, "half_open");
 
         drop(probe);
 
-        assert_eq!(auth_gate_circuit_state(&app).await, "closed");
+        assert_eq!(identity_circuit_state(&app).await, "closed");
         let admitted = app
             .oneshot(
                 HttpRequest::post("/api/auth/login")
@@ -1507,9 +1516,9 @@ mod tests {
         let unused_address = unused_listener.local_addr().unwrap();
         drop(unused_listener);
         let mut config = test_config(Url::parse(&format!("http://{unused_address}/")).unwrap());
-        config.resilience.auth_gate.timeout = Duration::from_millis(50);
-        config.resilience.auth_gate.max_retries = 0;
-        config.resilience.auth_gate.breaker_failure_threshold = 1;
+        config.resilience.identity.timeout = Duration::from_millis(50);
+        config.resilience.identity.max_retries = 0;
+        config.resilience.identity.breaker_failure_threshold = 1;
         let (app, _) = app_with_rate_limit(
             config,
             Ok(RateLimitDecision {
@@ -1561,7 +1570,7 @@ mod tests {
                 .as_array()
                 .unwrap()
                 .iter()
-                .any(|entry| entry["upstream"] == "auth_gate" && entry["state"] == "open")
+                .any(|entry| entry["upstream"] == "identity" && entry["state"] == "open")
         );
 
         let metrics = app
@@ -1570,7 +1579,7 @@ mod tests {
             .unwrap();
         let metrics = to_bytes(metrics.into_body(), 8192).await.unwrap();
         assert!(std::str::from_utf8(&metrics).unwrap().contains(
-            "gateway_upstream_circuit_breaker_state{upstream=\"auth_gate\",state=\"open\"} 1"
+            "gateway_upstream_circuit_breaker_state{upstream=\"identity\",state=\"open\"} 1"
         ));
     }
 
@@ -1578,7 +1587,7 @@ mod tests {
     async fn client_errors_do_not_count_as_breaker_failures() {
         let (upstream, state) = spawn_sequence_upstream(vec![StatusCode::BAD_REQUEST]).await;
         let mut config = test_config(upstream);
-        config.resilience.auth_gate.breaker_failure_threshold = 1;
+        config.resilience.identity.breaker_failure_threshold = 1;
         let (app, _) = app_with_rate_limit(
             config,
             Ok(RateLimitDecision {
@@ -1616,7 +1625,7 @@ mod tests {
                 .as_array()
                 .unwrap()
                 .iter()
-                .any(|entry| entry["upstream"] == "auth_gate" && entry["state"] == "closed")
+                .any(|entry| entry["upstream"] == "identity" && entry["state"] == "closed")
         );
     }
 
@@ -1637,7 +1646,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(response.status(), StatusCode::CREATED);
-        assert_eq!(response.headers()["x-upstream"], "auth-gate");
+        assert_eq!(response.headers()["x-upstream"], "identity");
         let body = to_bytes(response.into_body(), 1024).await.unwrap();
         assert_eq!(body, "/api/auth/login?return=console|forwarded|credentials");
     }
@@ -1807,6 +1816,58 @@ projecty.billing"
             .unwrap();
     }
 
+    /// O envelope que o identity confere do outro lado, em Go.
+    ///
+    /// Este teste fixa o que o portão ASSINA para uma rota de piloto; o
+    /// `TestAcceptsAnEnvelopeTheGatewaySigned`, em
+    /// `services/identity/internal/gateway`, fixa o que o identity ACEITA,
+    /// contra um envelope que saiu daqui. Os dois se encontram no meio, e é
+    /// isso que faz uma divergência entre as duas implementações aparecer como
+    /// teste vermelho em vez de como porta aberta.
+    #[tokio::test]
+    async fn signs_rider_reads_for_the_identity_audience() {
+        let issuer = TestIssuer::new("identity-key");
+        let (upstream, _state) = spawn_security_upstream(Some(issuer.jwks())).await;
+        let mut config = test_config(upstream.clone());
+        config.auth.jwks_url = upstream.join(".well-known/jwks.json").unwrap();
+        let app = build_app(config).unwrap();
+        let token = issuer.token("projecty.identity", &["Admin"]);
+        let response = app
+            .oneshot(
+                HttpRequest::get("/api/riders?ids=a,b")
+                    .header(AUTHORIZATION, format!("Bearer {token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response_json(response).await;
+        let issued_at = body["issued_at"].as_str().unwrap();
+        let signature = body["signature"]
+            .as_str()
+            .unwrap()
+            .strip_prefix("v1=")
+            .unwrap();
+        let canonical = format!(
+            "v1
+local-v1
+rider-123
+Admin
+{issued_at}
+GET
+/api/riders?ids=a,b
+projecty.identity"
+        );
+        let mut mac = Hmac::<Sha256>::new_from_slice(&[b'x'; 32]).unwrap();
+        mac.update(canonical.as_bytes());
+        mac.verify_slice(&URL_SAFE_NO_PAD.decode(signature).unwrap())
+            .unwrap();
+    }
+
+    /// O lote é de administrador, e um token de piloto para nele -- antes do
+    /// upstream, e não depois.
     #[tokio::test]
     async fn refuses_a_rider_token_on_an_admin_route() {
         let issuer = TestIssuer::new("admin-policy-key");
@@ -1814,7 +1875,33 @@ projecty.billing"
         let mut config = test_config(upstream.clone());
         config.auth.jwks_url = upstream.join(".well-known/jwks.json").unwrap();
         let app = build_app(config).unwrap();
-        let token = issuer.token("projecty.rider-manager", &["Rider"]);
+        let token = issuer.token("projecty.identity", &["Rider"]);
+        let response = app
+            .oneshot(
+                HttpRequest::get("/api/riders?ids=a,b")
+                    .header(AUTHORIZATION, format!("Bearer {token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+        assert_eq!(state.upstream_requests.load(Ordering::SeqCst), 0);
+    }
+
+    /// E o próprio registro passa. Quem confere o dono é o identity, comparando
+    /// o sujeito do envelope com o identificador do caminho; recusar aqui
+    /// deixaria essa conferência inalcançável, e a rota de auto-leitura só
+    /// funcionaria chamando o identity direto.
+    #[tokio::test]
+    async fn lets_a_rider_reach_their_own_record() {
+        let issuer = TestIssuer::new("self-read-key");
+        let (upstream, state) = spawn_security_upstream(Some(issuer.jwks())).await;
+        let mut config = test_config(upstream.clone());
+        config.auth.jwks_url = upstream.join(".well-known/jwks.json").unwrap();
+        let app = build_app(config).unwrap();
+        let token = issuer.token("projecty.identity", &["Rider"]);
         let response = app
             .oneshot(
                 HttpRequest::get("/api/riders/rider-123")
@@ -1825,8 +1912,13 @@ projecty.billing"
             .await
             .unwrap();
 
-        assert_eq!(response.status(), StatusCode::FORBIDDEN);
-        assert_eq!(state.upstream_requests.load(Ordering::SeqCst), 0);
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(state.upstream_requests.load(Ordering::SeqCst), 1);
+        // E o envelope que chega lá nomeia o piloto: é o sujeito, e não um
+        // identificador do caminho, que decide de quem é o registro.
+        let body = response_json(response).await;
+        assert_eq!(body["subject"], "rider-123");
+        assert_eq!(body["roles"], "Rider");
     }
 
     #[tokio::test]
@@ -1906,7 +1998,7 @@ projecty.billing"
         let mut config = test_config(upstream.clone());
         config.auth.jwks_url = upstream.join(".well-known/jwks.json").unwrap();
         let app = build_app(config).unwrap();
-        let token = issuer.token("projecty.rider-manager", &["Rider"]);
+        let token = issuer.token("projecty.identity", &["Rider"]);
         let response = app
             .oneshot(
                 HttpRequest::post("/api/rental/close")

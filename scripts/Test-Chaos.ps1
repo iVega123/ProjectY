@@ -9,7 +9,7 @@ try {
     $json = docker compose -f docker-compose.yml -f docker-compose.chaos.yml config --format json
     if ($LASTEXITCODE) { throw 'Compose configuration failed.' }
     $model = $json | ConvertFrom-Json
-    foreach ($service in @('auth-gate','rider-manager','rental-core')) {
+    foreach ($service in @('rental-core')) {
         $environment = $model.services.$service.environment
         foreach ($key in @('Redis__ConnectionString','RabbitMQ__HostName')) {
             if ($environment.$key -notmatch '^toxiproxy(:|$)') { throw "$service bypasses proxy: $key" }
@@ -22,7 +22,13 @@ try {
         if ($model.services.$service.depends_on.toxiproxy.condition -ne 'service_healthy') { throw "$service is not health-gated." }
     }
     if ($model.services.'api-gateway'.environment.GATEWAY_REDIS_URL -notmatch '://toxiproxy:') { throw 'Gateway bypasses Redis proxy.' }
-    if ($model.services.'rider-manager'.environment.MinIO__Endpoint -ne 'toxiproxy') { throw 'Object storage bypasses proxy.' }
+    # O identity não é .NET e não usa as mesmas chaves. O que o ensaio precisa
+    # provar é o mesmo: banco e armazenamento de objetos atravessam o proxy, e
+    # o serviço só sobe depois que ele está de pé.
+    $identity = $model.services.identity.environment
+    if ($identity.IDENTITY_DATABASE_URL -notmatch 'toxiproxy') { throw 'identity bypasses its database proxy.' }
+    if ($identity.MINIO_ENDPOINT -notmatch '^toxiproxy(:|$)') { throw 'Object storage bypasses proxy.' }
+    if ($model.services.identity.depends_on.toxiproxy.condition -ne 'service_healthy') { throw 'identity is not health-gated.' }
     # Isolate from existing developer containers, names, ports and persistent data.
     $model.name = $project
     foreach ($service in $model.services.PSObject.Properties.Value) { $service.PSObject.Properties.Remove('container_name'); $service.PSObject.Properties.Remove('ports') }

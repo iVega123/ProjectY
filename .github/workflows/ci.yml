@@ -101,8 +101,8 @@ jobs:
           grep --fixed-strings --quiet 'matcherRegex: trace_id' deploy/observability/grafana/provisioning/datasources/datasources.yaml
           grep --fixed-strings --quiet 'allow_structured_metadata: true' deploy/observability/loki.yaml
           grep --fixed-strings --quiet 'processors: [service-graphs]' deploy/observability/tempo.yaml
-          grep --fixed-strings --quiet 'postgres-data:/var/lib/postgresql' docker-compose.yml
-          grep --fixed-strings --quiet 'amq\.default|cmd\.rider\.register' scripts/New-LocalSecrets.ps1
+          grep --fixed-strings --quiet 'cockroach-data:/cockroach/cockroach-data' docker-compose.yml
+          grep --fixed-strings --quiet 'amq\.default|cmd\.rental\.update-licence' scripts/New-LocalSecrets.ps1
 
       - name: Validate command queue upgrade
         shell: pwsh
@@ -116,13 +116,16 @@ jobs:
         shell: bash
         run: |
           for project in \
-            services/AuthGate/AuthGate/AuthGate.csproj \
-            services/rental-core/RentalCore/RentalCore.csproj \
-            services/RiderManager/RiderManager/RiderManager.csproj; do
+            services/rental-core/RentalCore/RentalCore.csproj; do
             grep --quiet 'OpenTelemetry.Exporter.OpenTelemetryProtocol' "$project"
             grep --quiet 'Serilog.Sinks.OpenTelemetry' "$project"
             grep --quiet 'Shared\\Observability' "$project"
           done
+          # O identity exporta pelo SDK do Go, sem projeto .NET onde procurar
+          # pacote: o guarda equivalente é o pacote existir e o servidor estar
+          # embrulhado nele.
+          grep --quiet 'otlptracehttp' services/identity/internal/telemetry/telemetry.go
+          grep --quiet 'otelhttp.NewHandler' services/identity/cmd/identity/main.go
           grep --quiet 'AddAspNetCoreInstrumentation' Shared/Observability/ProjectYTelemetryExtensions.cs
           grep --quiet 'AddHttpClientInstrumentation' Shared/Observability/ProjectYTelemetryExtensions.cs
           grep --quiet 'WriteTo.OpenTelemetry' Shared/Observability/ProjectYTelemetryExtensions.cs
@@ -135,33 +138,10 @@ jobs:
         uses: dorny/paths-filter@v3
         with:
           filters: |
-            auth_gate:
-              - 'services/AuthGate/**'
-              - 'Shared/**'
-              - '.dockerignore'
-              - '.github/workflows/ci.yml'
-              - '.grype.yaml'
-              - '.trivyignore.yaml'
-              - 'global.json'
-              - 'Directory.Build.*'
-              - 'Directory.Packages.props'
-              - 'NuGet.config'
             rental_core:
               - 'services/rental-core/**'
               - 'contracts/**'
               - 'services/risk-pricing/pricing-policy.json'
-              - 'Shared/**'
-              - '.dockerignore'
-              - '.github/workflows/ci.yml'
-              - '.grype.yaml'
-              - '.trivyignore.yaml'
-              - 'global.json'
-              - 'Directory.Build.*'
-              - 'Directory.Packages.props'
-              - 'NuGet.config'
-            rider_manager:
-              - 'services/RiderManager/**'
-              - 'contracts/**'
               - 'Shared/**'
               - '.dockerignore'
               - '.github/workflows/ci.yml'
@@ -198,9 +178,7 @@ jobs:
         id: matrix
         shell: bash
         env:
-          AUTH_GATE_CHANGED: ${{ steps.filter.outputs.auth_gate }}
           RENTAL_CORE_CHANGED: ${{ steps.filter.outputs.rental_core }}
-          RIDER_MANAGER_CHANGED: ${{ steps.filter.outputs.rider_manager }}
           API_GATEWAY_CHANGED: ${{ steps.filter.outputs.api_gateway }}
           POLYGLOT_CHANGED: ${{ steps.filter.outputs.polyglot }}
         run: |
@@ -229,14 +207,8 @@ jobs:
               <<< "$image_matrix")
           }
 
-          if [[ "$AUTH_GATE_CHANGED" == "true" ]]; then
-            add_service "AuthGate" "services/AuthGate/AuthGate.sln" "auth-gate" "." "services/AuthGate/AuthGate/Dockerfile" "ghcr.io/ivega123/projecty/auth-gate"
-          fi
           if [[ "$RENTAL_CORE_CHANGED" == "true" ]]; then
             add_service "RentalCore" "services/rental-core/RentalCore.sln" "rental-core" "." "services/rental-core/RentalCore/Dockerfile" "ghcr.io/ivega123/projecty/rental-core"
-          fi
-          if [[ "$RIDER_MANAGER_CHANGED" == "true" ]]; then
-            add_service "RiderManager" "services/RiderManager/RiderManager.sln" "rider-manager" "." "services/RiderManager/RiderManager/Dockerfile" "ghcr.io/ivega123/projecty/rider-manager"
           fi
           if [[ "$API_GATEWAY_CHANGED" == "true" ]]; then
             image_matrix=$(jq --compact-output \

@@ -7,12 +7,3 @@ description = "ProjectY synthetic secret used to prove the CI gate"
 regex = '''PROJECTY_GITLEAKS_CANARY_[0-9A-F]{16}'''
 keywords = ["PROJECTY_GITLEAKS_CANARY_"]
 
-# Owner: @iVega123. Review by: 2027-08-29.
-# This matches only an empty example value; populated .env files are ignored by Git.
-[[allowlists]]
-targetRules = ["generic-api-key"]
-description = "Empty RiderManager API-key template value"
-condition = "AND"
-regexTarget = "line"
-paths = ['''^\.env\.example$''']
-regexes = ['''RIDER_MANAGER_API_KEY=''']

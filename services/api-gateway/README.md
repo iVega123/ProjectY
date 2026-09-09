@@ -9,8 +9,8 @@ shared Redis rate limiter are now enforced at this edge boundary.
 
 | Public path | Current upstream |
 |---|---|
-| `/api/auth/**` | AuthGate |
-| `/api/riders/**`, `/update-image` | RiderManager |
+| `/api/auth/**` | identity |
+| `/api/riders/**`, `/update-image` | identity |
 | `/api/motorcycles/**` | MotoHub |
 | `/api/rental/**` | RentalOperations |
 
@@ -28,14 +28,12 @@ All runtime configuration comes from environment variables.
 | `GATEWAY_BIND` | No (`0.0.0.0:8090`) | Listener address |
 | `GATEWAY_HEALTH_URL` | No (`http://127.0.0.1:8090/health/ready`) | URL used by the binary probe |
 | `GATEWAY_HEALTHCHECK_TIMEOUT_MS` | No (`2000`) | Probe timeout |
-| `GATEWAY_UPSTREAM_AUTH_GATE` | Yes | AuthGate base URL |
-| `GATEWAY_UPSTREAM_RIDER_MANAGER` | Yes | RiderManager base URL |
+| `GATEWAY_UPSTREAM_IDENTITY` | Yes | identity base URL |
 | `GATEWAY_UPSTREAM_MOTO_HUB` | Yes | MotoHub base URL |
 | `GATEWAY_UPSTREAM_RENTAL_OPERATIONS` | Yes | RentalOperations base URL |
 | `GATEWAY_JWKS_URL` | Yes | Absolute JWKS URL; redirects are refused |
 | `GATEWAY_JWT_ISSUER` | Yes | Exact trusted access-token issuer |
-| `GATEWAY_JWT_AUDIENCE_AUTH_GATE` | Yes | Exact audience accepted on AuthGate routes |
-| `GATEWAY_JWT_AUDIENCE_RIDER_MANAGER` | Yes | Exact audience accepted on RiderManager routes |
+| `GATEWAY_JWT_AUDIENCE_IDENTITY` | Yes | Exact audience accepted on identity routes |
 | `GATEWAY_JWT_AUDIENCE_MOTO_HUB` | Yes | Exact audience accepted on MotoHub routes |
 | `GATEWAY_JWT_AUDIENCE_RENTAL_OPERATIONS` | Yes | Exact audience accepted on RentalOperations routes |
 | `GATEWAY_JWKS_CACHE_TTL_SECS` | No (`300`) | Maximum age of cached public keys |
@@ -52,7 +50,7 @@ All runtime configuration comes from environment variables.
 | `GATEWAY_RATE_LIMIT_GENERAL_REFILL_PER_MINUTE` | No (`120`) | Sustained refill for non-auth routes |
 | `GATEWAY_RATE_LIMIT_AUTH_CAPACITY` | No (`10`) | Stricter burst capacity for `/api/auth/**` |
 | `GATEWAY_RATE_LIMIT_AUTH_REFILL_PER_MINUTE` | No (`5`) | Stricter sustained refill for `/api/auth/**` |
-| `GATEWAY_UPSTREAM_<UPSTREAM>_TIMEOUT_MS` | No (`1500`-`2500`) | Per-attempt timeout; upstream is `AUTH_GATE`, `RIDER_MANAGER`, `MOTO_HUB`, or `RENTAL_OPERATIONS` |
+| `GATEWAY_UPSTREAM_<UPSTREAM>_TIMEOUT_MS` | No (`2000`-`2500`) | Per-attempt timeout; upstream is `IDENTITY`, `MOTO_HUB`, `RENTAL_OPERATIONS`, or `BILLING` |
 | `GATEWAY_UPSTREAM_<UPSTREAM>_MAX_CONCURRENCY` | No (`64`) | Bulkhead permits; excess requests are refused without queueing |
 | `GATEWAY_UPSTREAM_<UPSTREAM>_BREAKER_FAILURE_THRESHOLD` | No (`5`) | Consecutive final failures before opening the circuit |
 | `GATEWAY_UPSTREAM_<UPSTREAM>_BREAKER_OPEN_MS` | No (`30000`) | Delay before admitting one half-open probe |
@@ -60,11 +58,21 @@ All runtime configuration comes from environment variables.
 | `GATEWAY_UPSTREAM_<UPSTREAM>_RETRY_BASE_MS` | No (`25`) | Initial full-jitter retry ceiling |
 | `GATEWAY_UPSTREAM_<UPSTREAM>_RETRY_MAX_MS` | No (`250`) | Maximum full-jitter retry ceiling |
 
-`POST /api/auth/login` and `POST /api/auth/register/rider` are public. Every
-other proxied route requires an EdDSA access token with `kid`, `sub`, `jti`,
-`iat`, `exp`, exact `iss`, and the route owner's exact `aud`. MotoHub routes and the
-legacy admin endpoints in RiderManager and RentalOperations also require the
-`Admin` role.
+`POST /api/auth/login`, `/api/auth/register/rider`, `/api/auth/refresh` and
+`/api/auth/logout` are public. Refresh and logout are public because the gateway
+cannot validate a refresh token — it is opaque, and the proof of possession is
+identity finding it — and because requiring an access token there would break the
+normal case: the caller renewing is the caller whose access token has expired.
+
+Every other proxied route requires an EdDSA access token with `kid`, `sub`,
+`jti`, `iat`, `exp`, exact `iss`, and an `aud` list containing the route owner's
+exact audience. MotoHub routes, the rider admin endpoints in identity, and the
+legacy admin endpoints in RentalOperations also require the `Admin` role.
+
+The stricter `/api/auth/**` rate-limit bucket follows the **path**, not the
+upstream. identity serves both `/api/auth` and `/api/riders` in one process, and
+a bucket that followed the process would cap rider reads at five per minute — a
+password brute-force rule applied to a lookup.
 
 `POST /api/rental/create` additionally checks
 `projecty:revoked:jti:<jti>` in Redis. A present key rejects the token, and a
@@ -115,10 +123,10 @@ path-and-query
 audience
 ```
 
-The current .NET AuthGate still issues legacy HMAC tokens and does not expose a
-JWKS. Protected gateway routes therefore fail closed until the Go identity
-issuer from issue #136 lands; the two public AuthGate routes remain available
-during that migration.
+Tokens come from the Go `identity` service, which signs with Ed25519 and
+publishes its public keys at `/.well-known/jwks.json`. An unresolvable JWKS
+means requests are refused rather than waved through, which is the posture
+ADR 0013 chose.
 
 Run `api-gateway --healthcheck` to execute the same self-probe used by Compose.
 The command needs only the two healthcheck variables, not upstream settings.

@@ -2,8 +2,7 @@ name: Rental load gate
 on:
   pull_request:
     paths:
-      - 'services/AuthGate/**'
-      - 'services/RiderManager/**'
+      - 'services/identity/**'
       - 'services/rental-core/**'
       - 'Shared/**'
       - 'services/api-gateway/**'

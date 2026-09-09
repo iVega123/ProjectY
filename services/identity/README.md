@@ -15,7 +15,17 @@ inventar um argumento de carga depois do fato.
 | `POST /api/auth/logout` | revoga a família inteira |
 | `GET /.well-known/jwks.json` | as chaves públicas, selecionáveis por `kid` |
 | `GET /.well-known/openid-configuration` | documento com a forma da descoberta OIDC |
+| `GET /api/riders?ids=a,b,c` | lote de pilotos, administrador, teto de 100 |
+| `GET /api/riders/{userId}` | o próprio piloto, ou um administrador |
+| `DELETE /api/riders/{userId}` | administrador, e responde 204 também quando já não há piloto |
+| `PUT /update-image` | a foto da CNH do piloto que o envelope nomeia |
 | `GET /health/{live,ready,startup}` | as três sondas |
+
+As quatro rotas de piloto exigem o **envelope de identidade** do [ADR
+0008](../../docs/adr/0008-single-trust-boundary.md); as de credencial e o JWKS
+são públicas, porque são o que alguém faz antes de ter um token. O identity não
+valida token nenhum: o portão é a única fronteira que faz isso, e um segundo
+lugar onde a validação acontece é um segundo lugar onde ela pode divergir.
 
 O documento de descoberta **não** faz deste serviço um provedor OIDC: não há
 endpoint de autorização, nem consentimento, nem clientes registrados, e o
@@ -23,6 +33,46 @@ endpoint de autorização, nem consentimento, nem clientes registrados, e o
 0013](../../docs/adr/0013-asymmetric-token-signing.md) pediu o documento porque
 ele é barato e torna o serviço legível para ferramenta padrão — é isso que ele
 entrega, e nada além.
+
+## O domínio do piloto
+
+O registro regulatório -- CNPJ, CNH, data de nascimento, o ponteiro para o
+objeto que o media-guard guardou -- mora aqui, em `riders`, ao lado da
+credencial em `users`. O [ADR
+0023](../../docs/adr/0023-the-rider-record-lives-with-the-credential.md) explica
+por que o `rider-core` separado do ADR 0012 não se justificou, e o que a fusão
+custa.
+
+`riders.user_id` é chave primária **e** estrangeira: um piloto não tem
+identificador próprio. É o achado B10 impossibilitado pelo schema em vez de
+evitado por convenção.
+
+Toda escrita grava o fato no outbox dentro da mesma transação:
+
+| | |
+|---|---|
+| `rider.registered` | cadastro |
+| `rider.verified` + `.v2` | cadastro, veredito do OCR, remoção |
+| `document.stored` | a CNH foi armazenada, e onde |
+| `document.verified` | **consumido**, do risk-pricing |
+
+O veredito do OCR só pode **derrubar**. Um documento que não confere revoga; um
+que confere devolve o que o tipo de CNH já dizia. Deixar o OCR conceder faria
+uma habilitação categoria B virar alugável por ter mandado uma foto legível.
+
+Apagar duas vezes responde 204 nas duas. O portão reenvia `DELETE` por conta
+própria quando o transporte falha -- é um método idempotente, e ele trata assim
+--, de modo que 404 na segunda tentativa transformaria uma resposta perdida em
+erro para o cliente, no caso exato que a repetição existe para cobrir. O custo
+aceito é que apagar um identificador que nunca existiu também responde 204.
+
+A foto nunca vai crua para o bucket: o que é gravado é o PNG que o media-guard
+devolveu. Cada envio gera uma chave nova, e o objeto anterior é apagado depois
+que o ponteiro novo está gravado -- inclusive quando o piloto inteiro sai. A
+limpeza fica FORA da transação de propósito: um bucket fora do ar não pode
+impedir de apagar um piloto. O preço é um objeto órfão quando o armazenamento
+falha, e um aviso no log é o que dá ao operador o que procurar. É a divisão arquivo/registro do ADR 0012 -- ele é dono do pipeline do
+arquivo, este serviço é dono da linha que diz qual piloto, qual objeto.
 
 ## A migração de senhas, e por que ela é o trabalho de verdade
 
@@ -45,6 +95,12 @@ três saídas:
   **intacto** — ele não pode fazer outra coisa, porque a senha em claro não
   existe em lugar nenhum. É o que dá à primeira metade o que ler.
 
+O importador grava os mesmos fatos que o cadastro grava, na mesma transação que
+a linha. Sem isso a importação produziria gente que **entra e não aluga**: o
+rental-core autoriza pela projeção local, ela só se preenche por evento, e um
+piloto que nunca foi anunciado não existe do lado de lá. Reexecutar não
+republica — só a linha que de fato chegou é anunciada.
+
 O leitor do formato antigo tem teste contra um vetor gerado pelo
 `PasswordHasher<T>` do próprio ASP.NET Identity, e não por este repositório.
 Um vetor auto-produzido provaria que o leitor concorda consigo mesmo, que não é
@@ -54,6 +110,14 @@ lado de fora.
 Custo aceito: o leitor de PBKDF2 fica no código até o último hash legado ser
 regravado. Isso é observável — `SELECT count(*) FROM users WHERE password_hash
 NOT LIKE '$argon2id$%'` — e não uma esperança.
+
+O código do AuthGate saiu do repositório no #136, e o importador ficou. Não é
+esquecimento: ele lê um banco no formato do ASP.NET Identity, e esse banco não é
+uma coisa que este repositório possua -- é o que uma instalação de verdade tem.
+Apagar o importador porque o CÓDIGO do serviço de origem saiu confundiria "não
+mantemos mais o serviço" com "ninguém tem os dados dele"; e sem ele o leitor de
+PBKDF2 vira decoração, porque nada mais conseguiria colocar um hash daqueles na
+tabela.
 
 ## As chaves
 
@@ -81,6 +145,12 @@ sobreposição menor que a vida do access token.
 | `IDENTITY_DATABASE_URL` | obrigatória |
 | `IDENTITY_AUDIENCES` | obrigatória, separada por vírgula — ver [ADR 0024](../../docs/adr/0024-one-token-many-audiences.md) |
 | `IDENTITY_KEY_ENCRYPTION_KEY` | obrigatória, mínimo 32 bytes |
+| `GATEWAY_IDENTITY_SIGNING_KEY` | obrigatória -- a chave com que o portão assina o envelope |
+| `IDENTITY_ENVELOPE_AUDIENCE` | obrigatória, e precisa bater com `GATEWAY_JWT_AUDIENCE_IDENTITY` |
+| `MEDIA_GUARD_URL` | `http://media-guard:8080` |
+| `MINIO_ENDPOINT` / `_ACCESS_KEY` / `_SECRET_KEY` / `_BUCKET` | armazenamento da CNH |
+| `KAFKA_BOOTSTRAP_SERVERS` | opcional; sem ele os fatos ficam retidos no outbox |
+| `SCHEMA_REGISTRY_URL` | usado só para resolver o id de schema, uma vez por tópico |
 | `IDENTITY_ISSUER` | `projecty.identity` |
 | `IDENTITY_ACCESS_TOKEN_TTL_SECONDS` | `300` — e o portão recusa acima disso |
 | `IDENTITY_REFRESH_TOKEN_TTL_SECONDS` | `604800` |
@@ -101,3 +171,15 @@ IDENTITY_TEST_COCKROACH=127.0.0.1:26257 go test -p 1 ./...
 
 `-p 1` porque os pacotes dividem um banco só, e aplicar o schema em paralelo faz
 o CockroachDB recusar com `table is being added`.
+
+## Tipos de evento
+
+Os tipos Go de `contracts/events` são **versionados**, ao contrário do que fazem
+o billing e o rental-core, que geram no build. O motivo é o dev loop: gerar no
+build obrigaria quem roda `go test ./...` a ter protoc instalado, e a linguagem
+inteira parte do princípio de que `go test` funciona sozinho.
+
+O que impede a cópia de envelhecer é o CI, que roda `./generate-events.sh` e
+recusa o PR se o resultado diferir do que está versionado. A geração roda dentro
+do container para o cabeçalho do arquivo gerado -- que carrega a versão do
+protoc -- ser o mesmo na máquina de quem escreve e no CI.

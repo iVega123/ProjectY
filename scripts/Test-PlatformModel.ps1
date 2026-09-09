@@ -11,7 +11,7 @@ try {
         $names = @($config.services.PSObject.Properties.Name | Sort-Object)
         if ($null -eq $expected) { $expected = $names }
         if (Compare-Object $expected $names) { throw "Application topology differs: $model" }
-        foreach ($name in @('auth-gate', 'rider-manager', 'rental-core', 'api-gateway', 'media-guard')) {
+        foreach ($name in @('identity', 'rental-core', 'api-gateway', 'media-guard')) {
             $service = $config.services.$name
             if (-not $service.build) { throw "Missing build: $model / $name" }
             $dockerfile = Join-Path $service.build.context $service.build.dockerfile

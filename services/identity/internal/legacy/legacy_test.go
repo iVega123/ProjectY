@@ -94,6 +94,55 @@ func TestImportCanBeRunAgain(t *testing.T) {
 	}
 }
 
+// TestImportAnnouncesWhatItBrought: importar sem contar produz gente que entra
+// e não aluga. O rental-core autoriza pela projeção local, ela só se preenche
+// por evento, e um piloto que nunca foi anunciado não existe do lado de lá.
+func TestImportAnnouncesWhatItBrought(t *testing.T) {
+	database := testdb.Open(t)
+	source := seedAuthGate(t, database)
+
+	if _, err := Import(context.Background(), database, database); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, topic := range []string{"rider.registered", "rider.verified", "rider.verified.v2"} {
+		if got := outboxCount(t, database, source.riderID, topic); got != 1 {
+			t.Fatalf("%s saiu %d vez(es) do importador", topic, got)
+		}
+	}
+
+	// E a linha concorda com o fato: CNH AB entra habilitada, como no cadastro.
+	var verified bool
+	if err := database.QueryRow(
+		`SELECT verified FROM riders WHERE user_id = $1`, source.riderID).Scan(&verified); err != nil {
+		t.Fatal(err)
+	}
+	if !verified {
+		t.Fatal("um piloto com CNH AB chegou não verificado")
+	}
+
+	// Reexecutar não republica: a linha já está lá, e a passagem seguinte não
+	// tem nada novo a contar.
+	if _, err := Import(context.Background(), database, database); err != nil {
+		t.Fatal(err)
+	}
+	if got := outboxCount(t, database, source.riderID, "rider.registered"); got != 1 {
+		t.Fatalf("a segunda passagem republicou o cadastro: %d", got)
+	}
+}
+
+func outboxCount(t *testing.T, database *sql.DB, riderID, topic string) int {
+	t.Helper()
+	var count int
+	if err := database.QueryRow(
+		`SELECT count(*) FROM outbox
+		  WHERE aggregate_type = 'rider' AND aggregate_id = $1 AND topic = $2`,
+		riderID, topic).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	return count
+}
+
 func TestImportReportsWhatItSkipped(t *testing.T) {
 	database := testdb.Open(t)
 	seedAuthGate(t, database)

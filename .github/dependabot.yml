@@ -23,10 +23,8 @@ updates:
 
   - package-ecosystem: docker
     directories:
-      - "/AuthGate/AuthGate"
       - "/MotoHub/MotoHub"
       - "/RentalOperations/RentalOperations"
-      - "/RiderManager/RiderManager"
     schedule:
       interval: weekly
       day: monday

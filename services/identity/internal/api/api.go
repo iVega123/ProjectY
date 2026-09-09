@@ -1,13 +1,20 @@
 // Package api é a borda HTTP do identity.
 //
-// Todas as rotas aqui são públicas de propósito: cadastrar, entrar, renovar e
-// sair são exatamente o que alguém faz ANTES de ter um token, e o JWKS precisa
-// ser legível por quem ainda não confia em nada. As rotas que exigem identidade
-// verificada -- ler piloto, revogar sessão alheia -- não moram neste arquivo.
+// Duas metades, e a divisão é deliberada.
+//
+// As rotas de credencial -- cadastrar, entrar, renovar, sair -- e o JWKS são
+// públicas, porque são exatamente o que alguém faz ANTES de ter um token, e o
+// JWKS precisa ser legível por quem ainda não confia em nada.
+//
+// As rotas do piloto exigem o envelope de identidade do ADR 0008, verificado em
+// `riders.go` contra o que o portão assinou. O identity NÃO valida token: o
+// portão é a única fronteira que faz isso, e um segundo lugar onde a validação
+// acontece é um segundo lugar onde ela pode divergir.
 package api
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -18,8 +25,12 @@ import (
 
 	"github.com/iVega123/ProjectY/services/identity/internal/accounts"
 	"github.com/iVega123/ProjectY/services/identity/internal/documents"
+	"github.com/iVega123/ProjectY/services/identity/internal/facts"
+	"github.com/iVega123/ProjectY/services/identity/internal/gateway"
 	"github.com/iVega123/ProjectY/services/identity/internal/keys"
+	"github.com/iVega123/ProjectY/services/identity/internal/media"
 	"github.com/iVega123/ProjectY/services/identity/internal/passwords"
+	"github.com/iVega123/ProjectY/services/identity/internal/riders"
 	"github.com/iVega123/ProjectY/services/identity/internal/sessions"
 	"github.com/iVega123/ProjectY/services/identity/internal/tokens"
 )
@@ -51,6 +62,10 @@ func init() {
 type API struct {
 	accounts  *accounts.Store
 	sessions  *sessions.Store
+	riders    *riders.Store
+	gateway   *gateway.Verifier
+	guard     *media.Guard
+	objects   ObjectStore
 	ring      *keys.Ring
 	minter    tokens.Minter
 	issuer    string
@@ -58,24 +73,49 @@ type API struct {
 	logger    *slog.Logger
 }
 
-// New monta o roteador com tudo já resolvido.
-func New(
-	accountStore *accounts.Store,
-	sessionStore *sessions.Store,
-	ring *keys.Ring,
-	minter tokens.Minter,
-	issuer string,
-	publicURL string,
-	logger *slog.Logger,
-) *API {
+// ObjectStore é o que a borda precisa do armazenamento de objetos.
+//
+// Uma interface e não o tipo concreto porque a borda não deve saber que existe
+// MinIO do outro lado -- e porque um teste da rota não deveria precisar de um
+// armazenamento de objetos de pé para provar quem pode ler o quê.
+type ObjectStore interface {
+	Put(ctx context.Context, riderID string, sanitized media.Sanitized) (string, error)
+	Presign(ctx context.Context, key string, expiry time.Duration) (string, error)
+	Remove(ctx context.Context, key string) error
+}
+
+// Dependencies são as peças que a borda precisa ter na mão.
+//
+// Uma struct e não oito parâmetros posicionais: a lista já passou do ponto em
+// que trocar dois argumentos do mesmo tipo compila e faz outra coisa.
+type Dependencies struct {
+	Accounts  *accounts.Store
+	Sessions  *sessions.Store
+	Riders    *riders.Store
+	Gateway   *gateway.Verifier
+	Guard     *media.Guard
+	Objects   ObjectStore
+	Ring      *keys.Ring
+	Minter    tokens.Minter
+	Issuer    string
+	PublicURL string
+	Logger    *slog.Logger
+}
+
+// New monta a borda com tudo já resolvido.
+func New(dependencies Dependencies) *API {
 	return &API{
-		accounts:  accountStore,
-		sessions:  sessionStore,
-		ring:      ring,
-		minter:    minter,
-		issuer:    issuer,
-		publicURL: publicURL,
-		logger:    logger,
+		accounts:  dependencies.Accounts,
+		sessions:  dependencies.Sessions,
+		riders:    dependencies.Riders,
+		gateway:   dependencies.Gateway,
+		guard:     dependencies.Guard,
+		objects:   dependencies.Objects,
+		ring:      dependencies.Ring,
+		minter:    dependencies.Minter,
+		issuer:    dependencies.Issuer,
+		publicURL: dependencies.PublicURL,
+		logger:    dependencies.Logger,
 	}
 }
 
@@ -88,6 +128,17 @@ func (a *API) Routes() *http.ServeMux {
 	mux.HandleFunc("POST /api/auth/logout", a.logout)
 	mux.HandleFunc("GET /.well-known/jwks.json", a.jwks)
 	mux.HandleFunc("GET /.well-known/openid-configuration", a.discovery)
+
+	// O domínio do piloto. Diferente das rotas acima, estas exigem o envelope
+	// que o portão assina -- ver ADR 0008 e internal/gateway.
+	if a.riders != nil {
+		mux.HandleFunc("GET /api/riders", a.listRiders)
+		mux.HandleFunc("GET /api/riders/{id}", a.getRider)
+		mux.HandleFunc("DELETE /api/riders/{id}", a.deleteRider)
+	}
+	if a.guard != nil && a.objects != nil {
+		mux.HandleFunc("PUT /update-image", a.updateImage)
+	}
 	return mux
 }
 
@@ -141,7 +192,23 @@ func (a *API) registerRider(writer http.ResponseWriter, request *http.Request) {
 		return
 	}
 
-	user, err := a.accounts.RegisterRider(request.Context(), accounts.Registration{
+	// Os fatos entram na MESMA transação do cadastro. Um piloto gravado sem
+	// `rider.registered` some da projeção do rental-core -- ele se cadastra, e
+	// depois não consegue alugar, sem nenhum erro em lugar nenhum.
+	ctx := riders.WithTraceParent(request.Context(), traceParent(request))
+	announce := func(inner context.Context, transaction *sql.Tx, user accounts.User) error {
+		if a.riders == nil {
+			return nil
+		}
+		return a.riders.RegisterFacts(inner, transaction, facts.Rider{
+			ID:        user.ID,
+			Name:      user.Name,
+			CNHNumber: strings.TrimSpace(body.CNHNumber),
+			CNHType:   cnhType,
+		})
+	}
+
+	user, err := a.accounts.RegisterRider(ctx, accounts.Registration{
 		Email:        body.Email,
 		Name:         body.Name,
 		PasswordHash: hash,
@@ -149,7 +216,8 @@ func (a *API) registerRider(writer http.ResponseWriter, request *http.Request) {
 		DateOfBirth:  dateOfBirth,
 		CNHNumber:    strings.TrimSpace(body.CNHNumber),
 		CNHType:      cnhType,
-	})
+		Verified:     facts.Entitled(cnhType),
+	}, announce)
 	switch {
 	case errors.Is(err, accounts.ErrEmailTaken):
 		fail(writer, http.StatusConflict, "e-mail já cadastrado")

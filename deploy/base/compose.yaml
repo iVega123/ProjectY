@@ -1,6 +1,6 @@
 # One application topology during the strangler migration. Build contexts,
 # configuration and secrets resolve from the repository root.
-# PostgreSQL serves auth-gate and rider-manager; rental-core runs on CockroachDB.
+# Every application service runs on CockroachDB; the identity issuer included.
 include:
   - path: ../../docker-compose.yml
     project_directory: ../..
