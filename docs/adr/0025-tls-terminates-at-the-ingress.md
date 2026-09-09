@@ -87,7 +87,8 @@ string, as a `v2` envelope. That is a change in four implementations — the Rus
 gateway that signs, and the C#, Kotlin and Go verifiers — with a rollout in
 which both versions are accepted, so it belongs in its own change and not in a
 documentation one. It is cheaper than a mesh and closes the integrity half
-without the confidentiality half.
+without the confidentiality half. Tracked as
+[#191](https://github.com/iVega123/ProjectY/issues/191).
 
 **The trigger to revisit:** a second tenant in the same cluster, a compliance
 requirement that names encryption in transit between workloads, or the first
@@ -121,3 +122,4 @@ service that is not ours running beside these.
 
 - [Epic 10 — Local Kubernetes and signed admission](https://github.com/iVega123/ProjectY/issues/11)
 - [A4 — Terminate TLS at the ingress](https://github.com/iVega123/ProjectY/issues/100)
+- [#191 — Bind the identity envelope to the request body](https://github.com/iVega123/ProjectY/issues/191)
