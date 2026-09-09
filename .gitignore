@@ -65,3 +65,6 @@ docs/images/console-test-failure.png
 # JVM build output (services/billing)
 **/.gradle/
 services/billing/build/
+
+# Pinned local Kubernetes tools downloaded by the Tilt bootstrap
+.tools/
