@@ -246,9 +246,42 @@ logs nobody out.
 |---|---|---|
 | 01 | The target DDL did not run on the engine ADR 0004 declared | ✅ **closed** — portable schema, proven in CI against both engines |
 | 02 | The double-booking guarantee lives in MongoDB, not in the target schema | ✅ **closed** — `one_active_rental_per_motorcycle` is the production mechanism, proved under concurrency |
-| 03 | Identity has no place in the schema or among the services | ⬜ **open** — `identity` decided in ADRs 0012 and 0013; tables not written |
+| 03 | Identity has no place in the schema or among the services | ✅ **closed** in #136 — `005_identity.sql` carries `users`, `riders`, `refresh_tokens` and `signing_keys`; the service issues and rotates |
+| 04 | The architecture is drawn to scale horizontally; every component assumes exactly one replica | ⬜ **open** — see §5.1 |
 
 No box is ticked because a decision was taken. Only because code runs.
+
+### 5.1 Contradição 04 — the axis this document did not have
+
+Sections 2 and 3 describe **topology**: who talks to whom. That target is
+reached. What no section describes is **multiplicity** — how many of each — and
+every component was written for exactly one.
+
+It is not visible in normal use, which is what makes it worth writing down:
+
+| Component | At one replica | At two |
+|---|---|---|
+| `api-gateway` | fine | fine — stateless, the one piece already ready |
+| outbox relays | 1 to 50 events/s ([#192](https://github.com/iVega123/ProjectY/issues/192)) | **publish every fact twice** — two of the three claim no row |
+| Kafka consumers | fine | **impossible** — consumer state is in process memory ([#70](https://github.com/iVega123/ProjectY/issues/70)) |
+| `telemetry` | fine | a broadcast on one pod never reaches clients on another — the PubSub adapter is node-local |
+| CockroachDB | one node, `--insecure` | connection budget per pod becomes a real limit |
+| Redis | one instance, `appendfsync always` | the rate limiter pays fsync it does not need ([#193](https://github.com/iVega123/ProjectY/issues/193)) |
+
+The relay line is the sharpest: the benchmark creates ~7.3 rentals/s against a
+`rental-core` relay that publishes **1/s**. The outbox already grows seven times
+faster than it drains for the length of every load run, and empties afterwards.
+Nothing asserts on drain latency, only on depth, so it has never been seen.
+
+The load floor has the same shape on the read side: an idle console tab polls
+six times a minute, and each poll fetches a page of a hundred rentals to
+validate a session ([#194](https://github.com/iVega123/ProjectY/issues/194)).
+That cost scales with the number of **users**, not with what they do.
+
+**The cheapest way to close this is not a load test.** It is running two
+replicas of everything, with no load at all, and fixing what appears. Meeting
+the duplicated relay at a hundred thousand requests per second is meeting it at
+the worst possible moment.
 
 ---
 
@@ -257,9 +290,15 @@ No box is ticked because a decision was taken. Only because code runs.
 | Floor | Scope | Size | Gain |
 |---|---|---|---|
 | **0** | Portable schema, per-engine bootstrap, CI on both | S — **done** | Portability becomes verifiable |
-| **1** | Move the .NET services into `services/`, wire them to the new stack, export OTLP | M | The dashboards stop querying an empty series |
-| **2** | Merge into `rental-core`, migrate `rentals` off Mongo, inbox in `billing` | L — **rentals done** | Real ACID consistency; exactly-once effect demonstrated |
-| **3** | The remaining polyglot services, with contract testing | L | The target architecture, complete |
+| **1** | Move the .NET services into `services/`, wire them to the new stack, export OTLP | M — **done** | The dashboards stop querying an empty series |
+| **2** | Merge into `rental-core`, migrate `rentals` off Mongo, inbox in `billing` | L — **done** | Real ACID consistency; exactly-once effect demonstrated |
+| **3** | The remaining polyglot services, with contract testing | L — **done** (epic 9) | The target architecture, complete |
+| **4** | Multiplicity: two replicas of everything, then N | M | The architecture stops assuming it is alone |
+| **5** | Operation: cluster, TLS at the ingress, autoscaling | L | It can be run, not only demonstrated |
+
+Floors 0 to 3 were about **shape**. Four and five are about **behaviour under
+more than one of each**, which no earlier floor tested and no earlier section of
+this document described.
 
 No estimates in weeks, deliberately: they would depend on availability, and an
 invented number costs more than it helps. The order is what matters — each floor
@@ -269,11 +308,20 @@ leaves the repository demonstrable at the end of it.
 
 ## 7. Next steps
 
-1. **Piso 1.** It is what turns the platform from a stage set into an instrument.
-2. **Identity tables**, `refresh_tokens` among them — closes Contradição 03 in the schema.
-3. **The Protobuf contract for `rental.closed`**, with the fields that describe the fact, and the CI job that blocks a compatibility break.
-4. **Batch endpoints** in `identity` and `rental-core`, locked by contract tests.
-5. **The missing-score policy**: which tier a rider who has not been scored yet falls into.
+1. **Two replicas of everything, without load.** The cheapest way to surface
+   floor 4, and the only one that meets the failures while the system is calm.
+   [#192](https://github.com/iVega123/ProjectY/issues/192) and
+   [#70](https://github.com/iVega123/ProjectY/issues/70) are what it finds first.
+2. **The console's load floor** — [#194](https://github.com/iVega123/ProjectY/issues/194).
+   Until an idle tab costs nothing, any measurement is mostly measuring the poll.
+3. **CockroachDB on more than one node**, with a connection budget per pod.
+4. **Epic 10** — the cluster, TLS terminated at the ingress
+   ([#100](https://github.com/iVega123/ProjectY/issues/100), decided in ADR 0025),
+   and autoscaling on p99 and queue depth rather than on CPU: these services are
+   I/O-bound, and CPU stays low while the queue grows.
+5. **The missing-score policy**: which tier a rider who has not been scored yet
+   falls into. The one item from the previous edition of this list that is still
+   open.
 
 ---
 
