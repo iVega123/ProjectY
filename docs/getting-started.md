@@ -49,25 +49,30 @@ starting.
 | Tempo | `3200` |
 | Loki | `3100` |
 | Grafana | `3000` |
-| PostgreSQL | `5432` |
 | Redis | `6379` |
-| pgAdmin | `5050` |
 | CockroachDB | `26257`, `26080` |
 | MinIO | `9000`, `9001` |
 
 | Application service | Required host ports |
 |---|---|
 | API Gateway | `8090` |
-| Auth Gate | `8080`, `8181` |
-| Rider Manager | `8000`, `8001` |
-| MotoHub | `8100`, `8101` |
-| Rental Operations | `8200`, `8201` |
+| identity | `8095`, on `127.0.0.1` only |
+| rental-core | `8200` |
 
-The secondary application ports (`8181`, `8001`, `8101`, and `8201`)
-are still published and therefore must be free, even though the current
-containers do not configure usable HTTPS listeners on them. If a port is
-already occupied, stop the conflicting local service or change the matching
-host-side mapping in `docker-compose.yml` before starting the stack.
+Every port above is **HTTP**. There is no TLS anywhere in this stack: no
+certificate is configured, `ASPNETCORE_URLS` declares HTTP, and calls between
+services are plain `http://`. That is audit finding A4, and it stays open until
+the ingress of [Epic 10](https://github.com/iVega123/ProjectY/issues/11)
+terminates TLS — see [ADR 0025](adr/0025-tls-terminates-at-the-ingress.md) for
+what was decided about traffic inside the cluster.
+
+What this document no longer does is *promise* otherwise. It used to list a
+second port for each .NET service — `8181`, `8001`, `8101`, `8201` — described
+as HTTPS. Those services are gone, and the last of those ports was published by
+`docker-compose.yml` with nothing listening on it.
+
+If a port is already occupied, stop the conflicting local service or change the
+matching host-side mapping in `docker-compose.yml` before starting the stack.
 
 ## Start the stack
 
@@ -128,28 +133,30 @@ depends on the network connection and Docker cache.
 | Service | Local URL |
 |---|---|
 | API Gateway | <http://localhost:8090> |
-| Auth Gate | <http://localhost:8080> |
-| Rider Manager | <http://localhost:8000> |
-| MotoHub | <http://localhost:8100> |
-| Rental Operations | <http://localhost:8200> |
+| identity | <http://127.0.0.1:8095> |
+| rental-core | <http://localhost:8200> |
+
+Auth Gate, Rider Manager, MotoHub and Rental Operations were listed here until
+#136. They no longer exist: the first two became `identity` and the last two
+became `rental-core`.
 
 Grafana is available at <http://localhost:3000>. Sign in with the generated
 `GRAFANA_USER` and `GRAFANA_PASSWORD` values from `.env`; both ProjectY
 dashboards and the Prometheus, Tempo, and Loki datasources are provisioned at
 startup.
 
-The four ASP.NET Core services instrument inbound requests and outbound
-`HttpClient` calls with the OpenTelemetry SDK. The Rust gateway creates a
-server span for each proxied request and propagates its W3C trace context to the
-upstream. Database commands emitted through EF Core and Npgsql are child spans
-of the request that triggered them. RabbitMQ trace
-context is captured in each transactional outbox row, continued by a producer
-span when the relay publishes, and restored by consumers; bounded retries keep
-the same W3C `traceparent` and `tracestate` headers. The same carrier contract
-applies to Kafka services as they are introduced; no application Kafka producer
-or consumer exists in the current tree.
+`rental-core`, the one ASP.NET Core service left, instruments inbound requests
+and outbound `HttpClient` calls with the OpenTelemetry SDK. The Rust gateway
+creates a server span for each proxied request and propagates its W3C trace
+context to the upstream. Database commands emitted through EF Core and Npgsql
+are child spans of the request that triggered them. RabbitMQ trace context is
+captured in each transactional outbox row, continued by a producer span when the
+relay publishes, and restored by consumers; bounded retries keep the same W3C
+`traceparent` and `tracestate` headers. Kafka carries the same contract in a
+`traceparent` header on each record, in `rental-core`, `identity`, `billing`,
+`telemetry` and `risk-pricing`.
 
-Both runtimes keep structured JSON console output and also export logs and
+Every runtime keeps structured JSON console output and also export logs and
 traces over OTLP to the Collector. The rental SLO dashboard selects the active
 `rental-core` service and its `POST /api/Rental/create` span.
 
@@ -161,15 +168,14 @@ alone never exposes Swagger from a `Production` process. Set
 `SWAGGER_ENABLED=false` in `.env` to disable Swagger in the self-hosted
 development overlay without editing its Compose files.
 
-Application traffic enters through the gateway. Existing service ports remain
-published temporarily for operational migration, but the domain APIs reject
-direct calls without a fresh, gateway-signed identity envelope. The gateway routes
-`/api/auth/**`, `/api/riders/**`, `/api/motorcycles/**`, and `/api/rental/**` to
-their current owners.
+Application traffic enters through the gateway. The service ports above stay
+published for operational access, and the domain APIs reject direct calls
+without a fresh, gateway-signed identity envelope. The gateway routes
+`/api/auth/**`, `/api/riders/**`, `/api/motorcycles/**`, `/api/rental/**` and
+`/api/invoices/**` to their current owners.
 
-Only the HTTP endpoints above are documented as usable. The compose file also
-publishes ports that older documentation described as HTTPS, but it configures
-no certificates or HTTPS listener; the audit records this as finding A4.
+Only the HTTP endpoints above are documented as usable, and the compose file no
+longer publishes any port without a listener behind it.
 
 The gateway already enforces the target EdDSA/JWKS trust boundary and strips
 credentials before forwarding a short-lived signed identity envelope. Domain

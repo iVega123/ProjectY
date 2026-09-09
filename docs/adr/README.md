@@ -42,6 +42,7 @@ Implementation records for the original epic 10:
 | [0022](0022-polyglot-workload-and-storage-costs.md) | Each runtime and store earns its workload | Alternatives, operational costs, Rabbit commands and Kafka facts |
 | [0023](0023-the-rider-record-lives-with-the-credential.md) | The rider record lives with the credential | Why rider-core was dropped, and what the merge costs |
 | [0024](0024-one-token-many-audiences.md) | One token, many audiences | Why aud became a list, and what replay it accepts |
+| [0025](0025-tls-terminates-at-the-ingress.md) | TLS terminates at the ingress | Why inside the cluster is network policy, not mTLS |
 
 Records 0000–0005 are the design trail and read in sequence. ADR 0008 belongs
 to that trail but was written later, after review showed the trust-boundary

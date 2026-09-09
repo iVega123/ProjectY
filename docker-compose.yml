@@ -389,8 +389,11 @@ services:
       dockerfile: services/rental-core/RentalCore/Dockerfile
     container_name: rental-core
     ports:
+      # 8200 e só. A 8201 era a porta "HTTPS" do achado A4: publicada, sem
+      # certificado, sem listener e sem nada do outro lado -- ASPNETCORE_URLS
+      # declara http://+:8200. Uma porta aberta que não responde é uma promessa
+      # que o Compose fazia por conta própria.
       - "8200:8200"
-      - "8201:8201"
     networks:
       - projecty
     environment:
