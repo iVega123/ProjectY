@@ -15,12 +15,12 @@ if ($LASTEXITCODE -ne 0) { throw 'Kyverno admission controller did not become av
 
 & $kubectl apply -f (Join-Path $root 'deploy\platform\kyverno\policy.yaml') | Out-Null
 if ($LASTEXITCODE -ne 0) { throw 'Could not apply the image policy in audit mode.' }
-& $kubectl wait --for=condition=Ready clusterpolicy/verify-projecty-images --timeout=90s
+& $kubectl wait --namespace projecty --for=condition=Ready namespacedimagevalidatingpolicy/verify-projecty-images --timeout=90s
 if ($LASTEXITCODE -ne 0) { throw 'The audit image policy did not become ready.' }
 
 & $kubectl apply -k (Join-Path $root 'deploy\platform\kyverno') | Out-Null
 if ($LASTEXITCODE -ne 0) { throw 'Could not promote the image policy to enforce mode.' }
-& $kubectl wait --for=condition=Ready clusterpolicy/verify-projecty-images --timeout=90s
+& $kubectl wait --namespace projecty --for=condition=Ready namespacedimagevalidatingpolicy/verify-projecty-images --timeout=90s
 if ($LASTEXITCODE -ne 0) { throw 'The enforced image policy did not become ready.' }
 
 Write-Host "Kyverno $version ready; ProjectY image verification promoted Audit -> Enforce."

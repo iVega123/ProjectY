@@ -4,14 +4,14 @@ resources:
   - policy.yaml
 patches:
   - target:
-      group: kyverno.io
+      group: policies.kyverno.io
       version: v1
-      kind: ClusterPolicy
+      kind: NamespacedImageValidatingPolicy
       name: verify-projecty-images
     patch: |-
       - op: replace
-        path: /spec/rules/0/verifyImages/0/failureAction
-        value: Enforce
+        path: /spec/validationActions/0
+        value: Deny
       - op: replace
-        path: /spec/rules/0/verifyImages/0/mutateDigest
+        path: /spec/validationConfigurations/mutateDigest
         value: true

@@ -697,7 +697,8 @@ jobs:
           $tools = ./scripts/kind/Install-ProjectYKubernetesTools.ps1
           $policy = (& $tools.Kubectl kustomize deploy/platform/kyverno) -join "`n"
           if ($LASTEXITCODE -ne 0 -or
-              $policy -notmatch 'failureAction: Enforce' -or
+              $policy -notmatch '(?m)^  validationActions:\s*$' -or
+              $policy -notmatch '(?m)^  - Deny\s*$' -or
               $policy -notmatch 'mutateDigest: true' -or
               $policy -notmatch 'url: https://rekor.sigstore.dev') {
             throw 'The signed-image admission policy is not enforced.'
