@@ -153,9 +153,20 @@ if full:
         'projecty/billing:dev', '.',
         dockerfile = 'services/billing/Dockerfile', target = 'development',
     )
+    # O identity compila da raiz pelo mesmo motivo do billing: o teste aplica
+    # deploy/db/sql. O live update sincroniza o fonte e reinicia -- `go run`
+    # recompila em segundos, e um binário Go não tem troca a quente.
+    docker_build(
+        'projecty/identity:dev', '.',
+        dockerfile = 'services/identity/Dockerfile', target = 'development',
+        live_update = [
+            fall_back_on(['services/identity/Dockerfile', 'services/identity/go.mod', 'services/identity/go.sum']),
+            sync('services/identity', '/src/services/identity'), restart_container(),
+        ],
+    )
     infra_resources += ['kafka', 'cassandra', 'schema-registry']
     setup_resources += ['kafka-init', 'cassandra-init', 'schema-init']
-    service_resources += ['telemetry', 'risk-pricing', 'console', 'billing']
+    service_resources += ['telemetry', 'risk-pricing', 'console', 'billing', 'identity']
 
 for resource in infra_resources:
     dc_resource(resource, labels = ['infra'])

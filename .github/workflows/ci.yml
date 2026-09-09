@@ -188,6 +188,7 @@ jobs:
               - 'services/risk-pricing/**'
               - 'services/console/**'
               - 'services/billing/**'
+              - 'services/identity/**'
               - 'deploy/db/sql/**'
               - 'contracts/**'
               - '.github/workflows/*.yml'
@@ -244,11 +245,11 @@ jobs:
           fi
 
           if [[ "$POLYGLOT_CHANGED" == "true" ]]; then
-            for service in media-guard telemetry risk-pricing console billing; do
+            for service in media-guard telemetry risk-pricing console billing identity; do
               context="services/$service"
-              # risk-pricing e billing compilam da raiz: um gera de contracts/,
-              # o outro de contracts/ e deploy/db/sql.
-              if [[ "$service" == "risk-pricing" || "$service" == "billing" ]]; then context="."; fi
+              # Três compilam da raiz: o risk-pricing gera de contracts/, e o
+              # billing e o identity leem contracts/ e deploy/db/sql.
+              if [[ "$service" == "risk-pricing" || "$service" == "billing" || "$service" == "identity" ]]; then context="."; fi
               image_matrix=$(jq --compact-output --arg service "$service" --arg context "$context" \
                 '.include += [{service: $service, image: $service, context: $context, dockerfile: ("services/" + $service + "/Dockerfile"), repository: ("ghcr.io/ivega123/projecty/" + $service)}]' \
                 <<< "$image_matrix")
@@ -282,6 +283,10 @@ jobs:
     needs: changes
     if: needs.changes.outputs.has_polyglot_changes == 'true'
     uses: ./.github/workflows/billing.yml
+  identity-tests:
+    needs: changes
+    if: needs.changes.outputs.has_polyglot_changes == 'true'
+    uses: ./.github/workflows/identity.yml
 
   observability:
     name: Observability stack

@@ -40,6 +40,8 @@ Implementation records for the original epic 10:
 | [0020](0020-asynchronous-risk-pricing.md) | Python owns asynchronous OCR and pricing | Durable facts, conservative projections and single-worker cost |
 | [0021](0021-operations-console.md) | Next.js is the operations window | Real traces, live positions, bounded load and BFF authorization |
 | [0022](0022-polyglot-workload-and-storage-costs.md) | Each runtime and store earns its workload | Alternatives, operational costs, Rabbit commands and Kafka facts |
+| [0023](0023-the-rider-record-lives-with-the-credential.md) | The rider record lives with the credential | Why rider-core was dropped, and what the merge costs |
+| [0024](0024-one-token-many-audiences.md) | One token, many audiences | Why aud became a list, and what replay it accepts |
 
 Records 0000–0005 are the design trail and read in sequence. ADR 0008 belongs
 to that trail but was written later, after review showed the trust-boundary
@@ -47,7 +49,9 @@ decision was implied everywhere and recorded nowhere; read it after 0001.
 Records 0006, 0007, 0010 and 0011 are decisions taken while closing individual
 findings or building a specific piece, and read on their own. ADR 0012 refines
 0001 by separating technology role from service inventory; ADR 0013 supersedes
-the signing half of 0006. Numbers are never reused or reassigned — 0011 was
+the signing half of 0006. ADR 0023 supersedes the rider-core half of 0012 and
+ADR 0024 the audience half of 0006 — between them, 0006 and 0012 now stand
+entirely as history on those two points. Numbers are never reused or reassigned — 0011 was
 renumbered once, from a 0008 that collided with an existing record.
 ADR 0009 is the executable consistency contract and refines the shorter
 outbox/inbox statement in ADR 0003.

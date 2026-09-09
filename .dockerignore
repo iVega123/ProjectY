@@ -19,6 +19,8 @@
 !services/console/**
 !services/billing/
 !services/billing/**
+!services/identity/
+!services/identity/**
 !deploy/
 !deploy/db/
 !deploy/db/sql/

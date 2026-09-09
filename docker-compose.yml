@@ -337,25 +337,25 @@ services:
       GATEWAY_UPSTREAM_MOTO_HUB_TIMEOUT_MS: "2000"
       GATEWAY_UPSTREAM_RENTAL_OPERATIONS_TIMEOUT_MS: "2500"
       GATEWAY_UPSTREAM_BILLING_TIMEOUT_MS: "2000"
-      GATEWAY_JWKS_URL: http://auth-gate:8080/.well-known/jwks.json
+      # O emissor é o identity, que vive no overlay poliglota junto do
+      # CockroachDB de onde ele lê as chaves. Sem o overlay de pé o JWKS não
+      # resolve e o portão recusa todo token -- que é a postura do ADR 0013,
+      # e é a mesma coisa que já acontecia quando esta linha apontava para um
+      # AuthGate que nunca serviu JWKS nenhum.
+      GATEWAY_JWKS_URL: http://identity:8095/.well-known/jwks.json
       GATEWAY_JWT_ISSUER: projecty.identity
       GATEWAY_JWT_AUDIENCE_AUTH_GATE: projecty.auth-gate
       GATEWAY_JWT_AUDIENCE_RIDER_MANAGER: projecty.rider-manager
       GATEWAY_JWT_AUDIENCE_MOTO_HUB: projecty.rental-core
       GATEWAY_JWT_AUDIENCE_RENTAL_OPERATIONS: projecty.rental-core
-      # A mesma audiência do rental-core, e não uma nova, deliberadamente.
+      # O billing volta a ter audiência própria.
       #
-      # Esta string faz duas coisas: valida o aud do token e vira a audiência
-      # do envelope que o portão assina. Uma audiência própria para o billing
-      # exigiria um segundo token para a mesma tela -- o console guarda um só,
-      # e não tem credenciais para pedir outro. A fatura é a liquidação de um
-      # aluguel que o chamador já tem token para ler.
-      #
-      # É um afrouxamento real: um token do rental-core serve no billing. O
-      # #136 troca este esquema inteiro (EdDSA com JWKS, um emissor), e a
-      # fronteira certa se desenha lá, uma vez, em vez de aqui, com uma sexta
-      # chave HMAC para um esquema que já está de saída.
-      GATEWAY_JWT_AUDIENCE_BILLING: projecty.rental-core
+      # No #137 esta linha dizia projecty.rental-core, e a justificativa era
+      # que o console guarda um token só: com um `aud` por token, uma tela que
+      # lê aluguel e nota precisaria de dois. O identity emite `aud` como
+      # LISTA, então o mesmo token vale nos dois -- e o billing deixa de
+      # precisar atender pelo nome do vizinho.
+      GATEWAY_JWT_AUDIENCE_BILLING: projecty.billing
       GATEWAY_IDENTITY_SIGNING_KEY: ${GATEWAY_IDENTITY_SIGNING_KEY:?GATEWAY_IDENTITY_SIGNING_KEY is required}
       GATEWAY_IDENTITY_SIGNING_KEY_ID: local-v1
       GATEWAY_REDIS_URL: redis://redis:6379/

@@ -114,6 +114,10 @@ $values = [ordered]@{
     RIDER_MANAGER_JWT_SIGNING_KEY     = (New-RandomValue)
     RENTAL_OPERATIONS_JWT_SIGNING_KEY = (New-RandomValue)
     GATEWAY_IDENTITY_SIGNING_KEY      = (New-RandomValue)
+    # Sela a semente Ed25519 que o identity guarda em signing_keys. Não é a
+    # chave de assinatura: é o que impede quem lê o banco de virar emissor.
+    IDENTITY_KEY_ENCRYPTION_KEY       = (New-RandomValue)
+    IDENTITY_ADMIN_PASSWORD           = (New-RandomValue)
 }
 
 $lines = @(

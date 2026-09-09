@@ -370,6 +370,98 @@ pub fn is_admin(identity: &Identity) -> bool {
 mod tests {
     use super::*;
 
+    /// O JWKS e o token abaixo saíram do `identity`, em Go, e não deste
+    /// arquivo.
+    ///
+    /// Todo o resto da suíte gera o par de chaves aqui mesmo, em Rust, e
+    /// assina em Rust -- o que prova que este validador concorda consigo
+    /// mesmo. Concordar consigo mesmo não é o risco: o risco é o emissor e o
+    /// validador ficarem em linguagens diferentes e discordarem no formato,
+    /// que é uma falha que não aparece como build quebrado, e sim como
+    /// ninguém conseguindo entrar.
+    ///
+    /// O que este vetor congela: a forma do JWKS (OKP/Ed25519, `x` em
+    /// base64url sem padding), a seleção pelo `kid`, os bytes da assinatura
+    /// EdDSA, e os nomes e tipos das reivindicações -- inclusive `aud` como
+    /// LISTA, que é o que permite um token só servir no rental-core e no
+    /// billing.
+    ///
+    /// O que ele deliberadamente NÃO cobre: expiração. Um vetor fixo está
+    /// sempre vencido, e a validade de tempo já é exercitada pelos testes que
+    /// emitem localmente.
+    const IDENTITY_JWKS: &str = concat!(
+        r#"{"keys":[{"kty":"OKP","crv":"Ed25519","#,
+        r#""x":"A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg","#,
+        r#""kid":"20260908-goldvector","alg":"EdDSA","use":"sig"}]}"#
+    );
+    const IDENTITY_TOKEN: &str = concat!(
+        "eyJhbGciOiJFZERTQSIsImtpZCI6IjIwMjYwOTA4LWdvbGR2ZWN0b3IiLCJ0eXAiOiJKV1QifQ.",
+        "eyJyb2xlcyI6WyJSaWRlciJdLCJpc3MiOiJwcm9qZWN0eS5pZGVudGl0eSIsInN1YiI6IjhhMWY5",
+        "YzJlLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDAwMSIsImF1ZCI6WyJwcm9qZWN0eS5yZW50YWwt",
+        "Y29yZSIsInByb2plY3R5LmJpbGxpbmciXSwiZXhwIjoxNzkwMDAwMzAwLCJuYmYiOjE3OTAwMDAw",
+        "MDAsImlhdCI6MTc5MDAwMDAwMCwianRpIjoiZGUzMDA0ZjQtZWY1Yy00MmQ3LTllMzctY2EwZjQy",
+        "NWI3M2Q3In0.",
+        "WRNgWXrewn8Npyd27gR15L5yi9d911N_uv_0riY2VZ3ddW-l4uZzrnNwqrJatZMqo00nTSAKKIa4",
+        "Az1DnmRWCg"
+    );
+
+    #[test]
+    fn accepts_a_token_the_go_identity_service_minted() {
+        let set: JwkSet = serde_json::from_str(IDENTITY_JWKS).expect("JWKS do identity ilegível");
+
+        let header = decode_header(IDENTITY_TOKEN).expect("cabeçalho ilegível");
+        assert_eq!(header.alg, Algorithm::EdDSA);
+        let kid = header.kid.expect("o identity precisa carimbar o kid");
+        let jwk = set.find(&kid).expect("o JWKS não publica o kid do token");
+        let key = DecodingKey::from_jwk(jwk).expect("a chave publicada não é utilizável");
+
+        let mut validation = Validation::new(Algorithm::EdDSA);
+        validation.set_issuer(&["projecty.identity"]);
+        // A audiência do billing, e não a do rental-core: um token com `aud`
+        // em lista vale nos dois, que é como o #137 deixa de precisar que o
+        // billing responda pelo nome do rental-core.
+        validation.set_audience(&["projecty.billing"]);
+        validation.set_required_spec_claims(&["sub", "iss", "aud", "exp", "iat", "jti"]);
+        validation.validate_exp = false;
+
+        let claims = decode::<Claims>(IDENTITY_TOKEN, &key, &validation)
+            .expect("o portão recusou um token do identity")
+            .claims;
+
+        assert_eq!(claims.sub, "8a1f9c2e-0000-4000-8000-000000000001");
+        assert_eq!(claims.jti, "de3004f4-ef5c-42d7-9e37-ca0f425b73d7");
+        assert_eq!(claims.exp - claims.iat, 300);
+
+        let mut roles = Vec::new();
+        claims.role.append_to(&mut roles);
+        claims.roles.append_to(&mut roles);
+        assert_eq!(roles, vec!["Rider".to_owned()]);
+    }
+
+    #[test]
+    fn rejects_a_token_the_identity_did_not_sign() {
+        let set: JwkSet = serde_json::from_str(IDENTITY_JWKS).unwrap();
+        let jwk = set.find("20260908-goldvector").unwrap();
+        let key = DecodingKey::from_jwk(jwk).unwrap();
+
+        // Um byte mexido na assinatura. Sem isto, o teste acima passaria
+        // igual com uma verificação que não verifica nada.
+        let mut tampered = IDENTITY_TOKEN.to_owned();
+        tampered.pop();
+        tampered.push(if IDENTITY_TOKEN.ends_with('A') {
+            'B'
+        } else {
+            'A'
+        });
+
+        let mut validation = Validation::new(Algorithm::EdDSA);
+        validation.set_issuer(&["projecty.identity"]);
+        validation.set_audience(&["projecty.billing"]);
+        validation.validate_exp = false;
+
+        assert!(decode::<Claims>(&tampered, &key, &validation).is_err());
+    }
+
     #[test]
     fn rejects_ambiguous_or_malformed_bearer_headers() {
         let mut headers = HeaderMap::new();

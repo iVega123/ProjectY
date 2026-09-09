@@ -173,11 +173,27 @@ services do not parse JWTs; they verify that envelope and apply only role and
 resource-ownership rules. Calls between domain services propagate the verified
 identity through the same signed envelope, replacing the former API keys.
 
-The legacy .NET AuthGate still emits HMAC tokens, so authenticated traffic will
-use the gateway once the Go identity service in issue #136 provides the issuer
-and JWKS. Until then, the gateway rejects those legacy tokens instead of silently
-weakening the new boundary; login and rider registration remain public through
-port `8090`.
+The Go `identity` service issues those tokens. It signs with Ed25519, publishes
+its public keys at `/.well-known/jwks.json`, and the gateway selects the key by
+`kid` from a bounded cache. It runs in the polyglot overlay, next to the
+CockroachDB it reads its keys from, and listens on `8095`.
+
+```bash
+curl -s localhost:8095/api/auth/login -H 'content-type: application/json' \
+  -d '{"email":"admin@projecty.local","password":"<IDENTITY_ADMIN_PASSWORD from .env>"}'
+```
+
+The access token that comes back is accepted by the gateway on every proxied
+route. The refresh token is opaque, single-use, and stored hashed in
+CockroachDB — reusing one after it has been exchanged revokes the whole session,
+because there is no way to tell the victim from the thief.
+
+The gateway still routes `/api/auth/**` to the legacy .NET AuthGate, which still
+emits HMAC tokens that the gateway rejects. That is deliberate and temporary:
+AuthGate's registration is what feeds RiderManager the rider record over
+RabbitMQ, and the two retire together in the second half of #136. Until they do,
+tokens come from `identity` on port `8095` and everything else goes through the
+gateway on `8090`.
 
 Once the identity issuer is available, rental creation also requires Redis for
 the immediate-revocation check defined by ADR 0017. The denylist key is

@@ -1,0 +1,38 @@
+name: Identity
+on:
+  workflow_call:
+permissions: {contents: read}
+jobs:
+  identity:
+    runs-on: ubuntu-latest
+    defaults:
+      run: {working-directory: services/identity}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27'
+          cache-dependency-path: services/identity/go.sum
+      # Um CockroachDB de verdade, e não um duplo. Metade do que este serviço
+      # promete está escrita em SQL -- o índice único parcial que decide qual
+      # réplica gera a primeira chave de assinatura, o UPDATE ... RETURNING que
+      # consome um refresh token sem corrida, o CHECK que recusa um tipo de CNH
+      # inventado -- e um repositório em memória não tem nada disso.
+      #
+      # `docker run` e não um service container do próprio job: o container do
+      # CockroachDB precisa de argumentos (`start-single-node --insecure`), e a
+      # sintaxe de services não permite trocar o comando.
+      - name: Start CockroachDB
+        run: |
+          docker run --detach --name cockroach --publish 26257:26257 \
+            cockroachdb/cockroach:v26.3.1 start-single-node --insecure
+      # gofmt é o `dotnet format --verify-no-changes` desta linguagem.
+      - name: Check formatting
+        run: test -z "$(gofmt -l .)"
+      - run: go vet ./...
+      # -p 1 porque os pacotes dividem um banco só, e aplicar o schema em
+      # paralelo faz o CockroachDB recusar com "table is being added". Um banco
+      # por pacote custaria mais tempo do que a paralelização devolveria.
+      - run: go test -p 1 ./...
+        env:
+          IDENTITY_TEST_COCKROACH: 127.0.0.1:26257
