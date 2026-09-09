@@ -47,6 +47,53 @@ namespace MotoHub.Controllers
         /// A restrição :guid é o que separa esta rota da de placa. Nenhuma placa
         /// brasileira se parece com um UUID, então não há ambiguidade a resolver.
         /// </summary>
+        /// <summary>
+        /// As motos de uma tela, numa chamada.
+        ///
+        /// Existe por contrato, e não por desempenho. O aluguel passou a
+        /// referenciar a moto pelo id em #134 e carrega apenas a placa; modelo e
+        /// ano moram aqui. Sem o lote, compor uma página de aluguéis custa uma
+        /// requisição por linha -- o N+1 não desaparece, apenas se muda do
+        /// navegador para o BFF, que é exatamente o que o ADR 0014 recusa.
+        ///
+        /// Não é rota de administrador. Ela é N vezes "esta moto", e ler uma moto
+        /// já é do piloto que vai alugá-la; o catálogo inteiro é que continua
+        /// sendo inventário da frota.
+        ///
+        /// O segmento literal `batch` ganha da rota de placa na precedência do
+        /// roteamento, e nenhuma placa brasileira se parece com a palavra.
+        /// </summary>
+        [HttpGet("batch")]
+        public async Task<IActionResult> GetByIdsAsync([FromQuery] string? ids)
+        {
+            var requested = (ids ?? string.Empty)
+                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            if (requested.Length == 0)
+            {
+                return BadRequest("At least one motorcycle id is required.");
+            }
+            if (requested.Length > MotorcycleService.MaxBatchSize)
+            {
+                return BadRequest(
+                    $"A batch may request at most {MotorcycleService.MaxBatchSize} motorcycle ids.");
+            }
+
+            var parsed = new List<Guid>(requested.Length);
+            foreach (var candidate in requested)
+            {
+                if (!Guid.TryParse(candidate, out var id))
+                {
+                    return BadRequest($"'{candidate}' is not a motorcycle id.");
+                }
+                parsed.Add(id);
+            }
+
+            // Um id ausente vira ausência na lista, e não 404: uma tela compõe o
+            // que chegou, e uma moto que saiu do catálogo não pode apagar as
+            // outras linhas da página.
+            return Ok(await _motorcycleService.GetMotorcyclesByIdsAsync(parsed));
+        }
+
         [HttpGet("{id:guid}")]
         public async Task<IActionResult> GetByIdAsync(Guid id)
         {

@@ -50,6 +50,26 @@ namespace MotoHub.Repositories
             return await _context.Motorcycles.FindAsync(id);
         }
 
+        /// <summary>
+        /// As motos pedidas, numa consulta.
+        ///
+        /// Aposentada continua respondendo, ao contrário da paginação: um
+        /// aluguel antigo aponta para uma moto que saiu da frota, e omiti-la
+        /// deixaria a linha do histórico sem modelo nem placa. Listar a frota e
+        /// resolver uma referência são perguntas diferentes.
+        /// </summary>
+        public async Task<IReadOnlyList<Motorcycle>> GetByIdsAsync(IReadOnlyCollection<Guid> ids)
+        {
+            if (ids.Count == 0)
+            {
+                return [];
+            }
+            return await _context.Motorcycles
+                .AsNoTracking()
+                .Where(motorcycle => ids.Contains(motorcycle.Id))
+                .ToListAsync();
+        }
+
         public void Add(Motorcycle motorcycle)
         {
             _context.Motorcycles.Add(motorcycle);

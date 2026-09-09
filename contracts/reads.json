@@ -1,0 +1,36 @@
+{
+  "consumer": "console",
+  "screen": "rentals",
+  "why": "ADR 0014 makes batch reads a contract and not an optimisation: without them the N+1 does not disappear, it moves from the browser into the BFF. This file is the consumer's declaration, and each provider verifies it against its own running handler. Removing one of these turns a provider test red before it turns the screen blank.",
+  "pageSize": 100,
+  "reads": [
+    {
+      "name": "motorcycles by id",
+      "provider": "rental-core",
+      "method": "GET",
+      "path": "/api/motorcycles/batch",
+      "idsParameter": "ids",
+      "batched": true,
+      "maxBatch": 100,
+      "fields": ["id", "model", "year", "licensePlate"]
+    },
+    {
+      "name": "invoices by rental id",
+      "provider": "billing",
+      "method": "GET",
+      "path": "/api/invoices",
+      "idsParameter": "rentalIds",
+      "batched": true,
+      "maxBatch": 100,
+      "fields": ["rentalId", "currency", "totalMinor", "adjustmentMinor", "reason", "daysUsed"]
+    },
+    {
+      "name": "the caller's own rider record",
+      "provider": "identity",
+      "method": "GET",
+      "path": "/api/riders/{id}",
+      "batched": false,
+      "fields": ["userId", "name", "cnhType", "verified"]
+    }
+  ]
+}

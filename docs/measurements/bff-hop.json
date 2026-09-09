@@ -1,0 +1,28 @@
+{
+  "measuredAt": "2026-09-09T12:40:25.465Z",
+  "fixture": "projecty-load",
+  "rounds": 40,
+  "pace": 700,
+  "path": "/api/motorcycles/batch?ids=00000000-0000-0000-0000-000000000000",
+  "viaGateway": {
+    "p50": 9.25,
+    "p95": 12.11,
+    "p99": 49.39
+  },
+  "viaService": {
+    "p50": 4.05,
+    "p95": 5.47,
+    "p99": 5.67
+  },
+  "hopCostMs": {
+    "p50": 5.2,
+    "p95": 6.64
+  },
+  "compositionCalls": 3,
+  "includes": [
+    "verificação EdDSA contra o JWKS que o portão cacheia",
+    "limitação de taxa: uma ida ao Redis por requisição",
+    "assinatura do envelope do ADR 0008",
+    "um salto de rede a mais"
+  ]
+}

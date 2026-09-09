@@ -206,6 +206,21 @@ mod tests {
         }
     }
 
+    /// O lote que o console usa para compor a tela de aluguéis. Ele é N vezes
+    /// "esta moto", e não o catálogo -- classificá-lo como Admin recusaria o
+    /// piloto na borda e deixaria a tela sem modelo nem ano.
+    #[test]
+    fn a_rider_may_resolve_the_motorcycles_on_their_own_screen() {
+        assert_eq!(
+            access_for(
+                &Method::GET,
+                "/api/motorcycles/batch",
+                UpstreamName::MotoHub
+            ),
+            Access::Authenticated
+        );
+    }
+
     #[test]
     fn a_rider_may_read_one_motorcycle_but_not_the_fleet() {
         // Alugar exige saber qual moto se está alugando. Listar a frota, não.

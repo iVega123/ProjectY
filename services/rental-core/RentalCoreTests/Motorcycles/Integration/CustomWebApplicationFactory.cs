@@ -109,12 +109,22 @@ namespace MotoHubTests.Integration
                 HttpRequestMessage request,
                 CancellationToken cancellationToken)
             {
-                if (request.Headers.Authorization is { Scheme: "Bearer", Parameter: "valid-admin" })
+                // Dois marcadores, e nao um: o lote de motos do #138 nao e rota
+                // de administrador, e provar isso exige um chamador que nao seja
+                // um. Assinar tudo como Admin faria o teste passar sem dizer
+                // nada sobre quem a rota deixa entrar.
+                var role = request.Headers.Authorization switch
+                {
+                    { Scheme: "Bearer", Parameter: "valid-admin" } => "Admin",
+                    { Scheme: "Bearer", Parameter: "valid-rider" } => "Rider",
+                    _ => null
+                };
+                if (role is not null)
                 {
                     var principal = new ClaimsPrincipal(new ClaimsIdentity(
                     [
                         new Claim(ClaimTypes.NameIdentifier, "test-user"),
-                        new Claim(ClaimTypes.Role, "Admin")
+                        new Claim(ClaimTypes.Role, role)
                     ], "TestGatewayIdentity"));
                     new GatewayIdentitySigner(GatewayIdentityKey, "test-v1")
                         .Sign(request, principal, GatewayIdentityAudience);

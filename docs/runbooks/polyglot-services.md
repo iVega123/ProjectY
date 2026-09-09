@@ -38,6 +38,38 @@ delivery, then resume writes. To roll back, use the previous applications and
 drain or replay any new pending commands before reverting producers; no queue is
 automatically removed. This is a queue naming update, independent of #130.
 
+### The rental screen is composed in the console
+
+Since #138 the console assembles one screen from four services, server-side.
+One page costs **four calls**, and the number does not move with the number of
+rows: the page itself, then a batch for the motorcycles, a batch for the
+invoices, and the caller's own rider record — the last three in parallel.
+
+That composition lives in the BFF and not in the gateway, and the reason is
+change rate rather than language: the gateway changes rarely and fails closed;
+read composition changes with every screen and fails soft
+([ADR 0014](../adr/0014-read-aggregation-at-the-bff.md)).
+
+`contracts/reads.json` is the console's declaration of those reads, and each
+provider has a test that reads that file and checks its own handler — so
+deleting a batch endpoint turns a test red before it turns the screen blank.
+
+**When a provider is down, the row loses that field and the page still
+renders.** The screen says which one:
+
+```
+3 in the current page · without invoices
+```
+
+A 404 is not a degradation — it is an answer. An admin has no rider record, and
+the screen says nothing is missing.
+
+The extra hop through the gateway is measured, not assumed:
+[`docs/measurements/bff-hop.json`](../measurements/bff-hop.json). Reproduce it
+against a prepared fixture with `services/console/test/hop-cost.mjs`; keep the
+probe under the gateway's 120 requests per minute or it measures the rate
+limiter instead of the hop.
+
 ### Prepare the fixture
 
 ```powershell
