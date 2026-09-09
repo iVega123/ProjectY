@@ -1,6 +1,6 @@
 services:
   schema-registry:
-    image: quay.io/apicurio/apicurio-registry:3.3.2
+    image: quay.io/apicurio/apicurio-registry:3.3.3
     networks: [projecty]
     environment:
       APICURIO_STORAGE_KIND: kafkasql
