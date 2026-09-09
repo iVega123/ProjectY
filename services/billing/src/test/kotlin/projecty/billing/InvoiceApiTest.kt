@@ -190,6 +190,42 @@ class InvoiceApiTest {
 
     // ------------------------------------------------------------------ apoio
 
+    /**
+     * O lote responde com tudo o que o console declarou precisar.
+     *
+     * Os nomes dos campos vêm de `contracts/reads.json`, e não desta classe:
+     * renomear `totalMinor` aqui deixa este teste vermelho sem que ninguém
+     * precise lembrar de atualizá-lo, que é a diferença entre um contrato e um
+     * comentário.
+     */
+    @Test
+    fun `o lote responde o que o console declarou`() {
+        val declared = DeclaredRead.of("billing", InvoiceApi.BASE)
+        assertEquals("GET", declared.method)
+        assertEquals(InvoiceReads.MAX_BATCH_SIZE, declared.maxBatch)
+
+        val first = seed("rider-contract")
+        val second = seed("rider-contract")
+
+        val response =
+            get(
+                "${InvoiceApi.BASE}?${declared.idsParameter}=${first.rentalId},${second.rentalId}",
+                "rider-contract",
+            )
+
+        assertEquals(200, response.statusCode())
+        val invoices = json.readTree(response.body())
+        assertEquals(2, invoices.size())
+        for (invoice in invoices) {
+            for (field in declared.fields) {
+                assertTrue(
+                    invoice.has(field),
+                    "contracts/reads.json declares '$field', and the batch did not answer with it.",
+                )
+            }
+        }
+    }
+
     private fun get(
         pathAndQuery: String,
         subject: String,

@@ -49,6 +49,21 @@ namespace MotoHub.Services
             return _mapper.Map<MotorcycleDTO>(motorcycle);
         }
 
+        /// <summary>
+        /// Quantas motos um lote pode pedir de uma vez.
+        ///
+        /// O mesmo teto do lote de aluguéis, e o mesmo motivo: um lote sem teto
+        /// é uma consulta arbitrária escrita pelo cliente. O número acompanha o
+        /// tamanho de página do console de propósito -- uma tela cabe numa
+        /// chamada, e o #138 mede a tela por número de chamadas.
+        /// </summary>
+        public const int MaxBatchSize = 100;
+
+        public async Task<IReadOnlyList<MotorcycleDTO>> GetMotorcyclesByIdsAsync(IReadOnlyCollection<Guid> ids)
+        {
+            return _mapper.Map<IReadOnlyList<MotorcycleDTO>>(await _repository.GetByIdsAsync(ids));
+        }
+
         public void CreateMotorcycle(MotorcycleDTO motorcycleDto)
         {
             var motorcycle = _mapper.Map<Motorcycle>(motorcycleDto);

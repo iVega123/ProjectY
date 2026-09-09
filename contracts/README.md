@@ -45,6 +45,34 @@ Once `topics.json` exists in the base revision, CI registers that revision first
 and checks the proposed schema against it under FULL. The negative control is
 sent to the compatibility endpoint only, never registered.
 
+## Read contracts
+
+`reads.json` is the console's declaration of the reads its rental screen makes:
+path, the name of the ids parameter, the batch cap, and the fields it uses.
+
+It exists because [ADR 0014](../docs/adr/0014-read-aggregation-at-the-bff.md)
+makes batch reads a contract rather than an optimisation — without them the N+1
+does not disappear, it moves from the browser into the BFF. The definition of
+done in #138 is that removing one turns a test red before it turns a screen
+blank, and that is only true if the tests read the declaration instead of
+repeating it.
+
+Each provider verifies itself against this same file, against its own running
+handler:
+
+| Provider | Test |
+|---|---|
+| rental-core | `Motorcycles/Integration/MotorcycleBatchReadContractTests.cs` |
+| identity | `internal/api/reads_test.go` |
+| billing | `InvoiceApiTest.o lote responde o que o console declarou` |
+
+The consumer is checked too: `services/console/test/compose.test.ts` asserts the
+screen calls nothing that is not declared here, and that the page size equals
+every declared batch cap.
+
+A field renamed on one side, or an endpoint deleted, fails on the other side —
+which is the whole point of writing it down once.
+
 ## Validation
 
 `node --test contracts/check.test.mjs` checks conventions.

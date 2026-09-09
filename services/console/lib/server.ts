@@ -1,6 +1,7 @@
 import { cookies } from 'next/headers';
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
-import type { Attempt, RentalPage } from './types';
+import type { Attempt, ComposedPage, RentalPage } from './types';
+import { compose, PAGE_SIZE } from './compose';
 
 export const gateway = process.env.GATEWAY_URL ?? 'http://api-gateway:8090';
 export const origin = process.env.CONSOLE_ORIGIN ?? 'http://localhost:3001';
@@ -19,12 +20,21 @@ export async function upstream(path: string, value: string, init: RequestInit = 
 export async function session(cursor = ''): Promise<{token:string; userId:string; rentals:RentalPage}> {
   if(cursor.length > 2048) throw new Error('Invalid rental cursor');
   const value = await token();
-  const result = await upstream('/api/Rental/user?pageSize=100'+(cursor?'&cursor='+encodeURIComponent(cursor):''), value);
+  const result = await upstream('/api/Rental/user?pageSize='+PAGE_SIZE+(cursor?'&cursor='+encodeURIComponent(cursor):''), value);
   if (!result.ok) throw new Error(result.status === 429 ? 'Gateway rate limit; retry shortly.' : 'Session unavailable. Sign in again.');
   // Claims are read only after the gateway has validated signature, issuer, audience and revocation.
   const claims = JSON.parse(Buffer.from(value.split('.')[1], 'base64url').toString());
   if (typeof claims.sub !== 'string') throw new Error('Session has no subject');
   return {token:value, userId:claims.sub, rentals:await result.json()};
+}
+// A tela composta: a página de aluguéis mais o que os outros serviços sabem
+// sobre ela. A composição vive aqui, e não no portão -- ADR 0014, e a razão é a
+// taxa de mudança, não a linguagem.
+export async function composedSession(cursor = ''): Promise<{userId:string; page:ComposedPage}> {
+  const auth = await session(cursor);
+  const composition = await compose(auth.rentals.items, auth.userId,
+    path => upstream(path, auth.token));
+  return {userId:auth.userId, page:{...composition, nextCursor:auth.rentals.nextCursor}};
 }
 function signature(payload: string, domain: string) {
   const key = process.env.TELEMETRY_TICKET_KEY;

@@ -92,8 +92,13 @@ try {
     if ($Polyglot) { $startServices += @('console', 'telemetry', 'risk-pricing') }
     Compose up @build -d --wait --wait-timeout 300 @startServices
     # Only this generated project and its fresh, separately named volumes are touched.
-    Get-Content load/fixtures/seed-rental-core.sql -Raw | docker compose -p $project -f $fixture exec -T cockroachdb cockroach sql --insecure --database=projecty
-    if ($LASTEXITCODE) { throw 'Rental-core fixture failed.' }
+    #
+    # O arquivo entra por copia, e nao pelo pipe. O Windows PowerShell 5.1
+    # escreve um BOM ao canalizar texto para um processo nativo, e o cockroach
+    # recusa o arquivo inteiro com um erro de sintaxe no primeiro caractere --
+    # um caractere que nao esta no arquivo. Copiar tira o host do caminho.
+    Compose cp load/fixtures/seed-rental-core.sql cockroachdb:/tmp/seed-rental-core.sql
+    Compose exec -T cockroachdb cockroach sql --insecure --database=projecty --file /tmp/seed-rental-core.sql
     Compose exec -T redis redis-cli FLUSHDB
     & "$PSScriptRoot/Invoke-Chaos.ps1" reset -Url 'http://127.0.0.1:18474'
     if ($PrepareOnly) { $exitCode = 0; return }

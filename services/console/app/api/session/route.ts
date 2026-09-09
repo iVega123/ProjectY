@@ -1,5 +1,5 @@
 import { cookies } from 'next/headers';
-import { failure, origin, sameOrigin, session, upstream } from '../../../lib/server';
+import { composedSession, failure, origin, sameOrigin, upstream } from '../../../lib/server';
 export async function POST(request:Request) {
   try {
     sameOrigin(request);
@@ -11,5 +11,5 @@ export async function POST(request:Request) {
     return Response.json({signedIn:true});
   } catch(error) {return failure(error)}
 }
-export async function GET(request:Request) {try {const data = await session(new URL(request.url).searchParams.get('cursor') ?? ''); return Response.json({userId:data.userId,rentals:data.rentals})} catch(error) {return failure(error)}}
+export async function GET(request:Request) {try {const data = await composedSession(new URL(request.url).searchParams.get('cursor') ?? ''); return Response.json({userId:data.userId,rentals:data.page,rider:data.page.rider})} catch(error) {return failure(error)}}
 export async function DELETE(request:Request) {try {sameOrigin(request); (await cookies()).delete('projecty-session'); return Response.json({signedIn:false})} catch(error) {return failure(error)}}

@@ -1,9 +1,12 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
-import type { Attempt, Metrics, Position, Rental, Span } from '../lib/types';
+import type { Attempt, Composed, Metrics, Position, RiderCard, Span } from '../lib/types';
 const LiveMap = dynamic(() => import('./map'), {ssr:false});
 const money = (n:number) => new Intl.NumberFormat('en-US',{style:'currency',currency:'BRL'}).format(n);
+// A nota vem em centavos, como o contrato do evento. Dividir na borda é o
+// último lugar onde isso acontece, e o único que mostra o número a alguém.
+const minor = (n:number, currency:string) => new Intl.NumberFormat('en-US',{style:'currency',currency}).format(n/100);
 async function json(url:string, init?:RequestInit) {
   const response = await fetch(url,init); const body = await response.json();
   if (!response.ok) throw new Error(body.error ?? 'Request failed');
@@ -11,7 +14,11 @@ async function json(url:string, init?:RequestInit) {
 }
 export default function Console() {
   const [user,setUser] = useState('');
-  const [rentals,setRentals] = useState<Rental[]>([]);
+  const [rentals,setRentals] = useState<Composed[]>([]);
+  const [rider,setRider] = useState<RiderCard|null>(null);
+  // O que a composição não conseguiu trazer. A tela renderiza o que chegou e
+  // diz o que faltou, em vez de fingir que a página está completa -- ADR 0014.
+  const [missing,setMissing] = useState<string[]>([]);
   const [selected,setSelected] = useState('');
   const [cursor,setCursor] = useState('');
   const [nextCursor,setNextCursor] = useState<string|null>(null);
@@ -37,7 +44,8 @@ export default function Console() {
     const data = await json('/api/session'+(pageCursor?'?cursor='+encodeURIComponent(pageCursor):''));
     setCursor(pageCursor); setNextCursor(data.rentals.nextCursor);
     setUser(data.userId); setRentals(data.rentals.items);
-    setSelected(current => data.rentals.items.some((r:Rental)=>r.rentalId===current) ? current : data.rentals.items.find((r:Rental) => !r.actualEndDate)?.rentalId || '');
+    setRider(data.rider ?? null); setMissing(data.rentals.missing ?? []);
+    setSelected(current => data.rentals.items.some((r:Composed)=>r.rentalId===current) ? current : data.rentals.items.find((r:Composed) => !r.actualEndDate)?.rentalId || '');
   }
   useEffect(() => {
     setNow(Date.now());
@@ -136,7 +144,7 @@ export default function Console() {
   const traceLength=spans.length ? Math.max(...spans.map(s=>s.start+s.duration))-traceStart : 1;
   return <div className="shell">
     <aside className="rail"><a className="brand" href="/" aria-label="ProjectY home">Y<span>↗</span></a><div className="rail-word">OPERATIONS</div><span className="rail-foot">PY / 10</span></aside>
-    <main><header><div className="breadcrumb">PROJECT Y <span>/</span> OPERATIONS CONSOLE</div><div className="header-state"><i className={user?'dot':'dot muted'}/>{user?'Session connected':'Sign-in required'}</div></header>
+    <main><header><div className="breadcrumb">PROJECT Y <span>/</span> OPERATIONS CONSOLE</div><div className="header-state"><i className={user?'dot':'dot muted'}/>{user?(rider?rider.name+' · CNH '+rider.cnhType:'Session connected'):'Sign-in required'}</div></header>
       <section className="intro"><div><div className="eyebrow">THE SYSTEM, IN MOTION</div><h1>Watch every move<span>.</span></h1><p>From a rider on the street to the events behind the ride.</p></div><div className="clock">{new Date(now).toISOString().slice(11,19)}<small>UTC / LIVE WORKSPACE</small></div></section>
       {!user && <form className="login panel" onSubmit={login}><div><strong>Connect to your fleet</strong><p>Use an access token from your configured identity provider.</p></div><label className="token-input">Gateway access token<input name="token" type="password" required autoComplete="off" maxLength={8192}/></label><button>Connect ↗</button></form>}
       {error && <div className="error" role="alert">{error}<button className="text" onClick={()=>setError('')}>Dismiss ×</button></div>}
@@ -147,9 +155,9 @@ export default function Console() {
       {tab==='Load generator' && <section className="panel load-panel"><div className="section-heading"><div><div className="eyebrow">CONTROLLED LOAD</div><h2>Put the flow to work.</h2></div><span className="tag">MAX 100 / BATCH</span></div><p>Enter existing motorcycle plates, separated by spaces or commas. Each plate triggers one real rental attempt under your account.</p><label>Motorcycle plates<textarea rows={3} value={batch} onChange={e=>setBatch(e.target.value.toUpperCase())} placeholder="Enter plates from your test fleet"/></label><div className="load-actions"><span>{batch.trim()?batch.trim().split(/[\s,]+/).length:0} concurrent attempts · uses the dates below</span><button disabled={!user||busy||!batch.trim()} onClick={()=>run(batch.trim().split(/[\s,]+/))}>{busy?'Running…':'Run batch ↗'}</button></div><Results attempts={attempts} select={a=>{setTrace({...a});setTab('System x-ray')}}/></section>}
       <section className="action-bar panel"><div><div className="eyebrow">CREATE A RENTAL</div><strong>Set a journey in motion</strong></div><label>Licence plate<input value={plate} onChange={e=>setPlate(e.target.value.toUpperCase())} placeholder="Your motorcycle plate" maxLength={7}/></label><label>Start date<input type="date" value={start} onChange={e=>setStart(e.target.value)}/></label><label>Plan<select value={days} onChange={e=>setDays(Number(e.target.value))}>{[7,15,30,45].map(n=><option key={n} value={n}>{n} days</option>)}</select></label><button disabled={!user||busy||!plate} onClick={()=>run([plate])}>{busy?'Sending…':'Start rental ↗'}</button></section>
       {tab!=='Load generator' && attempts.length>0 && <section className="panel"><Results attempts={attempts} select={a=>{setTrace({...a});setTab('System x-ray')}}/></section>}
-      {rentals.length>0 && <section className="rental-list"><div className="section-heading"><h2>Your recent rentals</h2><span className="caption">{rentals.length} in the current page</span></div>{rentals.slice(0,5).map(r=><div className="rental-row" key={r.rentalId}><strong>{r.motorcycleLicencePlate}</strong><span>{r.startDate.slice(0,10)} → {r.predictedEndDate.slice(0,10)}</span><span>{money(r.originalTotalCost)}</span><span className="tag">{r.actualEndDate?'CLOSED':'ACTIVE'}</span></div>)}</section>}
+      {rentals.length>0 && <section className="rental-list"><div className="section-heading"><h2>Your recent rentals</h2><span className="caption">{rentals.length} in the current page{missing.length?' · without '+missing.join(' and '):''}</span></div>{rentals.slice(0,5).map(r=><div className="rental-row" key={r.rentalId}><strong>{r.motorcycleLicencePlate}<small>{r.motorcycle?r.motorcycle.model+' · '+r.motorcycle.year:'model unavailable'}</small></strong><span>{r.startDate.slice(0,10)} → {r.predictedEndDate.slice(0,10)}</span><span>{money(r.originalTotalCost)}<small>agreed</small></span><span>{r.invoice?minor(r.invoice.totalMinor,r.invoice.currency):'—'}<small>{r.invoice?r.invoice.reason:r.actualEndDate?'invoice pending':'not settled yet'}</small></span><span className="tag">{r.actualEndDate?'CLOSED':'ACTIVE'}</span></div>)}</section>}
       {user && <div className="load-actions"><button className="secondary" disabled={!cursor} onClick={()=>refresh().catch(e=>setError(String(e)))}>First rental page</button><button className="secondary" disabled={!nextCursor} onClick={()=>refresh(nextCursor!).catch(e=>setError(String(e)))}>Next rental page →</button></div>}
-      <footer><span>PROJECT Y <b>POLYGLOT OPERATIONS</b></span><span>Live data · UTC timestamps</span>{user&&<button className="text" onClick={async()=>{await fetch('/api/session',{method:'DELETE'});setUser('');setRentals([]);setSelected('');setMetrics(null)}}>Sign out ↗</button>}</footer>
+      <footer><span>PROJECT Y <b>POLYGLOT OPERATIONS</b></span><span>Live data · UTC timestamps</span>{user&&<button className="text" onClick={async()=>{await fetch('/api/session',{method:'DELETE'});setUser('');setRentals([]);setSelected('');setMetrics(null);setRider(null);setMissing([])}}>Sign out ↗</button>}</footer>
     </main></div>;
 }
 function Metric({label,value,unit,note}:{label:string;value:string;unit:string;note:string}) {return <div className="metric"><div className="eyebrow">{label}</div><div className="metric-value">{value}<span>{unit}</span></div><small>{note}</small></div>}
