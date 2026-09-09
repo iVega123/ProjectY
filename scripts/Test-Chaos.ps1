@@ -45,14 +45,39 @@ try {
         $timer.Stop()
         $timer.ElapsedMilliseconds
     }
+    # A medida é o MENOR de algumas amostras, e não uma só.
+    #
+    # O cronômetro envolve o `docker compose exec` inteiro, e não o ida-e-volta
+    # do Redis -- que é submilissegundo. A subida daquele processo custa dezenas
+    # a centenas de milissegundos, varia com a carga da máquina, e a primeira
+    # chamada paga mais que as seguintes. Uma amostra só mediu 362 ms de linha
+    # de base num runner do CI, e a injeção de 500 ms "sumiu" na diferença.
+    #
+    # O menor é a estatística certa aqui: o toxic é um PISO de 500 ms, então com
+    # ele nenhuma amostra desce disso, e sem ele o menor é o exec mais barato.
+    # O ruído só empurra para cima, e é justamente ele que se quer descartar.
+    function FastestPing {
+        param([int]$Samples = 3)
+        $best = [int]::MaxValue
+        for ($attempt = 0; $attempt -lt $Samples; $attempt++) {
+            $elapsed = PingProxy
+            if ($elapsed -lt $best) { $best = $elapsed }
+        }
+        $best
+    }
+
     $api = 'http://127.0.0.1:18474'
-    $before = PingProxy
+    # Aquecimento descartado: a primeira chamada paga a criação do contêiner
+    # efêmero do exec, e atribuí-la à linha de base é o que produz o falso
+    # negativo.
+    $null = PingProxy
+    $before = FastestPing
     & "$PSScriptRoot/Invoke-Chaos.ps1" add redis test-latency -Value 500 -Url $api
-    $during = PingProxy
+    $during = FastestPing
     if ($during - $before -lt 350) { throw "Latency injection was not observed: before=$before during=$during" }
     & "$PSScriptRoot/Invoke-Chaos.ps1" remove redis test-latency -Url $api
     & "$PSScriptRoot/Invoke-Chaos.ps1" remove redis test-latency -Url $api
-    $after = PingProxy
+    $after = FastestPing
     if ($during - $after -lt 350) { throw "Latency did not recover: during=$during after=$after" }
     & "$PSScriptRoot/Invoke-Chaos.ps1" add redis test-timeout -Type timeout -Value 0 -Url $api
     & "$PSScriptRoot/Invoke-Chaos.ps1" reset -Url $api

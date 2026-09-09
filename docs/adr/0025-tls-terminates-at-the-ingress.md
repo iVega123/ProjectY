@@ -57,19 +57,37 @@ refuses it. mTLS would answer "is this peer who it says it is"; the envelope
 already answers a stronger question — "did the gateway authorise *this
 request*, for *this subject*, *now*".
 
-What mTLS would add on top is confidentiality on the wire inside the cluster,
-against an attacker who can already read pod-to-pod traffic. Against that
-attacker, a service mesh is one control; a default-deny network policy plus a
-single ingress is another. The mesh also brings a sidecar per pod, certificate
-rotation to operate, and a second identity system whose relationship to the
-envelope would have to be explained — in a system that runs seven languages,
-each new cross-cutting concern is paid seven times (the argument of ADR 0014
-against GraphQL, applied to the transport).
+**What the envelope does not do is protect the body.** The canonical string has
+no digest of the payload and no nonce, so an attacker who can read *and inject*
+cluster traffic can capture an envelope and reuse it, **on the same method and
+path, within the 30 second window, with a different body**. Concretely: a
+captured `PUT /update-image` can be replayed with a different CNH image and it
+authenticates as the victim. Replay to another route, another verb or another
+audience still fails — the canonical string binds those — and after 30 seconds
+the envelope is dead. But same-route body substitution is a real integrity gap,
+and it is the one place where the argument above is weaker than it sounds.
+
+What mTLS would add on top is therefore two things, not one: confidentiality on
+the wire inside the cluster, and integrity of the body between hops. Against an
+attacker who can already read and inject pod-to-pod traffic, a service mesh is
+one control; a default-deny network policy plus a single ingress is another. The
+mesh also brings a sidecar per pod, certificate rotation to operate, and a
+second identity system whose relationship to the envelope would have to be
+explained — in a system that runs seven languages, each new cross-cutting
+concern is paid seven times (the argument of ADR 0014 against GraphQL, applied
+to the transport).
 
 **The cost accepted:** an attacker with packet capture inside the cluster reads
-the envelope and the payload. The envelope is bound to method, path and time,
-so replaying it elsewhere fails, and it expires in 30 seconds — but the CNH
-image in a `PUT /update-image` body is readable. That is the trade, stated.
+the envelope and the payload, and — for 30 seconds, on the same route — can
+substitute the payload. The CNH image in a `PUT /update-image` body is both
+readable and replaceable under that attacker. That is the trade, stated.
+
+**What would close it without a mesh:** a digest of the body in the canonical
+string, as a `v2` envelope. That is a change in four implementations — the Rust
+gateway that signs, and the C#, Kotlin and Go verifiers — with a rollout in
+which both versions are accepted, so it belongs in its own change and not in a
+documentation one. It is cheaper than a mesh and closes the integrity half
+without the confidentiality half.
 
 **The trigger to revisit:** a second tenant in the same cluster, a compliance
 requirement that names encryption in transit between workloads, or the first
@@ -96,7 +114,8 @@ service that is not ours running beside these.
   louder failure than the silent one it had.
 - The identity envelope carries the weight of internal authentication. If it
   were ever weakened, this decision would have to be reopened with it — the two
-  are load-bearing together.
+  are load-bearing together. It does not carry integrity of the body, and this
+  record says so where the decision rests on it, rather than in a footnote.
 
 ## Follow-up
 
