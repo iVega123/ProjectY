@@ -2,6 +2,7 @@ using AutoMapper;
 using Google.Protobuf;
 using Moq;
 using ProjectY.Events;
+using RentalCore.Errors;
 using RentalOperations.CrossCutting.Services;
 using RentalOperations.Domain;
 using RentalOperations.DTOs;
@@ -69,7 +70,11 @@ public sealed class RiderProjectionTests
         var service = new RentalService(ReadyRepository().Object, Mock.Of<IMapper>(),
             riders.Object, Mock.Of<IMotorcycleService>());
 
-        await Assert.ThrowsAsync<ArgumentException>(() => service.CreateRentalAsync(Request(), "rider"));
+        // 403 e não 400 desde o #96: o corpo está certo, e reenviá-lo
+        // corrigido não existe -- quem muda isto é a habilitação do piloto.
+        var refused = await Assert.ThrowsAsync<RiderNotEntitledException>(
+            () => service.CreateRentalAsync(Request(), "rider"));
+        Assert.Equal(403, refused.Status);
     }
 
     // Field numbers are shared with rider.proto, so v1 consumers that have not moved

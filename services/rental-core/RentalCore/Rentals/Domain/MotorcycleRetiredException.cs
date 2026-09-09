@@ -1,9 +1,9 @@
+using RentalCore.Errors;
+
 namespace RentalOperations.Domain;
 
-public sealed class MotorcycleRetiredException : InvalidOperationException
-{
-    public MotorcycleRetiredException(Guid motorcycleId)
-        : base($"Motorcycle {motorcycleId} is retired and cannot be rented.")
-    {
-    }
-}
+public sealed class MotorcycleRetiredException(Guid motorcycleId)
+    : BusinessRuleException(
+        ProblemTypes.MotorcycleRetired,
+        "Motorcycle retired",
+        $"Motorcycle {motorcycleId} is retired and cannot be rented.");

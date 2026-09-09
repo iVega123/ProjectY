@@ -66,6 +66,13 @@ struct Problem {
     status: u16,
     detail: &'static str,
     instance: String,
+    /// O mesmo identificador de correlação que o rental-core devolve, e o mesmo
+    /// que o Tempo indexa. Sem ele, um 503 do portão e um 500 do serviço são
+    /// duas respostas que ninguém consegue ligar ao mesmo pedido -- que é
+    /// exatamente o suporte perguntando "que horas foi?" em vez de "qual é o
+    /// identificador?".
+    #[serde(rename = "traceId")]
+    trace_id: String,
 }
 
 #[derive(Debug)]
@@ -745,6 +752,23 @@ fn rate_limit_problem(instance: &axum::http::Uri, decision: RateLimitDecision) -
     response
 }
 
+/// O trace id da requisição em curso, em hexadecimal.
+///
+/// Vazio quando não há trace -- o que acontece sem coletor configurado. Um campo
+/// vazio é honesto; inventar um identificador que não existe em lugar nenhum
+/// seria pior do que não ter.
+fn current_trace_id() -> String {
+    use opentelemetry::trace::TraceContextExt;
+    let context = tracing::Span::current().context();
+    let span = context.span();
+    let span_context = span.span_context();
+    if span_context.is_valid() {
+        span_context.trace_id().to_string()
+    } else {
+        String::new()
+    }
+}
+
 fn problem(
     status: StatusCode,
     problem_type: &'static str,
@@ -760,6 +784,7 @@ fn problem(
             status: status.as_u16(),
             detail,
             instance,
+            trace_id: current_trace_id(),
         }),
     )
         .into_response();

@@ -267,6 +267,21 @@ mod tests {
         );
     }
 
+    /// O achado B9 pelo lado do portão: um segmento `../` no caminho não chega
+    /// a upstream nenhum -- ele é recusado antes de a rota ser resolvida, e por
+    /// isso não pode reescrever o caminho interno de nada.
+    #[test]
+    fn a_traversal_segment_never_reaches_an_upstream() {
+        for hostile in [
+            "/api/motorcycles/../riders/victim",
+            "/api/motorcycles/..%2friders",
+            "/api/motorcycles/%2e%2e/riders",
+            "/api/riders/./victim",
+        ] {
+            assert!(!is_canonical_path(hostile), "{hostile}");
+        }
+    }
+
     #[test]
     fn rejects_paths_that_an_upstream_could_normalize_differently() {
         assert!(is_canonical_path("/api/rental/user/victim"));

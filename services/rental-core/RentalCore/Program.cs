@@ -76,6 +76,8 @@ builder.Services.AddSingleton(NpgsqlDataSource.Create(connectionString));
 // paths now, so a token minted for either half is accepted by the merged service.
 builder.Services.AddGatewayIdentityAuthentication(builder.Configuration, "projecty.rental-core");
 
+builder.Services.AddProblemDetails();
+builder.Services.AddExceptionHandler<RentalCore.Errors.ProblemDetailsExceptionHandler>();
 builder.Services.AddControllers();
 builder.Services.AddAutoMapper(_ => { }, typeof(Program));
 builder.Services.AddEndpointsApiExplorer();
@@ -136,6 +138,15 @@ app.UseHttpsRedirection();
 app.UseAuthentication();
 app.UseAuthorization();
 app.UseProjectYIdempotency();
+
+// DEPOIS da idempotência, e não antes.
+//
+// O middleware de idempotência decide sobre a chave DEPOIS que a requisição
+// volta, olhando o status da resposta: um 503 marcado como "nada aconteceu
+// ainda" libera a chave para o cliente repetir. Se o tratador de exceções
+// estivesse por fora, a exceção passaria por ele como exceção -- sem status
+// para olhar -- e a chave ficaria trancada até expirar.
+app.UseExceptionHandler();
 
 app.MapControllers();
 app.MapProjectYHealthChecks();

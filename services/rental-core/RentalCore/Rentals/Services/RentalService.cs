@@ -4,6 +4,7 @@ using RentalOperations.Domain;
 using RentalOperations.DTOs;
 using RentalOperations.Model;
 using RentalOperations.Repository;
+using RentalCore.Errors;
 
 using ProjectY.Shared.Pagination;
 using ProjectY.Shared.Validation;
@@ -41,7 +42,7 @@ namespace RentalOperations.Services
         {
             if (createDto.StartDate.AddDays(1) >= createDto.PredictedEndDate)
             {
-                throw new InvalidOperationException("The Rent time must at least one day");
+                throw new InvalidRequestException("The rental must last at least one day.");
             }
 
             // Read locally, never over the network. Calling identity here would put
@@ -54,14 +55,14 @@ namespace RentalOperations.Services
             }
             if (!rider.Verified)
             {
-                throw new ArgumentException("Rider does not have the correct license type.");
+                throw new RiderNotEntitledException();
             }
 
             var motorcycle = await BeforeWriteAsync(
                 () => _motorcycleService.GetMotorcycleByIdAsync(createDto.MotorcycleId));
             if (motorcycle == null)
             {
-                throw new ArgumentException("Motorcycle does not exist.");
+                throw new ResourceNotFoundException("The motorcycle does not exist.");
             }
             if (motorcycle.retiredAtUtc is not null)
             {
@@ -114,7 +115,7 @@ namespace RentalOperations.Services
             var rental = await BeforeWriteAsync(() => _repository.GetRentalByIdAsync(rentalId));
 
             if (rental == null)
-                throw new KeyNotFoundException($"No rental found with ID {rentalId}");
+                throw new ResourceNotFoundException("The rental does not exist.");
 
             if (!string.Equals(rental.UserId, userId, StringComparison.Ordinal))
                 throw new UnauthorizedAccessException("The rental belongs to another rider.");
@@ -133,7 +134,7 @@ namespace RentalOperations.Services
             // a recebe.
             if (actualEndDate < rental.StartDate)
             {
-                throw new ArgumentException("A rental cannot end before it starts.");
+                throw new InvalidRequestException("A rental cannot end before it starts.");
             }
 
             rental.EndDate = actualEndDate;
