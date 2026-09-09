@@ -1,0 +1,35 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: verify-projecty-images
+  annotations:
+    policies.kyverno.io/title: Verify ProjectY Images
+    policies.kyverno.io/category: Software Supply Chain
+    projecty.io/rollout: audit-first
+spec:
+  background: false
+  webhookConfiguration:
+    failurePolicy: Fail
+    timeoutSeconds: 30
+  rules:
+    - name: signed-by-projecty-main
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+              namespaceSelector:
+                matchLabels:
+                  kubernetes.io/metadata.name: projecty
+      verifyImages:
+        - imageReferences:
+            - ghcr.io/ivega123/projecty/*
+          failureAction: Audit
+          mutateDigest: true
+          required: true
+          verifyDigest: true
+          attestors:
+            - count: 1
+              entries:
+                - keyless:
+                    subject: https://github.com/iVega123/ProjectY/.github/workflows/ci.yml@refs/heads/main
+                    issuer: https://token.actions.githubusercontent.com

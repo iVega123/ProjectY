@@ -72,17 +72,24 @@ if orchestrator == 'kubernetes':
 
         k8s_yaml(kustomize('deploy/overlays/selfhost'))
 
+        local_resource(
+            'signed-admission',
+            cmd = script_prefix + ['-File', 'scripts/kind/Install-Kyverno.ps1'],
+            deps = ['deploy/platform/kyverno'],
+            labels = ['platform'],
+        )
+
         k8s_resource('cockroach-schema', resource_deps = ['cockroachdb'], labels = ['setup'])
         k8s_resource('kafka-topics', resource_deps = ['kafka'], labels = ['setup'])
         k8s_resource('cassandra-schema', resource_deps = ['cassandra'], labels = ['setup'])
         k8s_resource('schema-contracts', resource_deps = ['schema-registry', 'kafka-topics'], labels = ['setup'])
-        k8s_resource('identity', resource_deps = ['cockroach-schema', 'schema-contracts', 'media-guard'], labels = ['services'])
-        k8s_resource('rental-core', resource_deps = ['cockroach-schema', 'kafka-topics'], labels = ['services'])
-        k8s_resource('billing', resource_deps = ['cockroach-schema', 'schema-contracts'], labels = ['services'])
-        k8s_resource('risk-pricing', resource_deps = ['schema-contracts'], labels = ['services'])
-        k8s_resource('telemetry', resource_deps = ['cassandra-schema', 'kafka-topics'], labels = ['services'])
+        k8s_resource('identity', resource_deps = ['signed-admission', 'cockroach-schema', 'schema-contracts', 'media-guard'], labels = ['services'])
+        k8s_resource('rental-core', resource_deps = ['signed-admission', 'cockroach-schema', 'kafka-topics'], labels = ['services'])
+        k8s_resource('billing', resource_deps = ['signed-admission', 'cockroach-schema', 'schema-contracts'], labels = ['services'])
+        k8s_resource('risk-pricing', resource_deps = ['signed-admission', 'schema-contracts'], labels = ['services'])
+        k8s_resource('telemetry', resource_deps = ['signed-admission', 'cassandra-schema', 'kafka-topics'], labels = ['services'])
         k8s_resource('api-gateway', resource_deps = ['identity', 'rental-core'], labels = ['services'])
-        k8s_resource('console', resource_deps = ['api-gateway', 'telemetry'], labels = ['services'])
+        k8s_resource('console', resource_deps = ['signed-admission', 'api-gateway', 'telemetry'], labels = ['services'])
         k8s_resource('projecty', links = [link('http://localhost:8080', 'Console'), link('http://localhost:8080/health/ready', 'Gateway')])
 
         print('Tilt UI: http://localhost:10350')

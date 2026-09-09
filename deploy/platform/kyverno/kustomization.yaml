@@ -1,0 +1,14 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - policy.yaml
+patches:
+  - target:
+      group: kyverno.io
+      version: v1
+      kind: ClusterPolicy
+      name: verify-projecty-images
+    patch: |-
+      - op: replace
+        path: /spec/rules/0/verifyImages/0/failureAction
+        value: Enforce
