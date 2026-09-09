@@ -2,20 +2,19 @@ using RentalCore.Errors;
 
 namespace RentalOperations.Domain;
 
-public sealed class ActiveRentalConflictException : BusinessRuleException
-{
-    public ActiveRentalConflictException(Guid motorcycleId, Exception? innerException = null)
-        : base(
-            ProblemTypes.ActiveRental,
-            "Active rental conflict",
-            $"Motorcycle {motorcycleId} already has an active rental.")
-    {
-        Cause = innerException;
-    }
-
-    /// <summary>
-    /// A causa vai para o log, e não para a resposta -- ela costuma ser a
-    /// violação de índice que o banco levantou, com nome de constraint dentro.
-    /// </summary>
-    public Exception? Cause { get; }
-}
+/// <summary>
+/// A violação do índice único vai como InnerException, e não como propriedade
+/// própria.
+///
+/// A cadeia de inner exceptions é o que o ILogger serializa e o que
+/// Exception.ToString() percorre; guardar a causa noutro lugar tira o SQLSTATE
+/// e o nome da constraint do log -- exatamente o que se procura para entender
+/// uma corrida perdida. Ela continua fora da RESPOSTA: quem decide isso é o
+/// ProblemDetailsExceptionHandler, que só publica o Detail.
+/// </summary>
+public sealed class ActiveRentalConflictException(Guid motorcycleId, Exception? innerException = null)
+    : BusinessRuleException(
+        ProblemTypes.ActiveRental,
+        "Active rental conflict",
+        $"Motorcycle {motorcycleId} already has an active rental.",
+        innerException);

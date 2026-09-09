@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 using Npgsql;
 using Microsoft.Extensions.Logging.Abstractions;
 using RentalCore.Errors;
+using RentalOperations.Domain;
 using RentalOperations.Services;
 using System.Net;
 using System.Security.Claims;
@@ -141,6 +142,56 @@ public sealed class DependencyFailureTests
             Assert.DoesNotContain(forbidden, body);
         }
         Assert.Equal(activity.TraceId.ToString(), problem.GetProperty("traceId").GetString());
+    }
+
+    /// <summary>
+    /// A causa do conflito fica no log, e não na resposta.
+    ///
+    /// A corrida perdida no índice único chega como PostgresException, e é ela
+    /// que tem o SQLSTATE e o nome da constraint -- o que se procura para
+    /// entender por que duas criações se cruzaram. Guardá-la numa propriedade
+    /// própria tirava tudo isso do log: o ILogger serializa a cadeia de
+    /// InnerException, não uma propriedade inventada.
+    /// </summary>
+    [Fact]
+    public async Task AConflict_KeepsItsDatabaseCauseInTheChain_AndOutOfTheResponse()
+    {
+        var cause = new PostgresException(
+            "duplicate key value violates unique constraint \"one_active_rental_per_motorcycle\"",
+            "ERROR", "ERROR", PostgresErrorCodes.UniqueViolation);
+        var conflict = new ActiveRentalConflictException(Guid.NewGuid(), cause);
+
+        Assert.Same(cause, conflict.InnerException);
+        Assert.Contains("one_active_rental_per_motorcycle", conflict.ToString());
+
+        var (context, problem) = await Handle(conflict);
+
+        Assert.Equal(409, context.Response.StatusCode);
+        Assert.DoesNotContain("one_active_rental_per_motorcycle", problem.GetRawText());
+        Assert.DoesNotContain("23505", problem.GetRawText());
+    }
+
+    /// <summary>
+    /// O atraso da projeção é 4xx, e nunca 5xx.
+    ///
+    /// Um 5xx diz ao portão que este upstream está doente: ele repete a
+    /// requisição -- POST com Idempotency-Key é repetível -- e conta a resposta
+    /// contra o disjuntor. Nada está doente; é o registro do próprio chamador
+    /// que ainda não chegou, e repetir agora falha igual. Foi 503 durante uma
+    /// revisão do #96, e o benchmark de carga acusou.
+    /// </summary>
+    [Fact]
+    public async Task APendingRiderProjection_IsNotDressedUpAsAnUnhealthyUpstream()
+    {
+        var (context, problem) = await Handle(new RiderProjectionPendingException("rider-1"));
+
+        Assert.Equal(409, context.Response.StatusCode);
+        Assert.InRange(context.Response.StatusCode, 400, 499);
+        Assert.False(context.Response.Headers.ContainsKey("Retry-After"));
+        // E com tipo próprio: "ainda não" tem de ser distinguível de "não pode".
+        Assert.Equal(
+            "urn:projecty:problem:rider-projection-pending",
+            problem.GetProperty("type").GetString());
     }
 
     private static async Task<(HttpContext Context, System.Text.Json.JsonElement Problem)> Handle(Exception failure)

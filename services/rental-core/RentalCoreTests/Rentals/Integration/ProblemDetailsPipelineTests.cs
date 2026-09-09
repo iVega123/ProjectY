@@ -81,6 +81,30 @@ public class ProblemDetailsPipelineTests(CustomWebApplicationFactory factory)
         Assert.DoesNotContain("not-a-uuid", body);
     }
 
+    /// <summary>
+    /// Um cursor quebrado é erro de quem o mandou, e não falha interna.
+    ///
+    /// Ele vem da query, e três lugares podem recusá-lo -- o decodificador em
+    /// Shared, o Position.Parse dos aluguéis e o das motos. Sem tradução, o
+    /// tratador global os leria como 500, dizendo "quebrou aqui dentro" sobre
+    /// uma entrada que o cliente pode consertar.
+    /// </summary>
+    [Theory]
+    [InlineData("/api/Rental/user?cursor=not-base64!!")]
+    [InlineData("/api/motorcycles?cursor=not-base64!!")]
+    public async Task AMalformedCursor_IsAClientError_NotAnInternalOne(string path)
+    {
+        using var client = factory.CreateAuthenticatedClient("Admin", "an-admin");
+
+        var response = await client.GetAsync(path);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        using var problem = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal(
+            "urn:projecty:problem:invalid-request",
+            problem.RootElement.GetProperty("type").GetString());
+    }
+
     private sealed class ThrowingRepository : IRentalRepository
     {
         private static Exception Failure() => new InvalidDataException(

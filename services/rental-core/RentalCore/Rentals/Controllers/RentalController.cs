@@ -61,10 +61,10 @@ namespace RentalOperations.Controllers
             {
                 return Forbid();
             }
-            return Ok(await _rentalService.GetRentalsByUserIdAsync(
+            return Ok(await Cursors.Paged(() => _rentalService.GetRentalsByUserIdAsync(
                 userIdClaim.Value,
                 cursor,
-                pageSize));
+                pageSize)));
         }
 
         [Authorize(Roles = "Admin")]
@@ -74,7 +74,8 @@ namespace RentalOperations.Controllers
             [FromQuery] string? cursor,
             [FromQuery] int? pageSize)
         {
-            return Ok(await _rentalService.GetRentalsByUserIdAsync(userId, cursor, pageSize));
+            return Ok(await Cursors.Paged(
+                () => _rentalService.GetRentalsByUserIdAsync(userId, cursor, pageSize)));
         }
 
         /// <summary>

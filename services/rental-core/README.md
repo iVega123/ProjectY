@@ -74,12 +74,18 @@ até expirar.
 | 400 | a requisição não serve como está |
 | 403 | o piloto não pode alugar -- reenviar corrigido não existe |
 | 404 | o recurso não existe, ou não é de quem pediu |
-| 409 | a regra recusa: aluguel ativo, moto aposentada, placa tomada, liquidação concorrente |
+| 409 | a regra recusa: aluguel ativo, moto aposentada, placa tomada, liquidação concorrente -- e a projeção do piloto que ainda não chegou |
 | 500 | quebrou aqui dentro |
-| 503 | dependência fora, ou projeção do piloto ainda não chegou |
+| 503 | dependência fora |
 
 O 403 e o 404 eram 400 antes do #96. Um 400 para "a sua CNH não permite" manda o
 cliente consertar o corpo, que não é o que precisa mudar.
+
+**Nenhuma recusa de negócio é 5xx**, e essa regra tem dono: um 5xx diz ao portão
+que este serviço está doente, e ele age -- repete a requisição (POST com
+`Idempotency-Key` é repetível) e conta a resposta contra o disjuntor. A projeção
+do piloto que ainda não chegou chegou a ser 503 durante o #96; o benchmark de
+carga acusou, porque o portão passou a repetir o que sempre falharia igual.
 
 ## Testes
 

@@ -56,18 +56,29 @@ public sealed class ResourceNotFoundException(string detail)
 /// 409 e não 400: a requisição está bem formada, o estado é que não permite.
 /// A diferença diz ao cliente se corrigir o corpo adianta.
 /// </summary>
-public class BusinessRuleException(string problemType, string title, string detail)
-    : ClientProblemException(409, problemType, title, detail);
+public class BusinessRuleException(
+    string problemType,
+    string title,
+    string detail,
+    Exception? innerException = null)
+    : ClientProblemException(409, problemType, title, detail, innerException);
 
 /// <summary>
-/// A resposta ainda não é possível, e vale insistir: 503 com Retry-After.
+/// A resposta ainda não é possível, e vale insistir: 409.
 ///
-/// Não é falha de dependência -- é atraso de projeção, e por isso NÃO conta
-/// como recusa no medidor de degradação. Confundir as duas faria o painel
-/// mostrar o banco caindo toda vez que um piloto se cadastra.
+/// **409 e não 503**, e a diferença importa para quem está na frente. Um 5xx diz
+/// ao portão "este upstream está doente": ele repete a requisição -- POST com
+/// Idempotency-Key é repetível -- e conta a resposta contra o disjuntor. Nada
+/// está doente aqui; é o registro do próprio chamador que ainda não chegou, e
+/// repetir agora falha igual. Dizer 503 é mentir sobre a saúde do serviço, e
+/// fazer o portão gastar tentativas por causa da mentira.
+///
+/// O tipo próprio é o que separa "ainda não" de "não pode": o comentário do
+/// RiderProjectionPendingException pede essa distinção, porque uma recusa
+/// genérica seria indistinguível de um fato permanente.
 /// </summary>
-public class NotYetAvailableException(string detail)
-    : ClientProblemException(503, ProblemTypes.NotYetAvailable, "Not available yet", detail);
+public class NotYetAvailableException(string problemType, string detail)
+    : ClientProblemException(409, problemType, "Not available yet", detail);
 
 /// <summary>
 /// O piloto não pode alugar: 403.
@@ -94,7 +105,7 @@ public static class ProblemTypes
     public const string MotorcycleRetired = Prefix + "motorcycle-retired";
     public const string SettlementConflict = Prefix + "settlement-conflict";
     public const string PlateTaken = Prefix + "licence-plate-taken";
-    public const string NotYetAvailable = Prefix + "not-yet-available";
+    public const string RiderProjectionPending = Prefix + "rider-projection-pending";
     public const string DependencyUnavailable = Prefix + "dependency-unavailable";
 
     /// <summary>

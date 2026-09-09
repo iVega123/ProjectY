@@ -61,10 +61,6 @@ public sealed class ProblemDetailsExceptionHandler(
     {
         if (exception is ClientProblemException client)
         {
-            if (client.Status == StatusCodes.Status503ServiceUnavailable)
-            {
-                context.Response.Headers.RetryAfter = "1";
-            }
             return ProblemFactory.Create(
                 context, client.Status, client.ProblemType, client.Title, client.Detail);
         }

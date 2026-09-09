@@ -21,7 +21,9 @@ public interface IRiderProjectionStore
 /// different fact and a permanent one.
 /// </summary>
 public sealed class RiderProjectionPendingException(string riderId)
-    : NotYetAvailableException($"Rider {riderId} is awaiting processing. Retry shortly.");
+    : NotYetAvailableException(
+        ProblemTypes.RiderProjectionPending,
+        $"Rider {riderId} is awaiting processing. Retry shortly.");
 
 public sealed class SqlRiderProjectionStore(NpgsqlDataSource database) : IRiderProjectionStore
 {

@@ -24,7 +24,7 @@ test('OTLP trace keeps actual duration, service and parent relationship',()=>{
  */
 test('a plate cannot rewrite the internal request path',()=>{
   for (const hostile of ['../riders','..%2friders','ABC/1234','ABC 1234','../../admin']) {
-    assert.throws(()=>plates([hostile]),undefined,hostile);
+    assert.throws(()=>plates([hostile]),Error,hostile);
   }
   // E o que passa pela validação ainda é escapado antes de virar caminho.
   assert.equal('/api/motorcycles/'+encodeURIComponent('../riders'),'/api/motorcycles/..%2Friders');

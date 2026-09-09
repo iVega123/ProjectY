@@ -32,18 +32,8 @@ namespace MotoHub.Controllers
         public async Task<IActionResult> GetAll([FromQuery] string? cursor, [FromQuery] int? pageSize)
         {
             _logger.LogInformation("Fetching a page of motorcycles.");
-            // O cursor inválido vira FormatException lá no repositório, e ela
-            // sobe até o ProblemDetailsExceptionHandler como 500 -- o que
-            // estaria errado, porque o defeito é da requisição. A tradução
-            // acontece aqui, onde se sabe que o cursor veio do cliente.
-            try
-            {
-                return Ok(await _motorcycleService.GetMotorcyclesAsync(cursor, pageSize));
-            }
-            catch (FormatException)
-            {
-                throw new InvalidRequestException("The pagination cursor is invalid.");
-            }
+            return Ok(await Cursors.Paged(
+                () => _motorcycleService.GetMotorcyclesAsync(cursor, pageSize)));
         }
 
         /// <summary>
