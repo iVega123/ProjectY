@@ -227,21 +227,32 @@ var envelopeKey = bytes.Repeat([]byte("x"), 32)
 // fakeObjects substitui o MinIO. A rota não deveria precisar de armazenamento
 // de objetos de pé para provar quem pode ler o quê.
 type fakeObjects struct {
-	stored map[string][]byte
-	fail   bool
+	stored  map[string][]byte
+	removed []string
+	writes  int
+	fail    bool
 }
 
+// Cada gravação inventa uma chave nova, como o MinIO de verdade: é o que faz
+// uma CNH substituída deixar a anterior para trás em vez de sobrescrevê-la.
 func (f *fakeObjects) Put(_ context.Context, riderID string, sanitized media.Sanitized) (string, error) {
 	if f.fail {
 		return "", errors.New("armazenamento fora do ar")
 	}
-	key := "riders/" + riderID + "/objeto.png"
+	f.writes++
+	key := fmt.Sprintf("riders/%s/objeto-%d.png", riderID, f.writes)
 	f.stored[key] = sanitized.Image
 	return key, nil
 }
 
 func (f *fakeObjects) Presign(_ context.Context, key string, _ time.Duration) (string, error) {
 	return "https://objetos.example.test/" + key + "?assinado=1", nil
+}
+
+func (f *fakeObjects) Remove(_ context.Context, key string) error {
+	f.removed = append(f.removed, key)
+	delete(f.stored, key)
+	return nil
 }
 
 func start(t *testing.T) *fixture {

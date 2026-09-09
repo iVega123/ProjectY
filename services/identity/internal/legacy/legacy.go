@@ -21,6 +21,7 @@ package legacy
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -29,6 +30,7 @@ import (
 
 	"github.com/iVega123/ProjectY/services/identity/internal/accounts"
 	"github.com/iVega123/ProjectY/services/identity/internal/dbx"
+	"github.com/iVega123/ProjectY/services/identity/internal/facts"
 )
 
 // Report conta o que a passagem fez.
@@ -174,13 +176,45 @@ func importOne(ctx context.Context, target *sql.DB, user legacyUser, roles []str
 		if err != nil {
 			return err
 		}
-		_, err = transaction.ExecContext(ctx,
-			`INSERT INTO riders (user_id, cnpj, date_of_birth, cnh_number, cnh_type)
-			 VALUES ($1, $2, $3, $4, $5)
-			 ON CONFLICT DO NOTHING`,
+		rider := facts.Rider{
+			ID: id.String(), Name: name,
+			CNHNumber: user.cnhNumber.String, CNHType: cnhType,
+		}
+		// `verified` nasce do tipo de CNH, como no cadastro. Deixá-lo no padrão
+		// faria a linha e o fato discordarem sobre o mesmo piloto -- e o fato é
+		// o que o rental-core lê.
+		verified := facts.Entitled(cnhType)
+
+		var landed string
+		err = transaction.QueryRowContext(ctx,
+			`INSERT INTO riders (user_id, cnpj, date_of_birth, cnh_number, cnh_type, verified)
+			 VALUES ($1, $2, $3, $4, $5, $6)
+			 ON CONFLICT DO NOTHING
+			 RETURNING user_id`,
 			id, user.cnpj.String, user.dateOfBirth.Time.UTC().Truncate(24*time.Hour),
-			user.cnhNumber.String, cnhType)
-		return err
+			user.cnhNumber.String, cnhType, verified,
+		).Scan(&landed)
+		if errors.Is(err, sql.ErrNoRows) {
+			// A linha já estava aqui: a passagem anterior já contou. Repetir os
+			// fatos seria republicar cadastro a cada reexecução.
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+
+		// Os mesmos fatos que o cadastro grava, na mesma transação que a linha.
+		//
+		// Sem isto, a importação produz gente que entra e não aluga: o
+		// rental-core autoriza pela projeção local, ela só se preenche por
+		// evento, e um piloto que nunca foi anunciado é um piloto que não
+		// existe do lado de lá. O relay publica assim que houver broker.
+		writer := facts.Writer{}
+		occurredAt := time.Now().UTC()
+		if err := writer.Registered(ctx, transaction, rider, occurredAt, ""); err != nil {
+			return err
+		}
+		return writer.Verified(ctx, transaction, rider, verified, occurredAt, "")
 	})
 }
 

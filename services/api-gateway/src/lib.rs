@@ -1866,9 +1866,37 @@ projecty.identity"
             .unwrap();
     }
 
+    /// O lote é de administrador, e um token de piloto para nele -- antes do
+    /// upstream, e não depois.
     #[tokio::test]
     async fn refuses_a_rider_token_on_an_admin_route() {
         let issuer = TestIssuer::new("admin-policy-key");
+        let (upstream, state) = spawn_security_upstream(Some(issuer.jwks())).await;
+        let mut config = test_config(upstream.clone());
+        config.auth.jwks_url = upstream.join(".well-known/jwks.json").unwrap();
+        let app = build_app(config).unwrap();
+        let token = issuer.token("projecty.identity", &["Rider"]);
+        let response = app
+            .oneshot(
+                HttpRequest::get("/api/riders?ids=a,b")
+                    .header(AUTHORIZATION, format!("Bearer {token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+        assert_eq!(state.upstream_requests.load(Ordering::SeqCst), 0);
+    }
+
+    /// E o próprio registro passa. Quem confere o dono é o identity, comparando
+    /// o sujeito do envelope com o identificador do caminho; recusar aqui
+    /// deixaria essa conferência inalcançável, e a rota de auto-leitura só
+    /// funcionaria chamando o identity direto.
+    #[tokio::test]
+    async fn lets_a_rider_reach_their_own_record() {
+        let issuer = TestIssuer::new("self-read-key");
         let (upstream, state) = spawn_security_upstream(Some(issuer.jwks())).await;
         let mut config = test_config(upstream.clone());
         config.auth.jwks_url = upstream.join(".well-known/jwks.json").unwrap();
@@ -1884,8 +1912,13 @@ projecty.identity"
             .await
             .unwrap();
 
-        assert_eq!(response.status(), StatusCode::FORBIDDEN);
-        assert_eq!(state.upstream_requests.load(Ordering::SeqCst), 0);
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(state.upstream_requests.load(Ordering::SeqCst), 1);
+        // E o envelope que chega lá nomeia o piloto: é o sujeito, e não um
+        // identificador do caminho, que decide de quem é o registro.
+        let body = response_json(response).await;
+        assert_eq!(body["subject"], "rider-123");
+        assert_eq!(body["roles"], "Rider");
     }
 
     #[tokio::test]

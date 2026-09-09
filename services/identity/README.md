@@ -17,7 +17,7 @@ inventar um argumento de carga depois do fato.
 | `GET /.well-known/openid-configuration` | documento com a forma da descoberta OIDC |
 | `GET /api/riders?ids=a,b,c` | lote de pilotos, administrador, teto de 100 |
 | `GET /api/riders/{userId}` | o próprio piloto, ou um administrador |
-| `DELETE /api/riders/{userId}` | administrador |
+| `DELETE /api/riders/{userId}` | administrador, e responde 204 também quando já não há piloto |
 | `PUT /update-image` | a foto da CNH do piloto que o envelope nomeia |
 | `GET /health/{live,ready,startup}` | as três sondas |
 
@@ -60,8 +60,18 @@ O veredito do OCR só pode **derrubar**. Um documento que não confere revoga; u
 que confere devolve o que o tipo de CNH já dizia. Deixar o OCR conceder faria
 uma habilitação categoria B virar alugável por ter mandado uma foto legível.
 
+Apagar duas vezes responde 204 nas duas. O portão reenvia `DELETE` por conta
+própria quando o transporte falha -- é um método idempotente, e ele trata assim
+--, de modo que 404 na segunda tentativa transformaria uma resposta perdida em
+erro para o cliente, no caso exato que a repetição existe para cobrir. O custo
+aceito é que apagar um identificador que nunca existiu também responde 204.
+
 A foto nunca vai crua para o bucket: o que é gravado é o PNG que o media-guard
-devolveu. É a divisão arquivo/registro do ADR 0012 -- ele é dono do pipeline do
+devolveu. Cada envio gera uma chave nova, e o objeto anterior é apagado depois
+que o ponteiro novo está gravado -- inclusive quando o piloto inteiro sai. A
+limpeza fica FORA da transação de propósito: um bucket fora do ar não pode
+impedir de apagar um piloto. O preço é um objeto órfão quando o armazenamento
+falha, e um aviso no log é o que dá ao operador o que procurar. É a divisão arquivo/registro do ADR 0012 -- ele é dono do pipeline do
 arquivo, este serviço é dono da linha que diz qual piloto, qual objeto.
 
 ## A migração de senhas, e por que ela é o trabalho de verdade
@@ -84,6 +94,12 @@ três saídas:
 - `identity import-authgate` copia as linhas do banco do AuthGate com o hash
   **intacto** — ele não pode fazer outra coisa, porque a senha em claro não
   existe em lugar nenhum. É o que dá à primeira metade o que ler.
+
+O importador grava os mesmos fatos que o cadastro grava, na mesma transação que
+a linha. Sem isso a importação produziria gente que **entra e não aluga**: o
+rental-core autoriza pela projeção local, ela só se preenche por evento, e um
+piloto que nunca foi anunciado não existe do lado de lá. Reexecutar não
+republica — só a linha que de fato chegou é anunciada.
 
 O leitor do formato antigo tem teste contra um vetor gerado pelo
 `PasswordHasher<T>` do próprio ASP.NET Identity, e não por este repositório.

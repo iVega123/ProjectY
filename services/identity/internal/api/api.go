@@ -81,6 +81,7 @@ type API struct {
 type ObjectStore interface {
 	Put(ctx context.Context, riderID string, sanitized media.Sanitized) (string, error)
 	Presign(ctx context.Context, key string, expiry time.Duration) (string, error)
+	Remove(ctx context.Context, key string) error
 }
 
 // Dependencies são as peças que a borda precisa ter na mão.

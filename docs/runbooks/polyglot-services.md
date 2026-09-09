@@ -148,7 +148,19 @@ the gateway, `TestAcceptsAnEnvelopeTheGatewaySigned` in identity, against an
 envelope the gateway actually produced.
 
 Someone else's record answers 404, not 403. The difference between those two
-responses tells a scanner which identifiers exist.
+responses tells a scanner which identifiers exist. The single-rider GET is
+**Authenticated** at the gateway, not Admin: the ownership check lives in
+identity, and rejecting the rider at the edge would put that check out of reach.
+
+`DELETE` answers 204 whether or not the rider was still there. The gateway
+retries DELETE on a transport failure — it is an idempotent method — so a 404
+on the second attempt would turn a lost response into a client-visible error.
+
+The CNH object is removed after the pointer changes, and when the rider is
+deleted. That cleanup runs outside the transaction: a bucket that is down must
+not block deleting a rider. When it fails you get `objeto da CNH ficou órfão`
+in the log with the key, which is what to grep for before deleting objects by
+hand.
 
 ### What identity publishes, and what it listens to
 
@@ -204,6 +216,13 @@ It preserves each user's identifier — that value is the JWT `sub` and
 Those passwords keep working: the first successful login verifies the old format
 and rewrites it as Argon2id. Re-running the import is safe; it skips what is
 already there and reports what it could not map.
+
+Each imported rider is announced on the same topics a fresh registration uses,
+written to the outbox in the transaction that inserts the row. Without that,
+imported riders could log in and never rent: rental-core authorizes from its
+local projection, and the projection only fills from events. If the import runs
+with no broker configured the facts wait in the outbox, and the relay publishes
+them once Kafka is reachable.
 
 The invoice itself is read through the gateway, from billing:
 

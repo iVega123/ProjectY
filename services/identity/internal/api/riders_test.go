@@ -5,6 +5,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 
@@ -285,7 +286,85 @@ func TestTheUploadBelongsToWhoeverTheEnvelopeNames(t *testing.T) {
 	}
 }
 
+// TestDeletingARiderTwiceStaysDeleted: o portão reenvia DELETE por conta
+// própria quando o transporte falha. Se a segunda tentativa respondesse 404, uma
+// resposta perdida viraria erro para o cliente -- no caso exato que a repetição
+// existe para cobrir.
+func TestDeletingARiderTwiceStaysDeleted(t *testing.T) {
+	fixture := start(t)
+	fixture.register(t, http.StatusCreated)
+	id := fixture.lastID
+
+	for attempt := 1; attempt <= 2; attempt++ {
+		response := fixture.send(fixture.envelope(t,
+			http.MethodDelete, "/api/riders/"+id, "um-administrador", "Admin"))
+		if response.Code != http.StatusNoContent {
+			t.Fatalf("tentativa %d devolveu %d: %s", attempt, response.Code, response.Body)
+		}
+	}
+	// E o fato sai uma vez só -- um do cadastro, um da remoção. A segunda
+	// passagem não encontra linha para anunciar, então a projeção do rental-core
+	// não recebe o mesmo aviso duas vezes.
+	if count := fixture.pending(t, id, facts.TopicVerifiedV2); count != 2 {
+		t.Fatalf("o outbox tem %d fatos verified.v2, esperava 2", count)
+	}
+}
+
+// TestReplacingTheCnhRemovesTheOneItSuperseded: cada envio gera uma chave nova,
+// então trocar a CNH sem apagar a anterior guardaria documento de identificação
+// para sempre -- e o "para sempre" é o problema, não o espaço.
+func TestReplacingTheCnhRemovesTheOneItSuperseded(t *testing.T) {
+	fixture := start(t)
+	fixture.register(t, http.StatusCreated)
+	id := fixture.lastID
+
+	fixture.send(fixture.upload(t, id, "uma foto qualquer"))
+	first := fixture.objectKey(t, id)
+
+	if response := fixture.send(fixture.upload(t, id, "uma foto qualquer")); response.Code != http.StatusOK {
+		t.Fatalf("o segundo envio devolveu %d", response.Code)
+	}
+	second := fixture.objectKey(t, id)
+	if first == second {
+		t.Fatal("o segundo envio reaproveitou a chave do primeiro")
+	}
+	if !slices.Contains(fixture.objects.removed, first) {
+		t.Fatalf("a CNH anterior ficou no armazenamento: %v", fixture.objects.removed)
+	}
+	// E a que o ponteiro aponta continua lá.
+	if _, held := fixture.objects.stored[second]; !held {
+		t.Fatal("a CNH atual foi apagada junto")
+	}
+}
+
+// TestDeletingARiderRemovesTheCnh: a linha some na transação, e o objeto no
+// bucket é a única parte que uma transação de banco não alcança.
+func TestDeletingARiderRemovesTheCnh(t *testing.T) {
+	fixture := start(t)
+	fixture.register(t, http.StatusCreated)
+	id := fixture.lastID
+	fixture.send(fixture.upload(t, id, "uma foto qualquer"))
+	key := fixture.objectKey(t, id)
+
+	fixture.send(fixture.envelope(t,
+		http.MethodDelete, "/api/riders/"+id, "um-administrador", "Admin"))
+	if !slices.Contains(fixture.objects.removed, key) {
+		t.Fatalf("a CNH sobreviveu ao piloto: %v", fixture.objects.removed)
+	}
+}
+
 // ---------------------------------------------------------------- ferramentas
+
+// objectKey lê para onde o registro aponta agora.
+func (f *fixture) objectKey(t *testing.T, riderID string) string {
+	t.Helper()
+	var key string
+	if err := f.database.QueryRow(
+		`SELECT cnh_object_key FROM riders WHERE user_id = $1`, riderID).Scan(&key); err != nil {
+		t.Fatal(err)
+	}
+	return key
+}
 
 // pending conta as linhas que a transação deixou no outbox para o piloto.
 func (f *fixture) pending(t *testing.T, riderID, topic string) int {

@@ -34,10 +34,7 @@ func Start(ctx context.Context) (func(context.Context) error, error) {
 		return nil, err
 	}
 
-	attributes, err := resource.Merge(resource.Default(), resource.NewWithAttributes(
-		semconv.SchemaURL,
-		semconv.ServiceName(name()),
-	))
+	attributes, err := Resource()
 	if err != nil {
 		return nil, err
 	}
@@ -53,6 +50,20 @@ func Start(ctx context.Context) (func(context.Context) error, error) {
 		propagation.TraceContext{}, propagation.Baggage{},
 	))
 	return provider.Shutdown, nil
+}
+
+// Resource descreve este processo para o coletor.
+//
+// O conjunto próprio vai SEM schema URL de propósito. resource.Merge recusa
+// dois recursos que declarem schemas diferentes, e resource.Default() declara o
+// do semconv que a versão do SDK carrega -- fixar uma versão aqui faz a subida
+// quebrar no dia em que o SDK avança, e quebrar dentro do container, longe do
+// teste. Sem schema, o resultado herda o do outro lado, e um go get -u deixa de
+// conseguir derrubar o serviço.
+func Resource() (*resource.Resource, error) {
+	return resource.Merge(resource.Default(), resource.NewSchemaless(
+		semconv.ServiceName(name()),
+	))
 }
 
 func name() string {

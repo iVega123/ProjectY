@@ -71,6 +71,18 @@ fn motorcycle_read_route(method: &Method, path: &str) -> bool {
             .is_some_and(|id| !id.is_empty() && !id.contains('/'))
 }
 
+/// Ler UM piloto não é rota de administrador, pelo mesmo motivo que ler uma
+/// moto não é: quem decide de quem é o registro é o identity, comparando o
+/// sujeito do envelope com o identificador do caminho, e respondendo 404 -- não
+/// 403 -- para o registro de outro.
+///
+/// Deixar isto em Admin recusaria o piloto no portão, antes de a conferência de
+/// dono existir, e a rota de auto-leitura só funcionaria chamando o identity
+/// direto. É a mesma discordância silenciosa entre duas camadas que o
+/// motorcycle_read_route acima documenta.
+///
+/// O lote continua Admin -- "este piloto" e "estes N pilotos" são perguntas
+/// diferentes -- e apagar também.
 fn rider_admin_route(method: &Method, path: &str) -> bool {
     if method == Method::GET && path == "/api/riders" {
         return true;
@@ -78,7 +90,7 @@ fn rider_admin_route(method: &Method, path: &str) -> bool {
     let Some(id) = path.strip_prefix("/api/riders/") else {
         return false;
     };
-    !id.is_empty() && !id.contains('/') && (method == Method::GET || method == Method::DELETE)
+    method == Method::DELETE && !id.is_empty() && !id.contains('/')
 }
 
 // A aposentadoria e a reserva de renomeação eram rotas de um protocolo entre
@@ -124,7 +136,11 @@ mod tests {
     #[test]
     fn maps_legacy_admin_routes_at_the_edge() {
         assert_eq!(
-            access_for(&Method::GET, "/api/riders/user-1", UpstreamName::Identity),
+            access_for(
+                &Method::DELETE,
+                "/api/riders/user-1",
+                UpstreamName::Identity
+            ),
             Access::Admin
         );
         assert_eq!(
@@ -212,6 +228,28 @@ mod tests {
                 "{method} on one motorcycle must stay Admin"
             );
         }
+    }
+
+    /// Um piloto lê o próprio registro, e o identity é quem confere o dono.
+    /// O lote e a remoção ficam com o administrador.
+    #[test]
+    fn a_rider_may_read_one_rider_but_not_the_batch() {
+        assert_eq!(
+            access_for(&Method::GET, "/api/riders/user-1", UpstreamName::Identity),
+            Access::Authenticated
+        );
+        assert_eq!(
+            access_for(&Method::GET, "/api/riders", UpstreamName::Identity),
+            Access::Admin
+        );
+        assert_eq!(
+            access_for(
+                &Method::DELETE,
+                "/api/riders/user-1",
+                UpstreamName::Identity
+            ),
+            Access::Admin
+        );
     }
 
     #[test]

@@ -1,8 +1,10 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -132,7 +134,33 @@ func (a *API) getRider(writer http.ResponseWriter, request *http.Request) {
 	reply(writer, http.StatusOK, found)
 }
 
+// discard apaga um objeto que nenhuma linha aponta mais.
+//
+// Ele roda DEPOIS do commit, e de propósito: dentro da transação, um bucket
+// fora do ar impediria de apagar o piloto. A ordem escolhida deixa passar um
+// objeto órfão quando o armazenamento falha, e não um ponteiro para um objeto
+// que já não existe -- o primeiro custa espaço, o segundo produz 500 na leitura.
+// O aviso é o que dá a um operador o que procurar.
+func (a *API) discard(request *http.Request, key string) {
+	if key == "" || a.objects == nil {
+		return
+	}
+	// Contexto próprio: a requisição já respondeu, e cancelá-la não pode
+	// cancelar a limpeza.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(request.Context()), 10*time.Second)
+	defer cancel()
+	if err := a.objects.Remove(ctx, key); err != nil {
+		a.logger.Warn("objeto da CNH ficou órfão", slog.String("objectKey", key))
+	}
+}
+
 // deleteRider apaga o piloto. Rota de administrador.
+//
+// Apagar duas vezes responde 204 nas duas. O portão reenvia DELETE por conta
+// própria quando o transporte falha (é um método idempotente, e ele trata assim),
+// de modo que 404 na segunda tentativa transformaria uma resposta perdida em
+// erro para o cliente -- exatamente no caso que a repetição existe para cobrir.
+// O custo é que apagar um identificador que nunca existiu também responde 204.
 func (a *API) deleteRider(writer http.ResponseWriter, request *http.Request) {
 	caller := a.caller(writer, request)
 	if caller == nil {
@@ -144,15 +172,13 @@ func (a *API) deleteRider(writer http.ResponseWriter, request *http.Request) {
 	}
 
 	id := request.PathValue("id")
-	err := a.riders.Delete(riders.WithTraceParent(request.Context(), traceParent(request)), id)
-	if errors.Is(err, riders.ErrNotFound) {
-		fail(writer, http.StatusNotFound, "piloto não encontrado")
-		return
-	}
-	if err != nil {
+	orphaned, err := a.riders.Delete(
+		riders.WithTraceParent(request.Context(), traceParent(request)), id)
+	if err != nil && !errors.Is(err, riders.ErrNotFound) {
 		a.fatal(writer, "apagando o piloto", err)
 		return
 	}
+	a.discard(request, orphaned)
 	writer.WriteHeader(http.StatusNoContent)
 }
 
@@ -214,7 +240,7 @@ func (a *API) updateImage(writer http.ResponseWriter, request *http.Request) {
 	// O ponteiro e o fato numa transação. Gravar o objeto e não contar deixaria
 	// o OCR do risk-pricing sem nada para ler, e o piloto esperando por um
 	// veredito que ninguém vai emitir.
-	err = a.riders.AttachDocument(
+	superseded, err := a.riders.AttachDocument(
 		riders.WithTraceParent(request.Context(), traceParent(request)), riderID, objectKey)
 	if errors.Is(err, riders.ErrNotFound) {
 		fail(writer, http.StatusNotFound, "piloto não encontrado")
@@ -224,6 +250,8 @@ func (a *API) updateImage(writer http.ResponseWriter, request *http.Request) {
 		a.fatal(writer, "apontando a CNH", err)
 		return
 	}
+	// A CNH anterior sai só depois que o ponteiro novo está gravado.
+	a.discard(request, superseded)
 	reply(writer, http.StatusOK, map[string]string{"objectKey": objectKey})
 }
 
