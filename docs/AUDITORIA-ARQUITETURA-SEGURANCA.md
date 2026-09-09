@@ -125,6 +125,16 @@ isolados com permissões específicas. Fechado pelo commit
 - **A4 — Não existe TLS.** O README promete 8181/8001/8101/8201; nenhum certificado é
   configurado, `ASPNETCORE_URLS` é só HTTP e `UseHttpsRedirection()` vira inofensivo sem
   porta HTTPS conhecida. As chamadas entre serviços são `http://` puro.
+
+  **Status: metade fechada.** A promessa saiu — a tabela de portas do
+  `getting-started` diz HTTP e nomeia os serviços que existem, a porta 8201 (que
+  o Compose publicava sem nada escutando) foi despublicada, e o
+  `UseHttpsRedirection()` foi removido em vez de deixado como decoração. O
+  [ADR 0025](adr/0025-tls-terminates-at-the-ingress.md) registra a decisão sobre
+  o tráfego dentro do cluster antes de o cluster existir: TLS termina no
+  ingress, e entre serviços é política de rede e não mTLS, porque o envelope do
+  ADR 0008 já autentica cada salto interno. **O que continua aberto é o TLS de
+  verdade**, que depende do ingress do épico 10 — #100.
 - **A5 — Upload de CNH validado só por extensão, com `Content-Type` do cliente.** Nunca se
   verificam os bytes iniciais, e `contentType = file.ContentType` é gravado como metadado no
   MinIO e devolvido pela URL pré-assinada → XSS armazenado.

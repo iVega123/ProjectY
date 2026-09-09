@@ -131,7 +131,14 @@ if (SwaggerPolicy.IsEnabled(app.Environment, app.Configuration))
     app.UseSwaggerUI();
 }
 
-app.UseHttpsRedirection();
+// UseHttpsRedirection saiu no #100.
+//
+// Sem porta HTTPS conhecida ele não redireciona nada: registra um aviso na
+// subida e deixa a requisição passar. Ficava como decoração que se lia como
+// garantia -- e é a metade pior do achado A4, porque uma garantia declarada e
+// não cumprida engana mais do que uma ausente. Quando o ingress do épico 10
+// terminar TLS, o que entra no lugar é ForwardedHeaders, para o aplicativo ver
+// o esquema original em vez de adivinhá-lo. Ver ADR 0025.
 
 app.UseAuthentication();
 app.UseAuthorization();
