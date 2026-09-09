@@ -1,222 +1,159 @@
 # ProjectY local development orchestration.
 #
-# The audited services remain the active topology while the strangler migration
-# replaces them one task at a time. The gateway is the first modernization
-# service and is the only public entry point added by this epic.
+# Kubernetes is the default path. Compose remains available during the migration
+# with `tilt up -- --orchestrator=compose`.
+
+load('ext://uibutton', 'cmd_button')
+
+config.define_string('orchestrator', usage = 'kubernetes (default) or compose')
+config.define_bool('full', usage = 'Include the complete polyglot topology in Compose mode')
+config.define_string_list('resources', args = True)
+settings = config.parse()
+config.set_enabled_resources(settings.get('resources', []))
+orchestrator = settings.get('orchestrator', 'kubernetes')
+full = settings.get('full', False)
+
+if orchestrator not in ['kubernetes', 'compose']:
+    fail('orchestrator must be `kubernetes` or `compose`')
 
 local_env_exists = os.path.exists('.env')
 rabbitmq_definitions_exist = os.path.exists('.rabbitmq-definitions.json')
-
 if local_env_exists != rabbitmq_definitions_exist:
-    existing_local_file = '.env' if local_env_exists else '.rabbitmq-definitions.json'
-    missing_local_file = '.rabbitmq-definitions.json' if local_env_exists else '.env'
-    partial_credentials_message = (
-        'Partial local credential set: %s exists but %s is missing. Tilt will not ' +
-        'rotate credentials automatically because persistent volumes may still use them. ' +
-        'Stop the stack, remove volumes initialized with the old credentials, then run ' +
+    existing = '.env' if local_env_exists else '.rabbitmq-definitions.json'
+    missing = '.rabbitmq-definitions.json' if local_env_exists else '.env'
+    fail(
+        'Partial local credential set: %s exists but %s is missing. Stop the stack, ' % (existing, missing) +
+        'remove volumes initialized with the old credentials, then run ' +
         '`powershell -ExecutionPolicy Bypass -File scripts/New-LocalSecrets.ps1 -Force`.'
-    ) % (existing_local_file, missing_local_file)
-    fail(partial_credentials_message)
+    )
 
-required_local_files = ['.env', '.rabbitmq-definitions.json']
-missing_local_files = [path for path in required_local_files if not os.path.exists(path)]
+missing_local_files = [path for path in ['.env', '.rabbitmq-definitions.json'] if not os.path.exists(path)]
 if missing_local_files and config.tilt_subcommand in ['up', 'ci']:
     print('Generating ignored local credentials for the first run...')
     local(
         ['pwsh', '-NoProfile', '-File', 'scripts/New-LocalSecrets.ps1'],
-        command_bat = [
-            'powershell',
-            '-NoProfile',
-            '-ExecutionPolicy',
-            'Bypass',
-            '-File',
-            'scripts\\New-LocalSecrets.ps1',
-        ],
+        command_bat = ['powershell', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', 'scripts\\New-LocalSecrets.ps1'],
         echo_off = True,
     )
 
-missing_local_files = [path for path in required_local_files if not os.path.exists(path)]
+missing_local_files = [path for path in ['.env', '.rabbitmq-definitions.json'] if not os.path.exists(path)]
 if missing_local_files:
-    missing_files_message = (
-        'Local credential generation did not create: %s. Run ' +
-        '`powershell -ExecutionPolicy Bypass -File scripts/New-LocalSecrets.ps1` ' +
-        'to inspect the underlying error.'
-    ) % ', '.join(missing_local_files)
-    fail(missing_files_message)
+    fail('Local credential generation did not create: %s' % ', '.join(missing_local_files))
 
-config.define_bool('full', usage = 'Include live telemetry, async risk/pricing and the console')
-config.define_string_list('resources', args = True)
-settings = config.parse()
-config.set_enabled_resources(settings.get('resources', []))
-full = settings.get('full', False)
-compose_files = ['docker-compose.yml', 'docker-compose.chaos.yml']
-if full:
-    compose_files.append('docker-compose.polyglot.yml')
+def build_application_images(target):
+    docker_build('projecty/api-gateway:dev', 'services/api-gateway', dockerfile = 'services/api-gateway/Dockerfile', target = target)
+    docker_build('projecty/media-guard:dev', 'services/media-guard', dockerfile = 'services/media-guard/Dockerfile', target = target)
+    docker_build('projecty/identity:dev', '.', dockerfile = 'services/identity/Dockerfile', target = target)
+    docker_build('projecty/rental-core:dev', '.', dockerfile = 'services/rental-core/RentalCore/Dockerfile', target = target)
+    docker_build('projecty/billing:dev', '.', dockerfile = 'services/billing/Dockerfile', target = target)
+    docker_build('projecty/risk-pricing:dev', '.', dockerfile = 'services/risk-pricing/Dockerfile', target = target)
+    docker_build('projecty/telemetry:dev', 'services/telemetry', dockerfile = 'services/telemetry/Dockerfile', target = target)
+    docker_build('projecty/console:dev', 'services/console', dockerfile = 'services/console/Dockerfile', target = target)
 
-docker_compose(
-    compose_files,
-    env_file = '.env',
-    project_name = 'projecty',
-)
+if orchestrator == 'kubernetes':
+    powershell = 'powershell' if os.name == 'nt' else 'pwsh'
+    script_prefix = [powershell, '-NoProfile']
+    if os.name == 'nt':
+        script_prefix += ['-ExecutionPolicy', 'Bypass']
 
-# Docker Compose workloads use restart_container(); the restart_process
-# extension does not support Compose resources. Development images keep their
-# source and language toolchain under /workspace so incremental builds happen
-# in-place instead of rebuilding an image.
-def configure_live_update(image, context, manifests, install_command, build_command = ''):
-    if not os.path.exists(context):
-        print('Live update pending service source: %s' % context)
-        return
+    if config.tilt_subcommand == 'down':
+        local(script_prefix + ['-File', 'scripts/kind/Remove-ProjectYCluster.ps1'])
+        print('ProjectY Kubernetes environment removed.')
+    else:
+        local(script_prefix + ['-File', 'scripts/kind/Ensure-ProjectYCluster.ps1'], echo_off = True)
+        allow_k8s_contexts('kind-projecty')
+        default_registry('localhost:5001')
 
-    update_steps = [
-        fall_back_on(context + '/Dockerfile'),
-        sync(context, '/workspace'),
-        run(install_command, trigger = manifests),
-    ]
-    if build_command:
-        update_steps.append(run(build_command))
-    update_steps.append(restart_container())
+        build_application_images('final')
+        docker_build('projecty/cockroach-schema:dev', 'deploy/db', dockerfile = 'deploy/db/Dockerfile')
+        docker_build('projecty/kafka-init:dev', 'deploy/kafka', dockerfile = 'deploy/kafka/Dockerfile')
+        docker_build('projecty/cassandra-init:dev', 'deploy/db/cassandra', dockerfile = 'deploy/db/cassandra/Dockerfile')
+        docker_build('projecty/schema-init:dev', 'contracts', dockerfile = 'contracts/Dockerfile')
+
+        k8s_yaml(kustomize('deploy/overlays/selfhost'))
+
+        k8s_resource('cockroach-schema', resource_deps = ['cockroachdb'], labels = ['setup'])
+        k8s_resource('kafka-topics', resource_deps = ['kafka'], labels = ['setup'])
+        k8s_resource('cassandra-schema', resource_deps = ['cassandra'], labels = ['setup'])
+        k8s_resource('schema-contracts', resource_deps = ['schema-registry', 'kafka-topics'], labels = ['setup'])
+        k8s_resource('identity', resource_deps = ['cockroach-schema', 'schema-contracts', 'media-guard'], labels = ['services'])
+        k8s_resource('rental-core', resource_deps = ['cockroach-schema', 'kafka-topics'], labels = ['services'])
+        k8s_resource('billing', resource_deps = ['cockroach-schema', 'schema-contracts'], labels = ['services'])
+        k8s_resource('risk-pricing', resource_deps = ['schema-contracts'], labels = ['services'])
+        k8s_resource('telemetry', resource_deps = ['cassandra-schema', 'kafka-topics'], labels = ['services'])
+        k8s_resource('api-gateway', resource_deps = ['identity', 'rental-core'], labels = ['services'])
+        k8s_resource('console', resource_deps = ['api-gateway', 'telemetry'], labels = ['services'])
+        k8s_resource('projecty', links = [link('http://localhost:8080', 'Console'), link('http://localhost:8080/health/ready', 'Gateway')])
+
+        print('Tilt UI: http://localhost:10350')
+        print('Console: http://localhost:8080')
+        print('Gateway: http://localhost:8080/health/ready')
+
+if orchestrator == 'compose':
+    compose_files = ['docker-compose.yml', 'docker-compose.chaos.yml']
+    if full:
+        compose_files.append('docker-compose.polyglot.yml')
+    docker_compose(compose_files, env_file = '.env', project_name = 'projecty')
+
+    def configure_live_update(image, context, manifests, install_command, build_command = ''):
+        update_steps = [
+            fall_back_on(context + '/Dockerfile'),
+            sync(context, '/workspace'),
+            run(install_command, trigger = manifests),
+        ]
+        if build_command:
+            update_steps.append(run(build_command))
+        update_steps.append(restart_container())
+        docker_build(image, context, dockerfile = context + '/Dockerfile', target = 'development', live_update = update_steps)
 
     docker_build(
-        image,
-        context,
-        dockerfile = context + '/Dockerfile',
-        target = 'development',
-        live_update = update_steps,
-    )
-
-def configure_dotnet_live_update(name, project, directory = None):
-    # The directory and the project stopped being the same name when moto-hub and
-    # rental-operations merged, so they are separate arguments now.
-    source = 'services/' + (directory or project) + '/' + project
-    docker_build(
-        'projecty/' + name + ':dev', '.',
-        dockerfile = source + '/Dockerfile', target = 'development',
+        'projecty/rental-core:dev', '.',
+        dockerfile = 'services/rental-core/RentalCore/Dockerfile', target = 'development',
         live_update = [
-            fall_back_on([source + '/Dockerfile', source + '/' + project + '.csproj', 'services/risk-pricing/pricing-policy.json']),
-            sync(source, '/src/' + source),
+            fall_back_on(['services/rental-core/RentalCore/Dockerfile', 'services/rental-core/RentalCore/RentalCore.csproj', 'services/risk-pricing/pricing-policy.json']),
+            sync('services/rental-core/RentalCore', '/src/services/rental-core/RentalCore'),
             sync('Shared', '/src/Shared'),
             sync('contracts', '/src/contracts'),
-            run('dotnet publish /src/' + source + '/' + project + '.csproj --configuration Release --output /app/publish --no-restore /p:UseAppHost=false'),
+            run('dotnet publish /src/services/rental-core/RentalCore/RentalCore.csproj --configuration Release --output /app/publish --no-restore /p:UseAppHost=false'),
             restart_container(),
         ],
     )
+    configure_live_update('projecty/api-gateway:dev', 'services/api-gateway', ['services/api-gateway/Cargo.toml', 'services/api-gateway/Cargo.lock'], 'cd /workspace && cargo fetch --locked', 'cd /workspace && cargo build --locked')
+    configure_live_update('projecty/media-guard:dev', 'services/media-guard', ['services/media-guard/Cargo.toml', 'services/media-guard/Cargo.lock'], 'cd /workspace && cargo fetch --locked', 'cd /workspace && cargo build --locked')
+    docker_build('projecty/identity:dev', '.', dockerfile = 'services/identity/Dockerfile', target = 'development')
 
-configure_dotnet_live_update('rental-core', 'RentalCore', 'rental-core')
+    infrastructure = ['toxiproxy', 'cockroachdb', 'redis', 'rabbitmq', 'minio']
+    observability = ['tempo', 'loki', 'otel-collector', 'prometheus', 'grafana']
+    setup = ['cockroach-init']
+    services = ['identity', 'rental-core', 'media-guard']
+    if full:
+        configure_live_update('projecty/telemetry:dev', 'services/telemetry', ['services/telemetry/mix.exs', 'services/telemetry/mix.lock'], 'cd /workspace && mix deps.get', 'cd /workspace && mix compile')
+        configure_live_update('projecty/console:dev', 'services/console', ['services/console/package.json', 'services/console/package-lock.json'], 'cd /workspace && npm ci')
+        docker_build('projecty/risk-pricing:dev', '.', dockerfile = 'services/risk-pricing/Dockerfile', target = 'development')
+        docker_build('projecty/billing:dev', '.', dockerfile = 'services/billing/Dockerfile', target = 'development')
+        infrastructure += ['kafka', 'cassandra', 'schema-registry']
+        setup += ['kafka-init', 'cassandra-init', 'schema-init']
+        services += ['telemetry', 'risk-pricing', 'console', 'billing']
 
-configure_live_update(
-    'projecty/api-gateway:dev',
-    'services/api-gateway',
-    ['services/api-gateway/Cargo.toml', 'services/api-gateway/Cargo.lock'],
-    'cd /workspace && cargo fetch --locked',
-    'cd /workspace && cargo build --locked',
-)
-configure_live_update(
-    'projecty/media-guard:dev',
-    'services/media-guard',
-    ['services/media-guard/Cargo.toml', 'services/media-guard/Cargo.lock'],
-    'cd /workspace && cargo fetch --locked',
-    'cd /workspace && cargo build --locked',
-)
-# O identity compila da raiz pelo mesmo motivo do billing: o teste aplica
-# deploy/db/sql, e a relay lê contracts/. O live update sincroniza o fonte e
-# reinicia -- `go run` recompila em segundos, e um binário Go não tem troca a
-# quente.
-docker_build(
-    'projecty/identity:dev', '.',
-    dockerfile = 'services/identity/Dockerfile', target = 'development',
-    live_update = [
-        fall_back_on(['services/identity/Dockerfile', 'services/identity/go.mod', 'services/identity/go.sum']),
-        sync('services/identity', '/src/services/identity'),
-        sync('contracts', '/src/contracts'),
-        restart_container(),
-    ],
-)
-infra_resources = ['toxiproxy', 'cockroachdb', 'redis', 'rabbitmq', 'minio']
-observability_resources = ['tempo', 'loki', 'otel-collector', 'prometheus', 'grafana']
-# O rental-core saiu daqui: o schema dele vem de deploy/db/sql, aplicado pelo
-# cockroach-init, e não de migrações do EF.
-setup_resources = ['cockroach-init']
-service_resources = ['identity', 'rental-core', 'media-guard']
+    for resource in infrastructure:
+        dc_resource(resource, labels = ['infra'])
+    for resource in observability:
+        links = [link('http://localhost:3000', 'Grafana')] if resource == 'grafana' else []
+        dc_resource(resource, labels = ['observability'], links = links)
+    for resource in setup:
+        dc_resource(resource, labels = ['setup'])
+    for resource in services:
+        dc_resource(resource, labels = ['services'], resource_deps = observability)
+    dc_resource('api-gateway', labels = ['services'], links = [link('http://localhost:8090/health/ready', 'Gateway')], resource_deps = observability)
 
-if full:
-    configure_live_update(
-        'projecty/telemetry:dev', 'services/telemetry',
-        ['services/telemetry/mix.exs', 'services/telemetry/mix.lock'],
-        'cd /workspace && mix deps.get', 'cd /workspace && mix compile',
-    )
-    configure_live_update(
-        'projecty/console:dev', 'services/console',
-        ['services/console/package.json', 'services/console/package-lock.json'],
-        'cd /workspace && npm ci',
-    )
-    docker_build(
-        'projecty/risk-pricing:dev', '.',
-        dockerfile = 'services/risk-pricing/Dockerfile', target = 'development',
-        live_update = [
-            fall_back_on(['services/risk-pricing/Dockerfile', 'services/risk-pricing/requirements.lock', 'contracts']),
-            sync('services/risk-pricing', '/workspace'), restart_container(),
-        ],
-    )
-    # O billing compila da raiz, como os .NET: o Gradle gera as classes de
-    # contracts/events e o teste aplica deploy/db/sql. Sem live update -- uma
-    # troca a quente de classes na JVM daria menos do que custaria explicar.
-    docker_build(
-        'projecty/billing:dev', '.',
-        dockerfile = 'services/billing/Dockerfile', target = 'development',
-    )
-    infra_resources += ['kafka', 'cassandra', 'schema-registry']
-    setup_resources += ['kafka-init', 'cassandra-init', 'schema-init']
-    service_resources += ['telemetry', 'risk-pricing', 'console', 'billing']
+    print('Tilt UI: http://localhost:10350')
+    print('Gateway: http://localhost:8090')
+    print('Grafana: http://localhost:3000')
+    if full:
+        print('Console: http://localhost:3001')
 
-for resource in infra_resources:
-    dc_resource(resource, labels = ['infra'])
-
-for resource in observability_resources:
-    resource_links = []
-    if resource == 'grafana':
-        resource_links = [link('http://localhost:3000', 'Grafana')]
-    dc_resource(resource, labels = ['observability'], links = resource_links)
-
-for resource in setup_resources:
-    dc_resource(resource, labels = ['setup'])
-
-for resource in service_resources:
-    dc_resource(
-        resource,
-        labels = ['services'],
-        resource_deps = observability_resources,
-    )
-
-dc_resource(
-    'api-gateway',
-    labels = ['services'],
-    links = [link('http://localhost:8090/health/ready', 'Gateway')],
-    resource_deps = observability_resources,
-)
-
-print('Tilt UI:  http://localhost:10350')
-print('Gateway:  http://localhost:8090')
-print('Grafana:  http://localhost:3000')
-if full:
-    print('Console:  http://localhost:3001')
-
-# Keep unavailable target-service drills visible and explicitly disabled.
-load('ext://uibutton', 'cmd_button')
-chaos_shell = 'powershell' if os.name == 'nt' else 'pwsh'
-chaos_prefix = [chaos_shell, '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', 'scripts/Invoke-ChaosDrill.ps1']
-for drill in read_json('deploy/chaos/drills.json'):
-    cmd_button(
-        'chaos-' + drill['id'],
-        resource = 'toxiproxy',
-        argv = chaos_prefix + [drill['id']],
-        text = drill['label'],
-        disabled = not drill['available'],
-    )
-    cmd_button(
-        'chaos-clear-' + drill['id'],
-        resource = 'toxiproxy',
-        argv = chaos_prefix + [drill['id'], '-Clear'],
-        text = 'Clear: ' + drill['label'],
-        disabled = not drill['available'],
-    )
+    chaos_shell = 'powershell' if os.name == 'nt' else 'pwsh'
+    chaos_prefix = [chaos_shell, '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', 'scripts/Invoke-ChaosDrill.ps1']
+    for drill in read_json('deploy/chaos/drills.json'):
+        cmd_button('chaos-' + drill['id'], resource = 'toxiproxy', argv = chaos_prefix + [drill['id']], text = drill['label'], disabled = not drill['available'])
+        cmd_button('chaos-clear-' + drill['id'], resource = 'toxiproxy', argv = chaos_prefix + [drill['id'], '-Clear'], text = 'Clear: ' + drill['label'], disabled = not drill['available'])

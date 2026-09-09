@@ -1,0 +1,101 @@
+apiVersion: batch/v1
+kind: Job
+metadata: {name: cockroach-schema}
+spec:
+  backoffLimit: 12
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: cockroach-schema, projecty.io/tier: setup}
+    spec:
+      restartPolicy: OnFailure
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: schema
+          image: projecty/cockroach-schema:dev
+          env: [{name: COCKROACH_HOST, value: cockroachdb:26257}]
+          resources:
+            requests: {cpu: 25m, memory: 32Mi}
+            limits: {cpu: 250m, memory: 128Mi}
+          securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}, readOnlyRootFilesystem: true}
+          volumeMounts: [{name: tmp, mountPath: /tmp}]
+      volumes: [{name: tmp, emptyDir: {}}]
+---
+apiVersion: batch/v1
+kind: Job
+metadata: {name: kafka-topics}
+spec:
+  backoffLimit: 12
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: kafka-topics, projecty.io/tier: setup}
+    spec:
+      restartPolicy: OnFailure
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: topics
+          image: projecty/kafka-init:dev
+          resources:
+            requests: {cpu: 25m, memory: 64Mi}
+            limits: {cpu: 250m, memory: 256Mi}
+          securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}, readOnlyRootFilesystem: true}
+          volumeMounts: [{name: tmp, mountPath: /tmp}]
+      volumes: [{name: tmp, emptyDir: {}}]
+---
+apiVersion: batch/v1
+kind: Job
+metadata: {name: cassandra-schema}
+spec:
+  backoffLimit: 12
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: cassandra-schema, projecty.io/tier: setup}
+    spec:
+      restartPolicy: OnFailure
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 999
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: schema
+          image: projecty/cassandra-init:dev
+          resources:
+            requests: {cpu: 25m, memory: 64Mi}
+            limits: {cpu: 250m, memory: 256Mi}
+          securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}, readOnlyRootFilesystem: true}
+          volumeMounts: [{name: tmp, mountPath: /tmp}]
+      volumes: [{name: tmp, emptyDir: {}}]
+---
+apiVersion: batch/v1
+kind: Job
+metadata: {name: schema-contracts}
+spec:
+  backoffLimit: 12
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: schema-contracts, projecty.io/tier: setup}
+    spec:
+      restartPolicy: OnFailure
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: contracts
+          image: projecty/schema-init:dev
+          env: [{name: SCHEMA_REGISTRY_URL, value: http://schema-registry:8080/apis/ccompat/v7}]
+          resources:
+            requests: {cpu: 25m, memory: 32Mi}
+            limits: {cpu: 250m, memory: 128Mi}
+          securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}, readOnlyRootFilesystem: true}
+          volumeMounts: [{name: tmp, mountPath: /tmp}]
+      volumes: [{name: tmp, emptyDir: {}}]
