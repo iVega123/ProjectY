@@ -1,0 +1,344 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: api-gateway}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app.kubernetes.io/name: api-gateway}
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: api-gateway, projecty.io/tier: edge}
+    spec:
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: api-gateway
+          image: projecty/api-gateway:dev
+          envFrom:
+            - configMapRef: {name: projecty-runtime}
+            - secretRef: {name: projecty-runtime}
+          env: [{name: OTEL_SERVICE_NAME, value: api-gateway}]
+          ports: [{name: http, containerPort: 8090}]
+          startupProbe: {httpGet: {path: /health/ready, port: http}, periodSeconds: 5, failureThreshold: 24}
+          readinessProbe: {httpGet: {path: /health/ready, port: http}, periodSeconds: 5}
+          livenessProbe: {httpGet: {path: /health/live, port: http}, periodSeconds: 10}
+          resources:
+            requests: {cpu: 50m, memory: 64Mi}
+            limits: {cpu: 500m, memory: 256Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+            readOnlyRootFilesystem: true
+          volumeMounts: [{name: tmp, mountPath: /tmp}]
+      volumes: [{name: tmp, emptyDir: {}}]
+---
+apiVersion: v1
+kind: Service
+metadata: {name: api-gateway}
+spec:
+  selector: {app.kubernetes.io/name: api-gateway}
+  ports: [{name: http, port: 8090, targetPort: http}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: identity}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app.kubernetes.io/name: identity}
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: identity, projecty.io/tier: service}
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: identity
+          image: projecty/identity:dev
+          envFrom:
+            - configMapRef: {name: projecty-runtime}
+            - secretRef: {name: projecty-runtime}
+          env: [{name: OTEL_SERVICE_NAME, value: identity}]
+          ports: [{name: http, containerPort: 8095}]
+          startupProbe: {httpGet: {path: /health/ready, port: http}, periodSeconds: 5, failureThreshold: 36}
+          readinessProbe: {httpGet: {path: /health/ready, port: http}, periodSeconds: 5}
+          livenessProbe: {httpGet: {path: /health/live, port: http}, periodSeconds: 10}
+          resources:
+            requests: {cpu: 50m, memory: 64Mi}
+            limits: {cpu: 500m, memory: 256Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+            readOnlyRootFilesystem: true
+          volumeMounts: [{name: tmp, mountPath: /tmp}]
+      volumes: [{name: tmp, emptyDir: {}}]
+---
+apiVersion: v1
+kind: Service
+metadata: {name: identity}
+spec:
+  selector: {app.kubernetes.io/name: identity}
+  ports: [{name: http, port: 8095, targetPort: http}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: rental-core}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app.kubernetes.io/name: rental-core}
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: rental-core, projecty.io/tier: service}
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: rental-core
+          image: projecty/rental-core:dev
+          envFrom:
+            - configMapRef: {name: projecty-runtime}
+            - secretRef: {name: projecty-runtime}
+          env: [{name: OTEL_SERVICE_NAME, value: rental-core}]
+          ports: [{name: http, containerPort: 8200}]
+          startupProbe: {httpGet: {path: /health/ready, port: http}, periodSeconds: 5, failureThreshold: 36}
+          readinessProbe: {httpGet: {path: /health/ready, port: http}, periodSeconds: 5}
+          livenessProbe: {httpGet: {path: /health/live, port: http}, periodSeconds: 10}
+          resources:
+            requests: {cpu: 100m, memory: 128Mi}
+            limits: {cpu: "1", memory: 512Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+            readOnlyRootFilesystem: true
+          volumeMounts: [{name: tmp, mountPath: /tmp}]
+      volumes: [{name: tmp, emptyDir: {}}]
+---
+apiVersion: v1
+kind: Service
+metadata: {name: rental-core}
+spec:
+  selector: {app.kubernetes.io/name: rental-core}
+  ports: [{name: http, port: 8200, targetPort: http}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: media-guard}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app.kubernetes.io/name: media-guard}
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: media-guard, projecty.io/tier: service}
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: media-guard
+          image: projecty/media-guard:dev
+          envFrom:
+            - configMapRef: {name: projecty-runtime}
+            - secretRef: {name: projecty-runtime}
+          env: [{name: OTEL_SERVICE_NAME, value: media-guard}]
+          ports: [{name: http, containerPort: 8092}]
+          startupProbe: {httpGet: {path: /health/ready, port: http}, periodSeconds: 3, failureThreshold: 20}
+          readinessProbe: {httpGet: {path: /health/ready, port: http}, periodSeconds: 5}
+          livenessProbe: {httpGet: {path: /health/live, port: http}, periodSeconds: 10}
+          resources:
+            requests: {cpu: 100m, memory: 64Mi}
+            limits: {cpu: "2", memory: 768Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+            readOnlyRootFilesystem: true
+          volumeMounts: [{name: tmp, mountPath: /tmp}]
+      volumes: [{name: tmp, emptyDir: {}}]
+---
+apiVersion: v1
+kind: Service
+metadata: {name: media-guard}
+spec:
+  selector: {app.kubernetes.io/name: media-guard}
+  ports: [{name: http, port: 8092, targetPort: http}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: billing}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app.kubernetes.io/name: billing}
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: billing, projecty.io/tier: service}
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: billing
+          image: projecty/billing:dev
+          envFrom:
+            - configMapRef: {name: projecty-runtime}
+            - secretRef: {name: projecty-runtime}
+          env: [{name: OTEL_SERVICE_NAME, value: billing}]
+          ports: [{name: http, containerPort: 8094}]
+          startupProbe: {httpGet: {path: /health/ready, port: http}, periodSeconds: 5, failureThreshold: 36}
+          readinessProbe: {httpGet: {path: /health/ready, port: http}, periodSeconds: 5}
+          livenessProbe: {httpGet: {path: /health/live, port: http}, periodSeconds: 10}
+          resources:
+            requests: {cpu: 100m, memory: 192Mi}
+            limits: {cpu: "1", memory: 768Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+            readOnlyRootFilesystem: true
+          volumeMounts: [{name: tmp, mountPath: /tmp}]
+      volumes: [{name: tmp, emptyDir: {}}]
+---
+apiVersion: v1
+kind: Service
+metadata: {name: billing}
+spec:
+  selector: {app.kubernetes.io/name: billing}
+  ports: [{name: http, port: 8094, targetPort: http}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: risk-pricing}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app.kubernetes.io/name: risk-pricing}
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: risk-pricing, projecty.io/tier: service}
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: risk-pricing
+          image: projecty/risk-pricing:dev
+          envFrom:
+            - configMapRef: {name: projecty-runtime}
+            - secretRef: {name: projecty-runtime}
+          env: [{name: OTEL_SERVICE_NAME, value: risk-pricing}]
+          ports: [{name: http, containerPort: 8093}]
+          startupProbe: {httpGet: {path: /health/ready, port: http}, periodSeconds: 5, failureThreshold: 36}
+          readinessProbe: {httpGet: {path: /health/ready, port: http}, periodSeconds: 5}
+          livenessProbe: {httpGet: {path: /health/live, port: http}, periodSeconds: 10}
+          resources:
+            requests: {cpu: 100m, memory: 128Mi}
+            limits: {cpu: "1", memory: 768Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+            readOnlyRootFilesystem: true
+          volumeMounts:
+            - {name: tmp, mountPath: /tmp}
+            - {name: state, mountPath: /data}
+      volumes:
+        - {name: tmp, emptyDir: {}}
+        - {name: state, emptyDir: {}}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: risk-pricing}
+spec:
+  selector: {app.kubernetes.io/name: risk-pricing}
+  ports: [{name: http, port: 8093, targetPort: http}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: telemetry}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app.kubernetes.io/name: telemetry}
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: telemetry, projecty.io/tier: service}
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: telemetry
+          image: projecty/telemetry:dev
+          envFrom:
+            - configMapRef: {name: projecty-runtime}
+            - secretRef: {name: projecty-runtime}
+          env: [{name: OTEL_SERVICE_NAME, value: telemetry}]
+          ports: [{name: http, containerPort: 4000}]
+          startupProbe: {httpGet: {path: /health/ready, port: http}, periodSeconds: 5, failureThreshold: 36}
+          readinessProbe: {httpGet: {path: /health/ready, port: http}, periodSeconds: 5}
+          livenessProbe: {httpGet: {path: /health/live, port: http}, periodSeconds: 10}
+          resources:
+            requests: {cpu: 100m, memory: 128Mi}
+            limits: {cpu: "1", memory: 512Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+            readOnlyRootFilesystem: true
+          volumeMounts: [{name: tmp, mountPath: /tmp}]
+      volumes: [{name: tmp, emptyDir: {}}]
+---
+apiVersion: v1
+kind: Service
+metadata: {name: telemetry}
+spec:
+  selector: {app.kubernetes.io/name: telemetry}
+  ports: [{name: http, port: 4000, targetPort: http}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: console}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app.kubernetes.io/name: console}
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: console, projecty.io/tier: edge}
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: console
+          image: projecty/console:dev
+          envFrom:
+            - configMapRef: {name: projecty-runtime}
+            - secretRef: {name: projecty-runtime}
+          ports: [{name: http, containerPort: 3001}]
+          startupProbe: {httpGet: {path: /health/ready, port: http}, periodSeconds: 5, failureThreshold: 36}
+          readinessProbe: {httpGet: {path: /health/ready, port: http}, periodSeconds: 5}
+          livenessProbe: {httpGet: {path: /health/live, port: http}, periodSeconds: 10}
+          resources:
+            requests: {cpu: 50m, memory: 128Mi}
+            limits: {cpu: "1", memory: 512Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+            readOnlyRootFilesystem: true
+          volumeMounts: [{name: tmp, mountPath: /tmp}]
+      volumes: [{name: tmp, emptyDir: {}}]
+---
+apiVersion: v1
+kind: Service
+metadata: {name: console}
+spec:
+  selector: {app.kubernetes.io/name: console}
+  ports: [{name: http, port: 3001, targetPort: http}]
