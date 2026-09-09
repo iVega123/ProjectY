@@ -2,7 +2,8 @@
 
 ## Status
 
-Accepted on 2026-08-30.
+Accepted on 2026-08-30; amended on 2026-09-09 when Kubernetes became the
+default local orchestrator.
 
 ## Context
 
@@ -23,8 +24,9 @@ snapshot confuses archival history with active configuration.
 - `deploy/overlays/<variant>/` owns values and mechanics that change by target,
   including build contexts, host ports, bind mounts, restart policy, runtime
   mode, credentials wiring, and provider endpoints.
-- Every runnable deployment selects an overlay. Tilt and manual local commands
-  use `deploy/overlays/selfhost/compose.yaml`, never the base directly.
+- Every runnable deployment selects an overlay. Kubernetes uses the Kustomize
+  overlays under `deploy/overlays`; the legacy Compose path uses
+  `deploy/overlays/selfhost/compose.yaml`. Neither path deploys the base directly.
 - New deployment variants are added as overlays in this tree and delivered by
   short-lived task branches through the normal GitFlow.
 - Branches may be frozen only as immutable article citations. They are not a
@@ -39,5 +41,6 @@ snapshot confuses archival history with active configuration.
   paths.
 - An overlay must be kept valid against the current base in CI; adding a new
   target adds validation, not a permanent merge lane.
-- Compose 2.20 or newer is required because the self-hosted entrypoint uses the
-  top-level `include` element to merge the base and its override.
+- The same Kustomize base renders both self-hosted and AWS shapes, and CI rejects
+  drift in either overlay. Compose 2.20 or newer remains required only for the
+  explicit Compose fallback.

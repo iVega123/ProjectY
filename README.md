@@ -52,7 +52,7 @@ source locations are in the
 | Data and messaging | CockroachDB for `rental-core`, PostgreSQL for the rest, RabbitMQ, and MinIO |
 | Active observability | Application OTLP exporters, OpenTelemetry Collector, Prometheus, Tempo, Loki, and Grafana |
 | Retired observability | The unauthenticated Elasticsearch, Logstash, and Kibana stack |
-| Platform integration | Root and `deploy/base` entrypoints share the real application topology; Tilt live updates all four .NET services |
+| Platform integration | Kustomize owns the shared Kubernetes topology with self-hosted and AWS overlays; Tilt provisions kind, Calico, ingress, External Secrets and signed-image admission |
 | Polyglot services | Rust media-guard, Elixir live telemetry, asynchronous Python risk/pricing and Next.js operations console |
 | Decision records | The design and implementation trail is indexed under [`docs/adr/`](docs/adr/README.md) |
 
@@ -106,13 +106,14 @@ Database-backed tests use the shared
 State-changing API retries follow the shared
 [`Idempotency-Key` contract](docs/api/idempotency.md).
 
-### Modernization development loop
+### Kubernetes development loop
 
-The root [`Tiltfile`](Tiltfile) organizes `docker-compose.yml` into
-infrastructure, observability, setup, and service groups. It requires Docker
-Compose 2.20 or newer, Tilt, and PowerShell (`powershell` on Windows or `pwsh`
-on macOS/Linux). Start the audited services behind the Rust gateway, with LGTM
-ready before application startup, using one command:
+The root [`Tiltfile`](Tiltfile) now uses Kubernetes by default. It bootstraps a
+pinned kind cluster, a local registry, Calico, ingress-nginx, External Secrets
+and Kyverno before deploying the shared `deploy/base` topology through the
+`selfhost` Kustomize overlay. See the
+[local Kubernetes runbook](docs/runbooks/local-kubernetes.md) for prerequisites,
+resource sizing, security proofs and troubleshooting. Start everything with:
 
 ```bash
 tilt up
@@ -129,15 +130,20 @@ To recover intentionally, stop the stack, remove volumes initialized with the
 old credentials, and run
 `powershell -ExecutionPolicy Bypass -File scripts/New-LocalSecrets.ps1 -Force`.
 
-The Tilt UI is at <http://localhost:10350> and the gateway listens at
-<http://localhost:8090>. Use `tilt down` to stop the stack. The one-shot EF Core
-migration containers appear as setup resources; infrastructure, the audited
-services and the temporary ELK stack are grouped separately.
+The Tilt UI is at <http://localhost:10350>; ingress serves the console and
+gateway at <http://localhost:8080>. `tilt down` removes the kind cluster and
+local registry, including their local data.
 
-Gateway source is synced into its Rust development image and rebuilt in place;
-the Compose container restarts after a successful incremental build. The
-release image built by CI uses the Dockerfile's final distroless, non-root stage
-instead of the toolchain-bearing development stage.
+Compose remains an explicit migration fallback:
+
+```bash
+tilt up -- --orchestrator=compose --full
+```
+
+The release images built by CI use the Dockerfiles' final non-root stages. CI
+also renders both Kubernetes overlays and runs an ephemeral-cluster acceptance
+that captures unsigned-image rejection, Pod Security enforcement, datastore
+isolation and External Secrets synchronization as downloadable evidence.
 
 There is not yet an honest cold-start time to publish. The first successful
 start must still be timed on a clean Docker cache with the hardware and network

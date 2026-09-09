@@ -40,6 +40,15 @@ if (-not $network -or $network -eq '<no value>') {
 & $kubectl config use-context $context | Out-Null
 if ($LASTEXITCODE -ne 0) { throw "Could not select kubectl context $context." }
 
+$calicoVersion = 'v3.32.2'
+$calicoManifest = "https://raw.githubusercontent.com/projectcalico/calico/$calicoVersion/manifests/calico.yaml"
+& $kubectl apply --server-side -f $calicoManifest | Out-Null
+if ($LASTEXITCODE -ne 0) { throw "Could not install Calico $calicoVersion." }
+& $kubectl rollout status --namespace kube-system daemonset/calico-node --timeout=240s
+if ($LASTEXITCODE -ne 0) { throw 'Calico nodes did not become ready.' }
+& $kubectl rollout status --namespace kube-system deployment/calico-kube-controllers --timeout=240s
+if ($LASTEXITCODE -ne 0) { throw 'Calico controllers did not become ready.' }
+
 $registryDiscovery = @"
 apiVersion: v1
 kind: ConfigMap
@@ -61,4 +70,4 @@ if ($LASTEXITCODE -ne 0) { throw 'Could not install ingress-nginx.' }
 & $kubectl wait --namespace ingress-nginx --for=condition=Available deployment/ingress-nginx-controller --timeout=180s
 if ($LASTEXITCODE -ne 0) { throw 'ingress-nginx did not become available.' }
 
-Write-Host "ProjectY cluster ready: $context (registry localhost:$registryPort, ingress http://localhost:8080)"
+Write-Host "ProjectY cluster ready: $context (Calico $calicoVersion, registry localhost:$registryPort, ingress http://localhost:8080)"

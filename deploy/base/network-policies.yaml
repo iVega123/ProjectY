@@ -1,0 +1,307 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: default-deny}
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: allow-dns}
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: kube-system}
+          podSelector:
+            matchLabels: {k8s-app: kube-dns}
+      ports:
+        - {protocol: UDP, port: 53}
+        - {protocol: TCP, port: 53}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: ingress-only-reaches-edge}
+spec:
+  podSelector:
+    matchLabels: {projecty.io/tier: edge}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: ingress-nginx}
+      ports:
+        - {protocol: TCP, port: 8090}
+        - {protocol: TCP, port: 3001}
+        - {protocol: TCP, port: 4000}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: gateway-to-owned-dependencies}
+spec:
+  podSelector:
+    matchLabels: {app.kubernetes.io/name: api-gateway}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - podSelector:
+            matchExpressions:
+              - key: app.kubernetes.io/name
+                operator: In
+                values: [identity, rental-core, billing]
+      ports:
+        - {protocol: TCP, port: 8095}
+        - {protocol: TCP, port: 8200}
+        - {protocol: TCP, port: 8094}
+    - to: [{podSelector: {matchLabels: {app.kubernetes.io/name: redis}}}]
+      ports: [{protocol: TCP, port: 6379}]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: console-to-gateway}
+spec:
+  podSelector:
+    matchLabels: {app.kubernetes.io/name: console}
+  policyTypes: [Egress]
+  egress:
+    - to: [{podSelector: {matchLabels: {app.kubernetes.io/name: api-gateway}}}]
+      ports: [{protocol: TCP, port: 8090}]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: gateway-to-service-ingress}
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app.kubernetes.io/name
+        operator: In
+        values: [identity, rental-core, billing]
+  policyTypes: [Ingress]
+  ingress:
+    - from: [{podSelector: {matchLabels: {app.kubernetes.io/name: api-gateway}}}]
+      ports:
+        - {protocol: TCP, port: 8095}
+        - {protocol: TCP, port: 8200}
+        - {protocol: TCP, port: 8094}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: identity-to-owned-dependencies}
+spec:
+  podSelector: {matchLabels: {app.kubernetes.io/name: identity}}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - podSelector:
+            matchExpressions:
+              - key: app.kubernetes.io/name
+                operator: In
+                values: [cockroachdb, minio, media-guard, kafka, schema-registry]
+      ports:
+        - {protocol: TCP, port: 26257}
+        - {protocol: TCP, port: 9000}
+        - {protocol: TCP, port: 8092}
+        - {protocol: TCP, port: 9092}
+        - {protocol: TCP, port: 8080}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: identity-to-media-guard}
+spec:
+  podSelector: {matchLabels: {app.kubernetes.io/name: media-guard}}
+  policyTypes: [Ingress]
+  ingress:
+    - from: [{podSelector: {matchLabels: {app.kubernetes.io/name: identity}}}]
+      ports: [{protocol: TCP, port: 8092}]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: rental-core-to-owned-dependencies}
+spec:
+  podSelector: {matchLabels: {app.kubernetes.io/name: rental-core}}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - podSelector:
+            matchExpressions:
+              - key: app.kubernetes.io/name
+                operator: In
+                values: [cockroachdb, rabbitmq, redis, kafka, schema-registry]
+      ports:
+        - {protocol: TCP, port: 26257}
+        - {protocol: TCP, port: 5672}
+        - {protocol: TCP, port: 6379}
+        - {protocol: TCP, port: 9092}
+        - {protocol: TCP, port: 8080}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: billing-to-owned-dependencies}
+spec:
+  podSelector: {matchLabels: {app.kubernetes.io/name: billing}}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - podSelector:
+            matchExpressions:
+              - key: app.kubernetes.io/name
+                operator: In
+                values: [cockroachdb, kafka, schema-registry]
+      ports:
+        - {protocol: TCP, port: 26257}
+        - {protocol: TCP, port: 9092}
+        - {protocol: TCP, port: 8080}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: risk-pricing-to-owned-dependencies}
+spec:
+  podSelector: {matchLabels: {app.kubernetes.io/name: risk-pricing}}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - podSelector:
+            matchExpressions:
+              - key: app.kubernetes.io/name
+                operator: In
+                values: [kafka, schema-registry, minio]
+      ports:
+        - {protocol: TCP, port: 9092}
+        - {protocol: TCP, port: 8080}
+        - {protocol: TCP, port: 9000}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: telemetry-to-owned-dependencies}
+spec:
+  podSelector: {matchLabels: {app.kubernetes.io/name: telemetry}}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - podSelector:
+            matchExpressions:
+              - key: app.kubernetes.io/name
+                operator: In
+                values: [kafka, redis, cassandra]
+      ports:
+        - {protocol: TCP, port: 9092}
+        - {protocol: TCP, port: 6379}
+        - {protocol: TCP, port: 9042}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: cockroachdb-owners}
+spec:
+  podSelector: {matchLabels: {app.kubernetes.io/name: cockroachdb}}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchExpressions:
+              - {key: app.kubernetes.io/name, operator: In, values: [identity, rental-core, billing, cockroach-schema]}
+      ports: [{protocol: TCP, port: 26257}]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: rabbitmq-owner}
+spec:
+  podSelector: {matchLabels: {app.kubernetes.io/name: rabbitmq}}
+  policyTypes: [Ingress]
+  ingress:
+    - from: [{podSelector: {matchLabels: {app.kubernetes.io/name: rental-core}}}]
+      ports: [{protocol: TCP, port: 5672}]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: redis-owners}
+spec:
+  podSelector: {matchLabels: {app.kubernetes.io/name: redis}}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchExpressions:
+              - {key: app.kubernetes.io/name, operator: In, values: [api-gateway, rental-core, telemetry]}
+      ports: [{protocol: TCP, port: 6379}]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: minio-owners}
+spec:
+  podSelector: {matchLabels: {app.kubernetes.io/name: minio}}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchExpressions:
+              - {key: app.kubernetes.io/name, operator: In, values: [identity, risk-pricing]}
+      ports: [{protocol: TCP, port: 9000}]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: kafka-clients}
+spec:
+  podSelector: {matchLabels: {app.kubernetes.io/name: kafka}}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchExpressions:
+              - {key: app.kubernetes.io/name, operator: In, values: [identity, rental-core, billing, risk-pricing, telemetry, schema-registry, kafka-topics]}
+      ports: [{protocol: TCP, port: 9092}]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: cassandra-clients}
+spec:
+  podSelector: {matchLabels: {app.kubernetes.io/name: cassandra}}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchExpressions:
+              - {key: app.kubernetes.io/name, operator: In, values: [telemetry, cassandra-schema]}
+      ports: [{protocol: TCP, port: 9042}]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: schema-registry-clients}
+spec:
+  podSelector: {matchLabels: {app.kubernetes.io/name: schema-registry}}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchExpressions:
+              - {key: app.kubernetes.io/name, operator: In, values: [identity, rental-core, billing, risk-pricing, schema-contracts]}
+      ports: [{protocol: TCP, port: 8080}]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: data-service-egress}
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app.kubernetes.io/name
+        operator: In
+        values: [schema-registry]
+  policyTypes: [Egress]
+  egress:
+    - to: [{podSelector: {matchLabels: {app.kubernetes.io/name: kafka}}}]
+      ports: [{protocol: TCP, port: 9092}]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: setup-to-data}
+spec:
+  podSelector: {matchLabels: {projecty.io/tier: setup}}
+  policyTypes: [Egress]
+  egress:
+    - to: [{podSelector: {matchLabels: {projecty.io/tier: data}}}]
+      ports:
+        - {protocol: TCP, port: 26257}
+        - {protocol: TCP, port: 9092}
+        - {protocol: TCP, port: 9042}
+        - {protocol: TCP, port: 8080}

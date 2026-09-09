@@ -34,7 +34,13 @@ the Compose network.
 - Git
 - Docker Engine or Docker Desktop
 - Docker Compose v2 (`docker compose`)
+- Tilt and PowerShell, for the default Kubernetes development path
 - Every host port listed in the next section must be available
+
+`tilt up` now provisions the Kubernetes environment described in the
+[local Kubernetes runbook](runbooks/local-kubernetes.md). The remaining Compose
+instructions in this document are the audited baseline and can be selected with
+`tilt up -- --orchestrator=compose`.
 
 ## Required host ports
 
@@ -114,10 +120,10 @@ Then start the stack:
 docker compose up --build
 ```
 
-Tilt uses the same Compose model and adds live update for the Rust gateway:
+Tilt can still select the Compose model explicitly during the migration:
 
 ```bash
-tilt up
+tilt up -- --orchestrator=compose
 ```
 
 `cockroach-init` applies `deploy/db/sql` before any application starts, and

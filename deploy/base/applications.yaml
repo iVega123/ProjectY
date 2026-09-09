@@ -9,6 +9,8 @@ spec:
     metadata:
       labels: {app.kubernetes.io/name: api-gateway, projecty.io/tier: edge}
     spec:
+      serviceAccountName: api-gateway
+      automountServiceAccountToken: false
       terminationGracePeriodSeconds: 30
       securityContext:
         runAsNonRoot: true
@@ -18,7 +20,7 @@ spec:
           image: projecty/api-gateway:dev
           envFrom:
             - configMapRef: {name: projecty-runtime}
-            - secretRef: {name: projecty-runtime}
+            - secretRef: {name: api-gateway-secrets}
           env: [{name: OTEL_SERVICE_NAME, value: api-gateway}]
           ports: [{name: http, containerPort: 8090}]
           startupProbe: {httpGet: {path: /health/ready, port: http}, periodSeconds: 5, failureThreshold: 24}
@@ -52,6 +54,8 @@ spec:
     metadata:
       labels: {app.kubernetes.io/name: identity, projecty.io/tier: service}
     spec:
+      serviceAccountName: identity
+      automountServiceAccountToken: false
       securityContext:
         runAsNonRoot: true
         seccompProfile: {type: RuntimeDefault}
@@ -60,7 +64,7 @@ spec:
           image: projecty/identity:dev
           envFrom:
             - configMapRef: {name: projecty-runtime}
-            - secretRef: {name: projecty-runtime}
+            - secretRef: {name: identity-secrets}
           env: [{name: OTEL_SERVICE_NAME, value: identity}]
           ports: [{name: http, containerPort: 8095}]
           startupProbe: {httpGet: {path: /health/ready, port: http}, periodSeconds: 5, failureThreshold: 36}
@@ -94,6 +98,8 @@ spec:
     metadata:
       labels: {app.kubernetes.io/name: rental-core, projecty.io/tier: service}
     spec:
+      serviceAccountName: rental-core
+      automountServiceAccountToken: false
       securityContext:
         runAsNonRoot: true
         seccompProfile: {type: RuntimeDefault}
@@ -102,7 +108,7 @@ spec:
           image: projecty/rental-core:dev
           envFrom:
             - configMapRef: {name: projecty-runtime}
-            - secretRef: {name: projecty-runtime}
+            - secretRef: {name: rental-core-secrets}
           env: [{name: OTEL_SERVICE_NAME, value: rental-core}]
           ports: [{name: http, containerPort: 8200}]
           startupProbe: {httpGet: {path: /health/ready, port: http}, periodSeconds: 5, failureThreshold: 36}
@@ -136,6 +142,8 @@ spec:
     metadata:
       labels: {app.kubernetes.io/name: media-guard, projecty.io/tier: service}
     spec:
+      serviceAccountName: media-guard
+      automountServiceAccountToken: false
       securityContext:
         runAsNonRoot: true
         seccompProfile: {type: RuntimeDefault}
@@ -144,7 +152,6 @@ spec:
           image: projecty/media-guard:dev
           envFrom:
             - configMapRef: {name: projecty-runtime}
-            - secretRef: {name: projecty-runtime}
           env: [{name: OTEL_SERVICE_NAME, value: media-guard}]
           ports: [{name: http, containerPort: 8092}]
           startupProbe: {httpGet: {path: /health/ready, port: http}, periodSeconds: 3, failureThreshold: 20}
@@ -178,6 +185,8 @@ spec:
     metadata:
       labels: {app.kubernetes.io/name: billing, projecty.io/tier: service}
     spec:
+      serviceAccountName: billing
+      automountServiceAccountToken: false
       securityContext:
         runAsNonRoot: true
         seccompProfile: {type: RuntimeDefault}
@@ -186,7 +195,7 @@ spec:
           image: projecty/billing:dev
           envFrom:
             - configMapRef: {name: projecty-runtime}
-            - secretRef: {name: projecty-runtime}
+            - secretRef: {name: billing-secrets}
           env: [{name: OTEL_SERVICE_NAME, value: billing}]
           ports: [{name: http, containerPort: 8094}]
           startupProbe: {httpGet: {path: /health/ready, port: http}, periodSeconds: 5, failureThreshold: 36}
@@ -220,6 +229,8 @@ spec:
     metadata:
       labels: {app.kubernetes.io/name: risk-pricing, projecty.io/tier: service}
     spec:
+      serviceAccountName: risk-pricing
+      automountServiceAccountToken: false
       securityContext:
         runAsNonRoot: true
         runAsUser: 65532
@@ -231,7 +242,7 @@ spec:
           image: projecty/risk-pricing:dev
           envFrom:
             - configMapRef: {name: projecty-runtime}
-            - secretRef: {name: projecty-runtime}
+            - secretRef: {name: risk-pricing-secrets}
           env: [{name: OTEL_SERVICE_NAME, value: risk-pricing}]
           ports: [{name: http, containerPort: 8093}]
           startupProbe: {httpGet: {path: /health/ready, port: http}, periodSeconds: 5, failureThreshold: 36}
@@ -267,8 +278,10 @@ spec:
     matchLabels: {app.kubernetes.io/name: telemetry}
   template:
     metadata:
-      labels: {app.kubernetes.io/name: telemetry, projecty.io/tier: service}
+      labels: {app.kubernetes.io/name: telemetry, projecty.io/tier: edge}
     spec:
+      serviceAccountName: telemetry
+      automountServiceAccountToken: false
       securityContext:
         runAsNonRoot: true
         runAsUser: 65532
@@ -279,7 +292,7 @@ spec:
           image: projecty/telemetry:dev
           envFrom:
             - configMapRef: {name: projecty-runtime}
-            - secretRef: {name: projecty-runtime}
+            - secretRef: {name: telemetry-secrets}
           env: [{name: OTEL_SERVICE_NAME, value: telemetry}]
           ports: [{name: http, containerPort: 4000}]
           startupProbe: {httpGet: {path: /health/ready, port: http}, periodSeconds: 5, failureThreshold: 36}
@@ -313,6 +326,8 @@ spec:
     metadata:
       labels: {app.kubernetes.io/name: console, projecty.io/tier: edge}
     spec:
+      serviceAccountName: console
+      automountServiceAccountToken: false
       securityContext:
         runAsNonRoot: true
         seccompProfile: {type: RuntimeDefault}
@@ -321,7 +336,7 @@ spec:
           image: projecty/console:dev
           envFrom:
             - configMapRef: {name: projecty-runtime}
-            - secretRef: {name: projecty-runtime}
+            - secretRef: {name: console-secrets}
           ports: [{name: http, containerPort: 3001}]
           startupProbe: {httpGet: {path: /health/ready, port: http}, periodSeconds: 5, failureThreshold: 36}
           readinessProbe: {httpGet: {path: /health/ready, port: http}, periodSeconds: 5}

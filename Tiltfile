@@ -60,7 +60,8 @@ if orchestrator == 'kubernetes':
         local(script_prefix + ['-File', 'scripts/kind/Remove-ProjectYCluster.ps1'])
         print('ProjectY Kubernetes environment removed.')
     else:
-        local(script_prefix + ['-File', 'scripts/kind/Ensure-ProjectYCluster.ps1'], echo_off = True)
+        if config.tilt_subcommand in ['up', 'ci']:
+            local(script_prefix + ['-File', 'scripts/kind/Ensure-ProjectYCluster.ps1'], echo_off = True)
         allow_k8s_contexts('kind-projecty')
         default_registry('localhost:5001')
 
@@ -73,24 +74,87 @@ if orchestrator == 'kubernetes':
         k8s_yaml(kustomize('deploy/overlays/selfhost'))
 
         local_resource(
+            'external-secrets-controller',
+            cmd = script_prefix + ['-File', 'scripts/kind/Install-ExternalSecrets.ps1'],
+            deps = ['scripts/kind/Install-ExternalSecrets.ps1'],
+            labels = ['platform'],
+        )
+        local_resource(
+            'local-secret-backend',
+            cmd = script_prefix + ['-File', 'scripts/kind/Publish-LocalSecretBackend.ps1'],
+            deps = ['.env', 'scripts/kind/Publish-LocalSecretBackend.ps1'],
+            resource_deps = ['external-secrets-controller'],
+            labels = ['platform'],
+        )
+        local_resource(
             'signed-admission',
             cmd = script_prefix + ['-File', 'scripts/kind/Install-Kyverno.ps1'],
             deps = ['deploy/platform/kyverno'],
             labels = ['platform'],
         )
 
-        k8s_resource('cockroach-schema', resource_deps = ['cockroachdb'], labels = ['setup'])
-        k8s_resource('kafka-topics', resource_deps = ['kafka'], labels = ['setup'])
-        k8s_resource('cassandra-schema', resource_deps = ['cassandra'], labels = ['setup'])
-        k8s_resource('schema-contracts', resource_deps = ['schema-registry', 'kafka-topics'], labels = ['setup'])
-        k8s_resource('identity', resource_deps = ['signed-admission', 'cockroach-schema', 'schema-contracts', 'media-guard'], labels = ['services'])
-        k8s_resource('rental-core', resource_deps = ['signed-admission', 'cockroach-schema', 'kafka-topics'], labels = ['services'])
-        k8s_resource('billing', resource_deps = ['signed-admission', 'cockroach-schema', 'schema-contracts'], labels = ['services'])
-        k8s_resource('risk-pricing', resource_deps = ['signed-admission', 'schema-contracts'], labels = ['services'])
-        k8s_resource('telemetry', resource_deps = ['signed-admission', 'cassandra-schema', 'kafka-topics'], labels = ['services'])
-        k8s_resource('api-gateway', resource_deps = ['identity', 'rental-core'], labels = ['services'])
-        k8s_resource('console', resource_deps = ['signed-admission', 'api-gateway', 'telemetry'], labels = ['services'])
-        k8s_resource('projecty', links = [link('http://localhost:8080', 'Console'), link('http://localhost:8080/health/ready', 'Gateway')])
+        workload_names = [
+            'api-gateway', 'identity', 'rental-core', 'media-guard', 'billing', 'risk-pricing', 'telemetry', 'console',
+            'cockroachdb', 'redis', 'rabbitmq', 'minio', 'kafka', 'cassandra', 'schema-registry',
+            'cockroach-schema', 'kafka-topics', 'cassandra-schema', 'schema-contracts',
+        ]
+        network_policy_names = [
+            'default-deny', 'allow-dns', 'ingress-only-reaches-edge', 'gateway-to-owned-dependencies',
+            'console-to-gateway', 'gateway-to-service-ingress', 'identity-to-owned-dependencies',
+            'identity-to-media-guard', 'rental-core-to-owned-dependencies', 'billing-to-owned-dependencies',
+            'risk-pricing-to-owned-dependencies', 'telemetry-to-owned-dependencies', 'cockroachdb-owners',
+            'rabbitmq-owner', 'redis-owners', 'minio-owners', 'kafka-clients', 'cassandra-clients',
+            'schema-registry-clients', 'data-service-egress', 'setup-to-data',
+        ]
+        platform_objects = [
+            'projecty:namespace', 'projecty-secrets:namespace',
+            'projecty-secret-reader:role:projecty-secrets', 'projecty-secret-reader:rolebinding:projecty-secrets',
+            'projecty-runtime:configmap:projecty', 'kafka-runtime:configmap:projecty', 'rabbitmq-runtime:configmap:projecty',
+            'external-secrets-reader:serviceaccount:projecty',
+        ]
+        platform_objects += [name + ':serviceaccount:projecty' for name in workload_names]
+        platform_objects += [name + ':networkpolicy:projecty' for name in network_policy_names]
+        k8s_resource(new_name = 'projecty-platform', objects = platform_objects, labels = ['platform'])
+        k8s_resource(
+            new_name = 'projecty-secret-store',
+            objects = ['projecty-secrets:secretstore:projecty'],
+            resource_deps = ['projecty-platform', 'external-secrets-controller', 'local-secret-backend'],
+            labels = ['platform'],
+        )
+        for secret in [
+            'api-gateway-secrets', 'identity-secrets', 'rental-core-secrets', 'billing-secrets',
+            'risk-pricing-secrets', 'telemetry-secrets', 'console-secrets', 'rabbitmq-secrets', 'minio-secrets',
+        ]:
+            k8s_resource(
+                new_name = secret,
+                objects = [secret + ':externalsecret:projecty'],
+                resource_deps = ['projecty-secret-store'],
+                labels = ['platform'],
+            )
+
+        for infrastructure_resource in ['cockroachdb', 'redis', 'kafka', 'cassandra', 'schema-registry']:
+            k8s_resource(infrastructure_resource, resource_deps = ['projecty-platform'], labels = ['infra'])
+        k8s_resource('rabbitmq', resource_deps = ['projecty-platform', 'rabbitmq-secrets'], labels = ['infra'])
+        k8s_resource('minio', resource_deps = ['projecty-platform', 'minio-secrets'], labels = ['infra'])
+        k8s_resource('cockroach-schema', resource_deps = ['projecty-platform', 'cockroachdb'], labels = ['setup'])
+        k8s_resource('kafka-topics', resource_deps = ['projecty-platform', 'kafka'], labels = ['setup'])
+        k8s_resource('cassandra-schema', resource_deps = ['projecty-platform', 'cassandra'], labels = ['setup'])
+        k8s_resource('schema-contracts', resource_deps = ['projecty-platform', 'schema-registry', 'kafka-topics'], labels = ['setup'])
+        k8s_resource('media-guard', resource_deps = ['projecty-platform', 'signed-admission'], labels = ['services'])
+        k8s_resource('identity', resource_deps = ['projecty-platform', 'signed-admission', 'identity-secrets', 'cockroach-schema', 'schema-contracts', 'media-guard'], labels = ['services'])
+        k8s_resource('rental-core', resource_deps = ['projecty-platform', 'signed-admission', 'rental-core-secrets', 'cockroach-schema', 'kafka-topics'], labels = ['services'])
+        k8s_resource('billing', resource_deps = ['projecty-platform', 'signed-admission', 'billing-secrets', 'cockroach-schema', 'schema-contracts'], labels = ['services'])
+        k8s_resource('risk-pricing', resource_deps = ['projecty-platform', 'signed-admission', 'risk-pricing-secrets', 'schema-contracts'], labels = ['services'])
+        k8s_resource('telemetry', resource_deps = ['projecty-platform', 'signed-admission', 'telemetry-secrets', 'cassandra-schema', 'kafka-topics'], labels = ['services'])
+        k8s_resource('api-gateway', resource_deps = ['projecty-platform', 'api-gateway-secrets', 'identity', 'rental-core'], labels = ['services'])
+        k8s_resource('console', resource_deps = ['projecty-platform', 'signed-admission', 'console-secrets', 'api-gateway', 'telemetry'], labels = ['services'])
+        k8s_resource(
+            new_name = 'projecty-edge',
+            objects = ['projecty:ingress:projecty'],
+            resource_deps = ['api-gateway', 'console', 'telemetry'],
+            links = [link('http://localhost:8080', 'Console'), link('http://localhost:8080/health/ready', 'Gateway')],
+            labels = ['services'],
+        )
 
         print('Tilt UI: http://localhost:10350')
         print('Console: http://localhost:8080')

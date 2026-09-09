@@ -54,6 +54,7 @@ jobs:
       has_rust_changes: ${{ steps.filter.outputs.api_gateway }}
       has_polyglot_changes: ${{ steps.filter.outputs.polyglot }}
       has_observability_changes: ${{ steps.filter.outputs.observability }}
+      has_kubernetes_changes: ${{ steps.filter.outputs.kubernetes }}
       image_matrix: ${{ steps.matrix.outputs.image_matrix }}
       has_image_changes: ${{ steps.matrix.outputs.has_image_changes }}
     steps:
@@ -186,6 +187,17 @@ jobs:
               - 'docker-compose.yml'
               - 'Tiltfile'
               - 'logstash/**'
+              - '.github/workflows/ci.yml'
+            kubernetes:
+              - 'deploy/base/**'
+              - 'deploy/kind/**'
+              - 'deploy/overlays/aws/**'
+              - 'deploy/overlays/selfhost/**'
+              - 'deploy/platform/kyverno/**'
+              - 'scripts/kind/**'
+              - 'scripts/Test-Kubernetes*.ps1'
+              - 'scripts/Test-ExternalSecrets.ps1'
+              - 'Tiltfile'
               - '.github/workflows/ci.yml'
             polyglot:
               - 'services/media-guard/**'
@@ -668,6 +680,82 @@ jobs:
           GITLEAKS_ENABLE_COMMENTS: "false"
           GITLEAKS_VERSION: 8.30.0
 
+  kubernetes-manifests:
+    name: Kubernetes manifests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Render and validate every deployment overlay
+        shell: pwsh
+        run: ./scripts/Test-KubernetesManifests.ps1
+
+      - name: Validate enforced signed-image policy
+        shell: pwsh
+        run: |
+          $tools = ./scripts/kind/Install-ProjectYKubernetesTools.ps1
+          $policy = (& $tools.Kubectl kustomize deploy/platform/kyverno) -join "`n"
+          if ($LASTEXITCODE -ne 0 -or $policy -notmatch 'validationFailureAction: Enforce') {
+            throw 'The signed-image admission policy is not enforced.'
+          }
+
+  kubernetes-security:
+    name: Kubernetes security acceptance
+    needs: changes
+    if: needs.changes.outputs.has_kubernetes_changes == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Generate ephemeral local credentials
+        shell: pwsh
+        run: ./scripts/New-LocalSecrets.ps1
+
+      - name: Provision kind, Calico and ingress
+        shell: pwsh
+        run: ./scripts/kind/Ensure-ProjectYCluster.ps1
+
+      - name: Install External Secrets and publish the local backend
+        shell: pwsh
+        run: |
+          ./scripts/kind/Install-ExternalSecrets.ps1
+          ./scripts/kind/Publish-LocalSecretBackend.ps1
+          $tools = ./scripts/kind/Install-ProjectYKubernetesTools.ps1
+          & $tools.Kubectl apply -f deploy/base/namespace.yaml
+          & $tools.Kubectl apply --namespace projecty -f deploy/base/serviceaccounts.yaml
+          & $tools.Kubectl apply -f deploy/overlays/selfhost/local-secret-store.yaml
+          & $tools.Kubectl apply --namespace projecty -f deploy/base/external-secrets.yaml
+          & $tools.Kubectl apply --namespace projecty -f deploy/base/network-policies.yaml
+
+      - name: Verify Pod Security, network ownership and secret synchronization
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path artifacts -Force | Out-Null
+          ./scripts/Test-KubernetesSecurity.ps1 | Tee-Object artifacts/kubernetes-isolation.json
+          ./scripts/Test-ExternalSecrets.ps1 | Tee-Object artifacts/external-secrets.json
+
+      - name: Verify signed-image admission
+        shell: pwsh
+        run: |
+          ./scripts/kind/Install-Kyverno.ps1
+          ./scripts/Test-SignedAdmission.ps1 | Tee-Object artifacts/signed-admission.json
+
+      - name: Upload reproducible acceptance evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kubernetes-security-${{ github.sha }}
+          path: artifacts
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Remove the ephemeral cluster
+        if: always()
+        shell: pwsh
+        run: ./scripts/kind/Remove-ProjectYCluster.ps1
+
   required:
     name: Required
     needs:
@@ -680,6 +768,8 @@ jobs:
       - images
       - publish
       - secrets
+      - kubernetes-manifests
+      - kubernetes-security
       - media-tests
       - telemetry-tests
       - risk-tests
@@ -699,6 +789,8 @@ jobs:
           IMAGES_RESULT: ${{ needs.images.result }}
           PUBLISH_RESULT: ${{ needs.publish.result }}
           SECRETS_RESULT: ${{ needs.secrets.result }}
+          KUBERNETES_RESULT: ${{ needs.kubernetes-manifests.result }}
+          KUBERNETES_SECURITY_RESULT: ${{ needs.kubernetes-security.result }}
           MEDIA_RESULT: ${{ needs.media-tests.result }}
           TELEMETRY_RESULT: ${{ needs.telemetry-tests.result }}
           RISK_RESULT: ${{ needs.risk-tests.result }}
@@ -716,6 +808,8 @@ jobs:
           [[ "$RUST_RESULT" == "success" || "$RUST_RESULT" == "skipped" ]]
           [[ "$IMAGES_RESULT" == "success" || "$IMAGES_RESULT" == "skipped" ]]
           [[ "$SECRETS_RESULT" == "success" ]]
+          [[ "$KUBERNETES_RESULT" == "success" ]]
+          [[ "$KUBERNETES_SECURITY_RESULT" == "success" || "$KUBERNETES_SECURITY_RESULT" == "skipped" ]]
           for result in "$MEDIA_RESULT" "$TELEMETRY_RESULT" "$RISK_RESULT" "$CONSOLE_RESULT" "$BILLING_RESULT"; do
             [[ "$result" == "success" || "$result" == "skipped" ]]
           done
