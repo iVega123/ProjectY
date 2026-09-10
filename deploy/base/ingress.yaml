@@ -4,8 +4,22 @@ metadata:
   name: projecty
   annotations:
     nginx.ingress.kubernetes.io/proxy-body-size: 32m
+    # This is what replaced UseHttpsRedirection(), and it lives here because
+    # here is the only place that knows the request's original scheme. The
+    # services behind it never redirect; they read X-Forwarded-Proto. ADR 0025.
+    nginx.ingress.kubernetes.io/force-ssl-redirect: 'true'
 spec:
   ingressClassName: nginx
+  # There is deliberately no `tls` block and no host.
+  #
+  # A `tls` block needs `hosts` to mean anything -- ingress-nginx maps SNI to a
+  # Secret by hostname, and an entry without hosts is silently ignored, which is
+  # the A4 defect in miniature: a stated guarantee that does not hold. And the
+  # hostnames are not shareable, since this base also renders for AWS.
+  #
+  # So the certificate is named by the platform layer of each environment, not
+  # by this file: the controller's --default-ssl-certificate on kind, an ACM
+  # annotation in front of the load balancer on AWS. See ADR 0025.
   rules:
     - http:
         paths:

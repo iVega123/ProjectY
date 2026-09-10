@@ -109,9 +109,9 @@ State-changing API retries follow the shared
 ### Kubernetes development loop
 
 The root [`Tiltfile`](Tiltfile) now uses Kubernetes by default. It bootstraps a
-pinned kind cluster, a local registry, Calico, ingress-nginx, External Secrets
-and Kyverno before deploying the shared `deploy/base` topology through the
-`selfhost` Kustomize overlay. See the
+pinned kind cluster, a local registry, Calico, ingress-nginx, External Secrets,
+cert-manager and Kyverno before deploying the shared `deploy/base` topology
+through the `selfhost` Kustomize overlay. See the
 [local Kubernetes runbook](docs/runbooks/local-kubernetes.md) for prerequisites,
 resource sizing, security proofs and troubleshooting. Start everything with:
 
@@ -131,8 +131,13 @@ old credentials, and run
 `powershell -ExecutionPolicy Bypass -File scripts/New-LocalSecrets.ps1 -Force`.
 
 The Tilt UI is at <http://localhost:10350>; ingress serves the console and
-gateway at <http://localhost:8080>. `tilt down` removes the kind cluster and
-local registry, including their local data.
+gateway over TLS at <https://localhost:8443>, and redirects
+<http://localhost:8080> to it. The certificate is issued by a local authority
+cert-manager creates in the cluster, so it is not in your trust store and the
+first visit warns — that warning is the honest state of a certificate no public
+CA vouched for, and the runbook says how to verify the chain deliberately.
+`tilt down` removes the kind cluster and local registry, including their local
+data.
 
 Compose remains an explicit migration fallback:
 
@@ -143,7 +148,14 @@ tilt up -- --orchestrator=compose --full
 The release images built by CI use the Dockerfiles' final non-root stages. CI
 also renders both Kubernetes overlays and runs an ephemeral-cluster acceptance
 that captures unsigned-image rejection, Pod Security enforcement, datastore
-isolation and External Secrets synchronization as downloadable evidence.
+isolation, External Secrets synchronization and TLS at the ingress as
+downloadable evidence.
+
+TLS terminates at the ingress and nowhere else: between services the traffic is
+plain HTTP, confined by network policy and authenticated by the signed identity
+envelope rather than by mTLS. The reasoning, and the integrity gap that decision
+accepts, are in
+[ADR 0025](docs/adr/0025-tls-terminates-at-the-ingress.md).
 
 There is not yet an honest cold-start time to publish. The first successful
 start must still be timed on a clean Docker cache with the hardware and network

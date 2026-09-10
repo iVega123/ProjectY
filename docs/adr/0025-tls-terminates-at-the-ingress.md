@@ -118,6 +118,32 @@ service that is not ours running beside these.
   are load-bearing together. It does not carry integrity of the body, and this
   record says so where the decision rests on it, rather than in a footnote.
 
+## What implemented it
+
+Epic 10 landed, and with it this decision, in #100:
+
+- cert-manager issues a self-signed root, the `projecty-local-ca` authority from
+  it, and the `projecty-tls` serving certificate from that authority.
+- **The deployment layer names no certificate.** A `tls` block on the Ingress
+  needs `hosts` to do anything — ingress-nginx maps SNI to a Secret by hostname
+  and ignores an entry without them, which would have reproduced the A4 defect
+  itself: a stated guarantee that does not hold. And the hostnames are not
+  shareable, because the same base renders for AWS. So each environment names
+  its certificate in its own platform layer: `--default-ssl-certificate` on the
+  controller here, an ACM annotation in front of the load balancer there.
+- `force-ssl-redirect` at the ingress is what replaced
+  `UseHttpsRedirection()` — the redirect now lives at the only hop that knows
+  the original scheme.
+- `UseForwardedHeaders` in `rental-core`, with a forward limit of two, since the
+  ingress and the gateway are both proxies in front of it. The known-proxy list
+  is empty, so the trust in that header rests on the default-deny
+  `NetworkPolicy` rather than on the middleware — noted where it is configured.
+- `scripts/Test-IngressTls.ps1` verifies the chain against the cluster's own
+  authority and requires a client without it to be refused.
+
+What did not change is the paragraph above it: between services the traffic is
+still plain HTTP, and the body-integrity gap is still open as #191.
+
 ## Follow-up
 
 - [Epic 10 — Local Kubernetes and signed admission](https://github.com/iVega123/ProjectY/issues/11)

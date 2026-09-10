@@ -92,6 +92,13 @@ if orchestrator == 'kubernetes':
             deps = ['deploy/platform/kyverno'],
             labels = ['platform'],
         )
+        local_resource(
+            'local-tls',
+            cmd = script_prefix + ['-File', 'scripts/kind/Install-CertManager.ps1'],
+            deps = ['deploy/platform/cert-manager', 'scripts/kind/Install-CertManager.ps1'],
+            resource_deps = ['projecty-platform'],
+            labels = ['platform'],
+        )
 
         workload_names = [
             'api-gateway', 'identity', 'rental-core', 'media-guard', 'billing', 'risk-pricing', 'telemetry', 'console',
@@ -151,14 +158,15 @@ if orchestrator == 'kubernetes':
         k8s_resource(
             new_name = 'projecty-edge',
             objects = ['projecty:ingress:projecty'],
-            resource_deps = ['api-gateway', 'console', 'telemetry'],
-            links = [link('http://localhost:8080', 'Console'), link('http://localhost:8080/health/ready', 'Gateway')],
+            resource_deps = ['api-gateway', 'console', 'telemetry', 'local-tls'],
+            links = [link('https://localhost:8443', 'Console'), link('https://localhost:8443/health/ready', 'Gateway')],
             labels = ['services'],
         )
 
         print('Tilt UI: http://localhost:10350')
-        print('Console: http://localhost:8080')
-        print('Gateway: http://localhost:8080/health/ready')
+        print('Console: https://localhost:8443')
+        print('Gateway: https://localhost:8443/health/ready')
+        print('The local authority is not in your trust store, so the first visit warns. Port 8080 redirects to 8443.')
 
 if orchestrator == 'compose':
     compose_files = ['docker-compose.yml', 'docker-compose.chaos.yml']

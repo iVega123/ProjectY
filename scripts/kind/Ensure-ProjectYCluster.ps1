@@ -11,6 +11,33 @@ $context = "kind-$clusterName"
 $registryName = 'projecty-registry'
 $registryPort = 5001
 
+# Probes that are allowed to fail cannot redirect a native command's stderr.
+#
+# On Windows PowerShell 5.1, `docker inspect ... 2>$null` wraps every stderr
+# line in a NativeCommandError, and with $ErrorActionPreference = 'Stop' that
+# terminates the script. So the first `tilt up` on a clean Windows machine --
+# the platform the runbook names first -- died on "no such object:
+# projecty-registry", which is the expected answer to "does the registry exist".
+# CI never saw it, because CI runs pwsh 7 on Linux.
+function Invoke-Probe {
+    param(
+        [Parameter(Mandatory)] [string]$FilePath,
+        [string[]]$Arguments = @()
+    )
+
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $output = & $FilePath @Arguments 2>&1
+    } finally {
+        $ErrorActionPreference = $previous
+    }
+    [pscustomobject]@{
+        ExitCode = $LASTEXITCODE
+        Lines = @($output | ForEach-Object { $_.ToString() })
+    }
+}
+
 if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
     throw 'Docker is required for the local kind cluster. Start Docker Desktop and retry `tilt up`.'
 }
@@ -18,21 +45,22 @@ if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
 & docker info --format '{{.ServerVersion}}' | Out-Null
 if ($LASTEXITCODE -ne 0) { throw 'Docker is installed but its engine is not reachable.' }
 
-$registryExists = (& docker inspect -f '{{.State.Running}}' $registryName 2>$null) -eq 'true'
-if (-not $registryExists) {
-    & docker rm -f $registryName 2>$null | Out-Null
+$registryState = Invoke-Probe -FilePath 'docker' -Arguments @('inspect', '-f', '{{.State.Running}}', $registryName)
+if ($registryState.ExitCode -ne 0 -or ($registryState.Lines -join '').Trim() -ne 'true') {
+    Invoke-Probe -FilePath 'docker' -Arguments @('rm', '-f', $registryName) | Out-Null
     & docker run --detach --restart=always --name $registryName --publish "127.0.0.1:${registryPort}:5000" registry:3.0.0 | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'Could not start the ProjectY local registry.' }
 }
 
-$clusters = @(& $kind get clusters 2>$null)
-if ($clusters -notcontains $clusterName) {
+$clusters = Invoke-Probe -FilePath $kind -Arguments @('get', 'clusters')
+if ($clusters.Lines -notcontains $clusterName) {
     & $kind create cluster --name $clusterName --config (Join-Path $root 'deploy\kind\cluster.yaml')
     if ($LASTEXITCODE -ne 0) { throw 'Could not create the ProjectY kind cluster.' }
 }
 
-$network = & docker inspect -f '{{json .NetworkSettings.Networks.kind}}' $registryName 2>$null
-if (-not $network -or $network -eq '<no value>') {
+$networkProbe = Invoke-Probe -FilePath 'docker' -Arguments @('inspect', '-f', '{{json .NetworkSettings.Networks.kind}}', $registryName)
+$network = ($networkProbe.Lines -join '').Trim()
+if ($networkProbe.ExitCode -ne 0 -or -not $network -or $network -eq '<no value>' -or $network -eq 'null') {
     & docker network connect kind $registryName
     if ($LASTEXITCODE -ne 0) { throw 'Could not attach the local registry to the kind network.' }
 }

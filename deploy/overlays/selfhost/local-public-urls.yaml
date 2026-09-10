@@ -3,6 +3,10 @@ kind: ConfigMap
 metadata:
   name: projecty-runtime
 data:
-  CONSOLE_ORIGIN: http://localhost:8080
-  TELEMETRY_PUBLIC_URL: ws://localhost:8080/socket/websocket
-  TELEMETRY_ORIGINS: //localhost:8080
+  # The ingress terminates TLS on 8443 and redirects 8080 to it, so these are
+  # https and wss. A client that follows the redirect and then opens a
+  # websocket against a ws:// URL would be told to upgrade a scheme the browser
+  # already refuses on a secure page.
+  CONSOLE_ORIGIN: https://localhost:8443
+  TELEMETRY_PUBLIC_URL: wss://localhost:8443/socket/websocket
+  TELEMETRY_ORIGINS: //localhost:8443

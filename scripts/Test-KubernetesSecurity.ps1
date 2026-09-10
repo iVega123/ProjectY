@@ -100,11 +100,34 @@ spec:
       securityContext: {runAsUser: 0, allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}}
 "@
 
+# These probes are meant to be rejected, and a rejection arrives on stderr.
+#
+# On Windows PowerShell 5.1, redirecting a native command's stderr wraps every
+# line in a NativeCommandError, and with $ErrorActionPreference = 'Stop' that
+# terminates the script before the exit code can be read -- so the expected
+# rejection killed the run instead of satisfying it. CI never saw this, because
+# CI runs pwsh 7 on Linux.
+function Invoke-Rejection {
+    param([Parameter(Mandatory)] [scriptblock]$Probe)
+
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $output = & $Probe 2>&1
+        [pscustomobject]@{
+            ExitCode = $LASTEXITCODE
+            Text = (@($output | ForEach-Object { $_.ToString() })) -join "`n"
+        }
+    } finally {
+        $ErrorActionPreference = $previous
+    }
+}
+
 try {
-    $rootResult = $rootPod | & $kubectl apply --server-side --dry-run=server -f - 2>&1
-    if ($LASTEXITCODE -eq 0) { throw 'Pod Security admitted a container explicitly running as root.' }
-    if (($rootResult -join "`n") -notmatch 'PodSecurity|runAsUser|non-root') {
-        throw "The root probe failed for an unrelated reason: $($rootResult -join ' ')"
+    $root = Invoke-Rejection -Probe { $rootPod | & $kubectl apply --server-side --dry-run=server -f - }
+    if ($root.ExitCode -eq 0) { throw 'Pod Security admitted a container explicitly running as root.' }
+    if ($root.Text -notmatch 'PodSecurity|runAsUser|non-root') {
+        throw "The root probe failed for an unrelated reason: $($root.Text)"
     }
 
     $fixtures | & $kubectl apply -f - | Out-Null
@@ -120,8 +143,8 @@ try {
     & $kubectl exec --namespace projecty $probeName -- nc -z -w 5 cockroachdb 26257 | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'Identity could not reach its owned CockroachDB dependency.' }
 
-    & $kubectl exec --namespace projecty $probeName -- nc -z -w 5 rabbitmq 5672 2>$null | Out-Null
-    if ($LASTEXITCODE -eq 0) { throw 'Identity unexpectedly reached Rental Core owned RabbitMQ.' }
+    $foreign = Invoke-Rejection -Probe { & $kubectl exec --namespace projecty $probeName -- nc -z -w 5 rabbitmq 5672 }
+    if ($foreign.ExitCode -eq 0) { throw 'Identity unexpectedly reached Rental Core owned RabbitMQ.' }
 
     [ordered]@{
         podSecurityRestricted = 'root pod rejected'

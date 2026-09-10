@@ -46,6 +46,41 @@ try {
         if ($externalSecrets.Count -ne 9) { throw "$overlay renders $($externalSecrets.Count) ExternalSecrets; expected 9." }
         if ($rendered -match 'secretRef:\s*\{name:\s*projecty-runtime\}') { throw "$overlay still uses the former shared runtime Secret." }
         if ($rendered -notmatch 'pod-security\.kubernetes\.io/enforce:\s+restricted') { throw "$overlay does not enforce restricted Pod Security." }
+
+        # A4: the edge is the only place that terminates TLS, and each overlay
+        # has to terminate it in its own way -- cert-manager fills a Secret on
+        # kind, ACM sits in front of the load balancer on AWS. An overlay that
+        # carries neither is serving the stack in clear.
+        $ingress = @($documents | Where-Object { $_ -match '(?m)^kind:\s+Ingress\s*$' })
+        if ($ingress.Count -ne 1) { throw "$overlay renders $($ingress.Count) Ingress objects; expected 1." }
+        # A `tls` block without hosts is ignored by ingress-nginx, and the
+        # hostnames cannot be shared between overlays -- so neither overlay is
+        # allowed to declare one. Each environment names its certificate in its
+        # own platform layer instead, and this asserts both halves.
+        if ($ingress[0] -match '(?m)^\s+tls:\s*$') {
+            throw "$overlay declares a tls block; a hostless one is ignored and a hosted one is not portable."
+        }
+        if ($overlay -eq 'selfhost') {
+            if ($ingress[0] -notmatch 'nginx\.ingress\.kubernetes\.io/force-ssl-redirect:\s*"true"') {
+                throw 'selfhost does not redirect plain HTTP to TLS at the ingress.'
+            }
+            $authority = (& $kubectl kustomize 'deploy/platform/cert-manager') -join "`n"
+            if ($LASTEXITCODE -ne 0) { throw 'Kustomize failed for the local certificate authority.' }
+            if ($authority -notmatch '(?m)^\s+secretName:\s+projecty-tls\s*$') {
+                throw 'The local authority does not issue the projecty-tls serving certificate.'
+            }
+            if ($authority -notmatch '(?m)^\s+isCA:\s+true\s*$') {
+                throw 'The local authority does not issue from a CA of its own.'
+            }
+        }
+        if ($overlay -eq 'aws') {
+            if ($ingress[0] -notmatch 'alb\.ingress\.kubernetes\.io/certificate-arn:') {
+                throw 'aws does not name a certificate at the load balancer.'
+            }
+            if ($ingress[0] -match 'nginx\.ingress\.kubernetes\.io/') {
+                throw 'aws mixes nginx annotations into an ALB Ingress.'
+            }
+        }
         if ($overlay -eq 'selfhost' -and $rendered -notmatch '(?ms)^kind:\s+SecretStore.*?provider:\s*\n\s+kubernetes:') {
             throw 'selfhost does not use the Kubernetes External Secrets provider.'
         }

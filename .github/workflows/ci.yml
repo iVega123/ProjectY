@@ -194,9 +194,11 @@ jobs:
               - 'deploy/overlays/aws/**'
               - 'deploy/overlays/selfhost/**'
               - 'deploy/platform/kyverno/**'
+              - 'deploy/platform/cert-manager/**'
               - 'scripts/kind/**'
               - 'scripts/Test-Kubernetes*.ps1'
               - 'scripts/Test-ExternalSecrets.ps1'
+              - 'scripts/Test-IngressTls.ps1'
               - 'Tiltfile'
               - '.github/workflows/ci.yml'
             polyglot:
@@ -745,6 +747,14 @@ jobs:
         run: |
           ./scripts/kind/Install-Kyverno.ps1
           ./scripts/Test-SignedAdmission.ps1 | Tee-Object artifacts/signed-admission.json
+
+      - name: Verify TLS at the ingress
+        shell: pwsh
+        run: |
+          $tools = ./scripts/kind/Install-ProjectYKubernetesTools.ps1
+          ./scripts/kind/Install-CertManager.ps1
+          & $tools.Kubectl apply --namespace projecty -f deploy/base/ingress.yaml
+          ./scripts/Test-IngressTls.ps1 -UseFixtureBackends | Tee-Object artifacts/ingress-tls.json
 
       - name: Upload reproducible acceptance evidence
         if: always()

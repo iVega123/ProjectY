@@ -1,0 +1,58 @@
+# The local certificate authority for kind.
+#
+# On AWS, TLS terminates at the load balancer with an ACM certificate the
+# platform issues and rotates; nothing in the workloads layer knows the
+# certificate exists. This is the same shape locally: cert-manager issues,
+# rotates and republishes `projecty-tls`, and the deployment layer never names
+# it -- the controller is pointed at it with --default-ssl-certificate by
+# `scripts/kind/Install-CertManager.ps1`. See ADR 0025.
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: projecty-selfsigned
+spec:
+  selfSigned: {}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: projecty-local-ca
+  namespace: cert-manager
+spec:
+  isCA: true
+  commonName: ProjectY Local Authority
+  secretName: projecty-local-ca
+  privateKey: {algorithm: ECDSA, size: 256}
+  duration: 8760h
+  renewBefore: 720h
+  issuerRef: {name: projecty-selfsigned, kind: ClusterIssuer, group: cert-manager.io}
+---
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: projecty-local-ca
+spec:
+  ca:
+    secretName: projecty-local-ca
+---
+# `localhost` is what a visitor actually types; `projecty.localtest.me` resolves
+# to 127.0.0.1 without editing a hosts file, for anything that refuses to accept
+# a certificate for a bare `localhost`.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: projecty-tls
+  namespace: projecty
+spec:
+  secretName: projecty-tls
+  commonName: localhost
+  dnsNames:
+    - localhost
+    - projecty.localtest.me
+  ipAddresses:
+    - 127.0.0.1
+  privateKey: {algorithm: ECDSA, size: 256}
+  duration: 2160h
+  renewBefore: 360h
+  usages: [server auth]
+  issuerRef: {name: projecty-local-ca, kind: ClusterIssuer, group: cert-manager.io}

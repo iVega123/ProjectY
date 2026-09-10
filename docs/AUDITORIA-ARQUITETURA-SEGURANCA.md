@@ -126,15 +126,23 @@ isolados com permissões específicas. Fechado pelo commit
   configurado, `ASPNETCORE_URLS` é só HTTP e `UseHttpsRedirection()` vira inofensivo sem
   porta HTTPS conhecida. As chamadas entre serviços são `http://` puro.
 
-  **Status: metade fechada.** A promessa saiu — a tabela de portas do
+  **Status: fechada.** A promessa saiu primeiro — a tabela de portas do
   `getting-started` diz HTTP e nomeia os serviços que existem, a porta 8201 (que
   o Compose publicava sem nada escutando) foi despublicada, e o
   `UseHttpsRedirection()` foi removido em vez de deixado como decoração. O
   [ADR 0025](adr/0025-tls-terminates-at-the-ingress.md) registra a decisão sobre
   o tráfego dentro do cluster antes de o cluster existir: TLS termina no
   ingress, e entre serviços é política de rede e não mTLS, porque o envelope do
-  ADR 0008 já autentica cada salto interno. **O que continua aberto é o TLS de
-  verdade**, que depende do ingress do épico 10 — #100.
+  ADR 0008 já autentica cada salto interno.
+
+  O TLS de verdade chegou com o ingress do épico 10: o cert-manager emite a
+  autoridade local e o certificado do `projecty-tls`, o ingress redireciona
+  8080 para 8443 com `force-ssl-redirect`, e o `rental-core` lê
+  `X-Forwarded-Proto` com `UseForwardedHeaders` em vez de redirecionar atrás de
+  um proxy. O `Test-IngressTls.ps1` verifica a cadeia contra a autoridade do
+  cluster e exige que um cliente sem ela seja recusado. **O que este achado não
+  cobre, e o ADR 0025 assume explicitamente, é a confidencialidade entre pods**
+  — segue em #191.
 - **A5 — Upload de CNH validado só por extensão, com `Content-Type` do cliente.** Nunca se
   verificam os bytes iniciais, e `contentType = file.ContentType` é gravado como metadado no
   MinIO e devolvido pela URL pré-assinada → XSS armazenado.

@@ -2,9 +2,9 @@
 
 `tilt up` is ProjectY's default development entrypoint. It creates a disposable
 single-node kind cluster named `projecty`, connects a local OCI registry, installs
-Calico and ingress-nginx, then deploys the `selfhost` Kustomize overlay. No global
-kind, kubectl or Helm installation is required: verified pinned binaries are kept
-under the ignored `.tools/kubernetes` directory.
+Calico, ingress-nginx and cert-manager, then deploys the `selfhost` Kustomize
+overlay. No global kind, kubectl or Helm installation is required: verified pinned
+binaries are kept under the ignored `.tools/kubernetes` directory.
 
 ## Prerequisites and capacity
 
@@ -28,8 +28,9 @@ tilt up
 ```
 
 Open the Tilt UI at <http://localhost:10350>, the console at
-<http://localhost:8080>, or the gateway readiness endpoint at
-<http://localhost:8080/health/ready>.
+<https://localhost:8443>, or the gateway readiness endpoint at
+<https://localhost:8443/health/ready>. Port `8080` answers every request with a
+308 to `8443`.
 
 Stop and delete the cluster, registry and local cluster data with:
 
@@ -55,6 +56,40 @@ manifests contain references and property names, never secret values. The AWS
 overlay keeps the same ExternalSecret resources and replaces only the SecretStore
 provider with AWS Secrets Manager and workload-identity authentication.
 
+## TLS
+
+TLS terminates at the ingress and nowhere else. cert-manager creates a
+self-signed root, issues the `projecty-local-ca` authority from it, and issues
+the `projecty-tls` serving certificate for `localhost`, `projecty.localtest.me`
+and `127.0.0.1` from that authority. The `Ingress` in `deploy/base` names no
+certificate at all: a `tls` block without hosts is ignored by ingress-nginx, and
+the hostnames could not be shared with the AWS overlay anyway. Each environment
+names its certificate in its own platform layer instead — the controller's
+`--default-ssl-certificate` here, an ACM annotation in front of the load
+balancer on AWS.
+
+The authority is local, so no public CA vouches for it and browsers warn on the
+first visit. To verify the chain deliberately instead of clicking through:
+
+```powershell
+./scripts/Test-IngressTls.ps1
+```
+
+That script pins the chain to the cluster's own authority in .NET rather than
+shelling out to `curl --cacert`, which does not work here: the `curl` shipped
+with Windows is built against schannel, which can only trust what the machine
+already trusts and answers exit 60 for a certificate from an authority that is
+deliberately in no trust store.
+
+Between services the traffic is plain HTTP. That is a decision, not an
+omission: every internal hop is authenticated above the transport by the signed
+identity envelope, and the integrity gap that leaves — same-route body
+substitution inside the 30 second window — is stated in
+[ADR 0025](../adr/0025-tls-terminates-at-the-ingress.md) and tracked as
+[#191](https://github.com/iVega123/ProjectY/issues/191). No service redirects to
+HTTPS; `rental-core` reads `X-Forwarded-Proto` through `UseForwardedHeaders`
+with a forward limit of two, because the ingress and the gateway are two hops.
+
 Kyverno first receives the ProjectY image-verification policy in Audit mode and
 is then promoted from the same manifest to Enforce. The policy trusts only the
 keyless certificate identity of `.github/workflows/ci.yml` on `main` for ProjectY
@@ -76,14 +111,32 @@ With `tilt up` running, reproduce the three live acceptance checks:
 ./scripts/Test-ExternalSecrets.ps1
 ./scripts/Test-KubernetesSecurity.ps1
 ./scripts/Test-SignedAdmission.ps1
+./scripts/Test-IngressTls.ps1
 ```
+
+Every one of these runs on Windows PowerShell 5.1 as well as on PowerShell 7.
+That is worth stating because it did not use to: a probe that is *meant* to be
+rejected writes its rejection to stderr, and redirecting a native command's
+stderr under 5.1 wraps it in a `NativeCommandError` that terminates the script
+before the exit code is read. The expected rejection killed the run instead of
+satisfying it, and CI never noticed because CI runs pwsh 7 on Linux.
 
 The security test creates temporary listener pods to prove that an identity-labeled
 pod can reach its owned CockroachDB endpoint but cannot connect to Rental Core's
 RabbitMQ endpoint. It also submits an otherwise restricted pod with UID 0 and
 requires admission to reject it. The signed-admission test uses server dry-run,
-so neither canary workload is persisted. CI executes the same sequence in an
-ephemeral kind cluster and uploads the JSON output as `kubernetes-security-<sha>`.
+so neither canary workload is persisted. The TLS test verifies the served
+certificate against the cluster's own authority with no `--insecure`, and then
+requires an empty authority to be rejected — otherwise the first check would
+prove only that something answered on 8443.
+
+CI executes the same sequence in an ephemeral kind cluster and uploads the JSON
+output as `kubernetes-security-<sha>`. One difference is worth naming: CI has no
+application images in that cluster, so it runs the TLS test with
+`-UseFixtureBackends`, standing two busybox listeners in for the console and the
+gateway. CI therefore proves the edge — chain, SAN, redirect, refusal of an
+untrusted client — and the claim that the real console and gateway answer over
+TLS is what the switch-free run above verifies under `tilt up`.
 
 ## Troubleshooting
 
