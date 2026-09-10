@@ -1,0 +1,16 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: projecty
+resources:
+  - namespace.yaml
+  - serviceaccounts.yaml
+  - external-secrets.yaml
+  - configuration.yaml
+  - network-policies.yaml
+  - infrastructure.yaml
+  - initialization.yaml
+  - applications.yaml
+  - ingress.yaml
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: projecty

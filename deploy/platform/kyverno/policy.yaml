@@ -1,0 +1,45 @@
+apiVersion: policies.kyverno.io/v1beta1
+kind: ImageValidatingPolicy
+metadata:
+  name: verify-projecty-images
+  annotations:
+    policies.kyverno.io/title: Verify ProjectY Images
+    policies.kyverno.io/category: Software Supply Chain
+    projecty.io/rollout: audit-first
+spec:
+  validationActions: [Audit]
+  failurePolicy: Fail
+  webhookConfiguration:
+    timeoutSeconds: 30
+  evaluation:
+    background:
+      enabled: false
+  matchConstraints:
+    resourceRules:
+      - apiGroups: ['']
+        apiVersions: [v1]
+        operations: [CREATE, UPDATE]
+        resources: [pods]
+  matchConditions:
+    - name: projecty-namespace
+      expression: object.metadata.namespace == 'projecty'
+  matchImageReferences:
+    - glob: ghcr.io/ivega123/projecty/*
+  attestors:
+    - name: projectyMain
+      cosign:
+        keyless:
+          identities:
+            - subject: https://github.com/iVega123/ProjectY/.github/workflows/ci.yml@refs/heads/main
+              issuer: https://token.actions.githubusercontent.com
+        ctlog:
+          url: https://rekor.sigstore.dev
+  validations:
+    - expression: >-
+        images.containers.map(image,
+          verifyImageSignatures(image, [attestors.projectyMain])).all(count, count > 0)
+      message: ProjectY images must be signed by the main CI workflow.
+  validationConfigurations:
+    mutateDigest: false
+    required: true
+    verifyDigest: true
