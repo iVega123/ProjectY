@@ -166,19 +166,25 @@ try {
         if ($LASTEXITCODE -ne 0) { throw 'The TLS edge fixtures did not become ready.' }
 
         # A ready pod is not a reloaded ingress. The controller has to observe
-        # the new EndpointSlice and reload before it stops answering 503, and
+        # each new EndpointSlice and reload before it stops answering 503, and
         # nothing in `kubectl wait` covers that -- so the edge is polled until
         # it converges, and only then does the run start asserting.
-        $converged = $false
-        for ($attempt = 1; $attempt -le 30; $attempt++) {
-            $probe = Invoke-TlsRequest -TargetHost $HttpsHost -Port $HttpsPort -Path '/' -Authority $authority
-            if ($probe.Handshake -eq 'verified' -and $probe.Status -eq '200') {
-                $converged = $true
-                break
-            }
-            Start-Sleep -Seconds 2
+        #
+        # Both paths, not just the first: the two fixtures land in the
+        # controller's view independently, so waiting only on `/` left
+        # `/health/ready` still answering 503 when the assertions began.
+        $paths = @('/', '/health/ready')
+        $pending = $paths
+        for ($attempt = 1; $attempt -le 30 -and $pending.Count -gt 0; $attempt++) {
+            if ($attempt -gt 1) { Start-Sleep -Seconds 2 }
+            $pending = @($pending | Where-Object {
+                $probe = Invoke-TlsRequest -TargetHost $HttpsHost -Port $HttpsPort -Path $_ -Authority $authority
+                -not ($probe.Handshake -eq 'verified' -and $probe.Status -eq '200')
+            })
         }
-        if (-not $converged) { throw 'The ingress did not start serving the TLS edge fixtures.' }
+        if ($pending.Count -gt 0) {
+            throw "The ingress did not start serving the TLS edge fixtures at: $($pending -join ', ')"
+        }
     }
 
     $console = Invoke-TlsRequest -TargetHost $HttpsHost -Port $HttpsPort -Path '/' -Authority $authority

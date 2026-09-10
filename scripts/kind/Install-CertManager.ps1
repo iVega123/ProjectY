@@ -44,7 +44,9 @@ if ($LASTEXITCODE -ne 0) { throw 'The ingress serving certificate did not become
 $flag = '--default-ssl-certificate=projecty/projecty-tls'
 $current = & $kubectl get deployment ingress-nginx-controller --namespace ingress-nginx -o jsonpath='{.spec.template.spec.containers[0].args}'
 if ($LASTEXITCODE -ne 0) { throw 'Could not read the ingress controller arguments.' }
+$patched = $false
 if ($current -notlike "*default-ssl-certificate*") {
+    $patched = $true
     # Through a file, not through -p: a JSON patch on the command line loses its
     # quoting on the way to a native executable on Windows, and kubectl answers
     # with "the request is invalid" that names nothing.
@@ -65,11 +67,71 @@ if ($current -notlike "*default-ssl-certificate*") {
     }
 }
 
-# The Secret already exists at this point, so the restart comes up serving it
-# instead of the controller's own self-signed placeholder.
-& $kubectl rollout restart deployment/ingress-nginx-controller --namespace ingress-nginx | Out-Null
-if ($LASTEXITCODE -ne 0) { throw 'Could not restart the ingress controller.' }
+# Patching the args already rolls the Deployment, so a restart on top of it
+# would take the controller down twice. The explicit restart is only for the
+# already-patched case, where the Secret may have been reissued under a
+# controller that has been running since before it existed.
+if (-not $patched) {
+    & $kubectl rollout restart deployment/ingress-nginx-controller --namespace ingress-nginx | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'Could not restart the ingress controller.' }
+}
 & $kubectl rollout status deployment/ingress-nginx-controller --namespace ingress-nginx --timeout=240s
 if ($LASTEXITCODE -ne 0) { throw 'The ingress controller did not come back after the restart.' }
+
+# Rolling the controller takes its admission webhook down with it, and
+# `rollout status` returning is not permission to create an Ingress: the
+# readiness probe answers on /healthz:10254 while the webhook listens on 8443,
+# so there is a window where the pod is Ready and the webhook refuses the
+# connection. Whatever applied an Ingress next got "connection refused" from
+# validate.nginx.ingress.kubernetes.io and never created it.
+#
+# Pod readiness therefore cannot be the signal -- the only honest check is to
+# put a request through the webhook. A server-side dry run does exactly that
+# and persists nothing. Same shape as the Kyverno startup race already handled
+# in Install-Kyverno.ps1, and the wait lives with the component that caused the
+# outage instead of with every caller.
+# The canary needs a host and a path of its own. nginx rejects a second Ingress
+# that claims a host and path another one already has, so a canary on `/` is
+# admitted on a fresh cluster and denied on every later run -- the webhook
+# answering, read as the webhook being down.
+$canary = @"
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata: {name: projecty-admission-canary, namespace: ingress-nginx}
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: projecty-admission-canary.invalid
+      http:
+        paths:
+          - path: /projecty-admission-canary
+            pathType: Prefix
+            backend:
+              service: {name: projecty-admission-canary, port: {number: 80}}
+"@
+
+$admits = $false
+for ($attempt = 1; $attempt -le 60; $attempt++) {
+    # The dry run is expected to fail while the webhook is down, and a native
+    # command's stderr terminates the script under Windows PowerShell 5.1, so
+    # the preference is relaxed around it.
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $answer = ($canary | & $kubectl apply --dry-run=server -f - 2>&1 | Out-String)
+        $exitCode = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $previous
+    }
+    # Any answer proves the webhook is serving, including a denial. Only a
+    # failure to reach it is worth another attempt -- that is the distinction
+    # the first version of this wait did not make.
+    if ($exitCode -eq 0 -or $answer -notmatch 'failed calling webhook|connection refused|no endpoints available') {
+        $admits = $true
+        break
+    }
+    Start-Sleep -Seconds 2
+}
+if (-not $admits) { throw 'The ingress admission webhook did not start answering.' }
 
 Write-Host "cert-manager $chartVersion ready; the ingress serves projecty-tls from the local authority."
