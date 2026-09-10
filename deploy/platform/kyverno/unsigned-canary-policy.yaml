@@ -1,8 +1,7 @@
-apiVersion: policies.kyverno.io/v1
-kind: NamespacedImageValidatingPolicy
+apiVersion: policies.kyverno.io/v1beta1
+kind: ImageValidatingPolicy
 metadata:
   name: projecty-unsigned-canary
-  namespace: projecty
 spec:
   validationActions: [Deny]
   failurePolicy: Fail
@@ -17,6 +16,11 @@ spec:
         apiVersions: [v1]
         operations: [CREATE, UPDATE]
         resources: [pods]
+  matchConditions:
+    - name: projecty-canary
+      expression: >-
+        object.metadata.namespace == 'projecty' &&
+        object.metadata.name == 'projecty-unsigned-canary'
   matchImageReferences:
     - glob: ghcr.io/kyverno/test-verify-image:unsigned
   attestors:

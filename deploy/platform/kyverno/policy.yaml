@@ -1,8 +1,7 @@
-apiVersion: policies.kyverno.io/v1
-kind: NamespacedImageValidatingPolicy
+apiVersion: policies.kyverno.io/v1beta1
+kind: ImageValidatingPolicy
 metadata:
   name: verify-projecty-images
-  namespace: projecty
   annotations:
     policies.kyverno.io/title: Verify ProjectY Images
     policies.kyverno.io/category: Software Supply Chain
@@ -21,6 +20,9 @@ spec:
         apiVersions: [v1]
         operations: [CREATE, UPDATE]
         resources: [pods]
+  matchConditions:
+    - name: projecty-namespace
+      expression: object.metadata.namespace == 'projecty'
   matchImageReferences:
     - glob: ghcr.io/ivega123/projecty/*
   attestors:

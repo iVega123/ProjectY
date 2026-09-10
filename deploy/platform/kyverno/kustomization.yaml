@@ -5,8 +5,8 @@ resources:
 patches:
   - target:
       group: policies.kyverno.io
-      version: v1
-      kind: NamespacedImageValidatingPolicy
+      version: v1beta1
+      kind: ImageValidatingPolicy
       name: verify-projecty-images
     patch: |-
       - op: replace
