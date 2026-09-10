@@ -13,7 +13,7 @@ $policy = Join-Path $root 'deploy\platform\kyverno\unsigned-canary-policy.yaml'
 if ($LASTEXITCODE -ne 0) { throw 'Could not install the unsigned-image canary policy.' }
 
 try {
-    & $kubectl wait --namespace projecty --for=condition=Ready namespacedimagevalidatingpolicy/projecty-unsigned-canary --timeout=90s | Out-Null
+    & $kubectl wait --namespace projecty --for=jsonpath='{.status.ready}'=true namespacedimagevalidatingpolicy/projecty-unsigned-canary --timeout=90s | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'The unsigned-image canary policy did not become ready.' }
 
     $rejection = & $kubectl run projecty-unsigned-canary --namespace projecty --image ghcr.io/kyverno/test-verify-image:unsigned --restart Never --dry-run=server -o yaml 2>&1
