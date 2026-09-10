@@ -55,7 +55,7 @@ try {
 
     $rejection = Test-ImageAdmission -Name projecty-unsigned-canary -Image ghcr.io/kyverno/test-verify-image:unsigned
     if ($rejection.ExitCode -eq 0) { throw 'Kyverno admitted the deliberately unsigned image.' }
-    if (($rejection.Output -join "`n") -notmatch 'signature|verify|imagevalidatingpolicy|must be signed') {
+    if (($rejection.Output -join "`n") -notmatch 'signature|verify|ivpol\.validate\.kyverno|Policy projecty-unsigned-canary failed') {
         throw "The canary failed for an unrelated reason: $($rejection.Output -join ' ')"
     }
 
