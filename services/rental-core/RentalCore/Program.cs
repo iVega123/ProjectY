@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.OpenApi.Models;
 using MotoHub.Data;
@@ -76,6 +77,27 @@ builder.Services.AddSingleton(NpgsqlDataSource.Create(connectionString));
 // paths now, so a token minted for either half is accepted by the merged service.
 builder.Services.AddGatewayIdentityAuthentication(builder.Configuration, "projecty.rental-core");
 
+// O esquema original chega em X-Forwarded-Proto, não na requisição.
+//
+// São dois saltos até aqui: o ingress termina TLS e reescreve o cabeçalho, e o
+// gateway repassa os cabeçalhos do cliente que não são hop-by-hop -- inclusive
+// este. Daí ForwardLimit = 2. Com o limite padrão de 1, o valor lido seria o
+// que o gateway viu, e não o que o cliente enviou.
+//
+// KnownNetworks e KnownProxies ficam vazios porque o IP do pod do ingress é
+// dinâmico e não há faixa estável para nomear. Isso significa confiar no
+// cabeçalho de quem alcançar esta porta -- e o que sustenta essa confiança não
+// é o middleware, é a NetworkPolicy: rental-core só aceita ingresso do gateway,
+// e o gateway só aceita do ingress. Se aquela política cair, esta linha passa a
+// aceitar o esquema que o chamador inventar. Ver ADR 0025.
+builder.Services.Configure<ForwardedHeadersOptions>(options =>
+{
+    options.ForwardedHeaders = ForwardedHeaders.XForwardedProto | ForwardedHeaders.XForwardedFor;
+    options.ForwardLimit = 2;
+    options.KnownIPNetworks.Clear();
+    options.KnownProxies.Clear();
+});
+
 builder.Services.AddProblemDetails();
 builder.Services.AddExceptionHandler<RentalCore.Errors.ProblemDetailsExceptionHandler>();
 builder.Services.AddControllers();
@@ -127,20 +149,28 @@ builder.Services.AddScoped<IRentalService, RentalService>();
 
 var app = builder.Build();
 
+// UseHttpsRedirection saiu no #100, e o que entrou no lugar é isto.
+//
+// Sem porta HTTPS conhecida ele não redirecionava nada: registrava um aviso na
+// subida e deixava a requisição passar. Ficava como decoração que se lia como
+// garantia -- e é a metade pior do achado A4, porque uma garantia declarada e
+// não cumprida engana mais do que uma ausente.
+//
+// Quem redireciona agora é o ingress, com force-ssl-redirect, porque é o único
+// ponto que conhece o esquema original. Aqui só se lê o esquema, nunca se
+// redireciona: redirecionar atrás de um proxy que já terminou TLS é como se
+// produzem laços de redirecionamento. Ver ADR 0025.
+//
+// Primeiro middleware da cadeia, de propósito: tudo o que vem depois -- a
+// autenticação, o idempotency, os logs -- deve ver o esquema e o IP do cliente,
+// não os do último salto.
+app.UseForwardedHeaders();
+
 if (SwaggerPolicy.IsEnabled(app.Environment, app.Configuration))
 {
     app.UseSwagger();
     app.UseSwaggerUI();
 }
-
-// UseHttpsRedirection saiu no #100.
-//
-// Sem porta HTTPS conhecida ele não redireciona nada: registra um aviso na
-// subida e deixa a requisição passar. Ficava como decoração que se lia como
-// garantia -- e é a metade pior do achado A4, porque uma garantia declarada e
-// não cumprida engana mais do que uma ausente. Quando o ingress do épico 10
-// terminar TLS, o que entra no lugar é ForwardedHeaders, para o aplicativo ver
-// o esquema original em vez de adivinhá-lo. Ver ADR 0025.
 
 app.UseAuthentication();
 app.UseAuthorization();

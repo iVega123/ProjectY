@@ -4,8 +4,17 @@ metadata:
   name: projecty
   annotations:
     nginx.ingress.kubernetes.io/proxy-body-size: 32m
+    # This is what replaced UseHttpsRedirection(), and it lives here because
+    # here is the only place that knows the request's original scheme. The
+    # services behind it never redirect; they read X-Forwarded-Proto. ADR 0025.
+    nginx.ingress.kubernetes.io/force-ssl-redirect: 'true'
 spec:
   ingressClassName: nginx
+  # No hosts: nginx serves this as the default certificate for every request
+  # that reaches it. The Secret is filled by the platform layer, never
+  # committed -- cert-manager locally, ACM in front of the load balancer on AWS.
+  tls:
+    - secretName: projecty-tls
   rules:
     - http:
         paths:

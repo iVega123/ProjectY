@@ -1,0 +1,35 @@
+# On AWS the certificate never enters the cluster: TLS terminates at the load
+# balancer with an ACM certificate, so the `tls` block from the base -- which
+# names a Secret cert-manager fills in on kind -- is removed here.
+#
+# The ARN is a placeholder on purpose. The real one is an output of the
+# Terraform that provisions the certificate, and that Terraform belongs to
+# epic 11 (#83, #84). A literal ARN here would be a cloud resource identifier
+# for a cloud that has provisioned nothing yet.
+#
+# The class changes with it. The nginx annotations and the ALB ones are
+# different controllers, and an Ingress carrying both reads as if two were
+# expected. Epic 11 owns this choice and may reverse it -- ingress-nginx behind
+# an NLB is the other defensible answer, and it would move the certificate
+# annotation onto the controller's Service instead of onto this Ingress.
+- op: remove
+  path: /spec/tls
+- op: replace
+  path: /spec/ingressClassName
+  value: alb
+- op: remove
+  path: /metadata/annotations/nginx.ingress.kubernetes.io~1force-ssl-redirect
+- op: remove
+  path: /metadata/annotations/nginx.ingress.kubernetes.io~1proxy-body-size
+- op: add
+  path: /metadata/annotations/alb.ingress.kubernetes.io~1scheme
+  value: internet-facing
+- op: add
+  path: /metadata/annotations/alb.ingress.kubernetes.io~1certificate-arn
+  value: PLACEHOLDER_ACM_CERTIFICATE_ARN
+- op: add
+  path: /metadata/annotations/alb.ingress.kubernetes.io~1listen-ports
+  value: '[{"HTTP": 80}, {"HTTPS": 443}]'
+- op: add
+  path: /metadata/annotations/alb.ingress.kubernetes.io~1ssl-redirect
+  value: '443'

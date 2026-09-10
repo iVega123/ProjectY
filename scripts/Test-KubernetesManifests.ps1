@@ -46,6 +46,32 @@ try {
         if ($externalSecrets.Count -ne 9) { throw "$overlay renders $($externalSecrets.Count) ExternalSecrets; expected 9." }
         if ($rendered -match 'secretRef:\s*\{name:\s*projecty-runtime\}') { throw "$overlay still uses the former shared runtime Secret." }
         if ($rendered -notmatch 'pod-security\.kubernetes\.io/enforce:\s+restricted') { throw "$overlay does not enforce restricted Pod Security." }
+
+        # A4: the edge is the only place that terminates TLS, and each overlay
+        # has to terminate it in its own way -- cert-manager fills a Secret on
+        # kind, ACM sits in front of the load balancer on AWS. An overlay that
+        # carries neither is serving the stack in clear.
+        $ingress = @($documents | Where-Object { $_ -match '(?m)^kind:\s+Ingress\s*$' })
+        if ($ingress.Count -ne 1) { throw "$overlay renders $($ingress.Count) Ingress objects; expected 1." }
+        if ($overlay -eq 'selfhost') {
+            if ($ingress[0] -notmatch '(?ms)^\s+tls:\s*\n\s+-\s+secretName:\s+projecty-tls\s*$') {
+                throw 'selfhost does not terminate TLS with the cert-manager issued secret.'
+            }
+            if ($ingress[0] -notmatch 'nginx\.ingress\.kubernetes\.io/force-ssl-redirect:\s*"true"') {
+                throw 'selfhost does not redirect plain HTTP to TLS at the ingress.'
+            }
+        }
+        if ($overlay -eq 'aws') {
+            if ($ingress[0] -match '(?m)^\s+tls:\s*$') {
+                throw 'aws carries an in-cluster TLS secret; ACM terminates in front of the load balancer.'
+            }
+            if ($ingress[0] -notmatch 'alb\.ingress\.kubernetes\.io/certificate-arn:') {
+                throw 'aws does not name a certificate at the load balancer.'
+            }
+            if ($ingress[0] -match 'nginx\.ingress\.kubernetes\.io/') {
+                throw 'aws mixes nginx annotations into an ALB Ingress.'
+            }
+        }
         if ($overlay -eq 'selfhost' -and $rendered -notmatch '(?ms)^kind:\s+SecretStore.*?provider:\s*\n\s+kubernetes:') {
             throw 'selfhost does not use the Kubernetes External Secrets provider.'
         }

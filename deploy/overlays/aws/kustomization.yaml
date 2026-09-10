@@ -5,3 +5,9 @@ resources:
   - aws-secret-store.yaml
 patches:
   - path: production-shape.yaml
+  - path: ingress-acm.yaml
+    target:
+      group: networking.k8s.io
+      version: v1
+      kind: Ingress
+      name: projecty
