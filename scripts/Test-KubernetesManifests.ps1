@@ -53,18 +53,27 @@ try {
         # carries neither is serving the stack in clear.
         $ingress = @($documents | Where-Object { $_ -match '(?m)^kind:\s+Ingress\s*$' })
         if ($ingress.Count -ne 1) { throw "$overlay renders $($ingress.Count) Ingress objects; expected 1." }
+        # A `tls` block without hosts is ignored by ingress-nginx, and the
+        # hostnames cannot be shared between overlays -- so neither overlay is
+        # allowed to declare one. Each environment names its certificate in its
+        # own platform layer instead, and this asserts both halves.
+        if ($ingress[0] -match '(?m)^\s+tls:\s*$') {
+            throw "$overlay declares a tls block; a hostless one is ignored and a hosted one is not portable."
+        }
         if ($overlay -eq 'selfhost') {
-            if ($ingress[0] -notmatch '(?ms)^\s+tls:\s*\n\s+-\s+secretName:\s+projecty-tls\s*$') {
-                throw 'selfhost does not terminate TLS with the cert-manager issued secret.'
-            }
             if ($ingress[0] -notmatch 'nginx\.ingress\.kubernetes\.io/force-ssl-redirect:\s*"true"') {
                 throw 'selfhost does not redirect plain HTTP to TLS at the ingress.'
             }
+            $authority = (& $kubectl kustomize 'deploy/platform/cert-manager') -join "`n"
+            if ($LASTEXITCODE -ne 0) { throw 'Kustomize failed for the local certificate authority.' }
+            if ($authority -notmatch '(?m)^\s+secretName:\s+projecty-tls\s*$') {
+                throw 'The local authority does not issue the projecty-tls serving certificate.'
+            }
+            if ($authority -notmatch '(?m)^\s+isCA:\s+true\s*$') {
+                throw 'The local authority does not issue from a CA of its own.'
+            }
         }
         if ($overlay -eq 'aws') {
-            if ($ingress[0] -match '(?m)^\s+tls:\s*$') {
-                throw 'aws carries an in-cluster TLS secret; ACM terminates in front of the load balancer.'
-            }
             if ($ingress[0] -notmatch 'alb\.ingress\.kubernetes\.io/certificate-arn:') {
                 throw 'aws does not name a certificate at the load balancer.'
             }

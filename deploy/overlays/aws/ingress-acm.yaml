@@ -1,6 +1,7 @@
 # On AWS the certificate never enters the cluster: TLS terminates at the load
-# balancer with an ACM certificate, so the `tls` block from the base -- which
-# names a Secret cert-manager fills in on kind -- is removed here.
+# balancer with an ACM certificate. The base names no certificate at all, so
+# there is nothing to remove here -- only the annotation that says which one the
+# load balancer presents.
 #
 # The ARN is a placeholder on purpose. The real one is an output of the
 # Terraform that provisions the certificate, and that Terraform belongs to
@@ -12,8 +13,6 @@
 # expected. Epic 11 owns this choice and may reverse it -- ingress-nginx behind
 # an NLB is the other defensible answer, and it would move the certificate
 # annotation onto the controller's Service instead of onto this Ingress.
-- op: remove
-  path: /spec/tls
 - op: replace
   path: /spec/ingressClassName
   value: alb

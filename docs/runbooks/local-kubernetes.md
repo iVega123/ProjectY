@@ -61,20 +61,25 @@ provider with AWS Secrets Manager and workload-identity authentication.
 TLS terminates at the ingress and nowhere else. cert-manager creates a
 self-signed root, issues the `projecty-local-ca` authority from it, and issues
 the `projecty-tls` serving certificate for `localhost`, `projecty.localtest.me`
-and `127.0.0.1` from that authority. The `Ingress` in `deploy/base` names the
-Secret and knows nothing else about it — on AWS the same field is dropped and
-ACM terminates in front of the load balancer.
+and `127.0.0.1` from that authority. The `Ingress` in `deploy/base` names no
+certificate at all: a `tls` block without hosts is ignored by ingress-nginx, and
+the hostnames could not be shared with the AWS overlay anyway. Each environment
+names its certificate in its own platform layer instead — the controller's
+`--default-ssl-certificate` here, an ACM annotation in front of the load
+balancer on AWS.
 
 The authority is local, so no public CA vouches for it and browsers warn on the
 first visit. To verify the chain deliberately instead of clicking through:
 
 ```powershell
-$tools = ./scripts/kind/Install-ProjectYKubernetesTools.ps1
-& $tools.Kubectl get secret projecty-local-ca --namespace cert-manager -o jsonpath='{.data.ca\.crt}' |
-  ForEach-Object { [System.Convert]::FromBase64String($_) } |
-  Set-Content projecty-local-ca.crt -AsByteStream
-curl --cacert projecty-local-ca.crt https://localhost:8443/health/ready
+./scripts/Test-IngressTls.ps1
 ```
+
+That script pins the chain to the cluster's own authority in .NET rather than
+shelling out to `curl --cacert`, which does not work here: the `curl` shipped
+with Windows is built against schannel, which can only trust what the machine
+already trusts and answers exit 60 for a certificate from an authority that is
+deliberately in no trust store.
 
 Between services the traffic is plain HTTP. That is a decision, not an
 omission: every internal hop is authenticated above the transport by the signed
@@ -108,6 +113,13 @@ With `tilt up` running, reproduce the three live acceptance checks:
 ./scripts/Test-SignedAdmission.ps1
 ./scripts/Test-IngressTls.ps1
 ```
+
+Every one of these runs on Windows PowerShell 5.1 as well as on PowerShell 7.
+That is worth stating because it did not use to: a probe that is *meant* to be
+rejected writes its rejection to stderr, and redirecting a native command's
+stderr under 5.1 wraps it in a `NativeCommandError` that terminates the script
+before the exit code is read. The expected rejection killed the run instead of
+satisfying it, and CI never noticed because CI runs pwsh 7 on Linux.
 
 The security test creates temporary listener pods to prove that an identity-labeled
 pod can reach its owned CockroachDB endpoint but cannot connect to Rental Core's

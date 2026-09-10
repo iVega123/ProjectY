@@ -123,9 +123,14 @@ service that is not ours running beside these.
 Epic 10 landed, and with it this decision, in #100:
 
 - cert-manager issues a self-signed root, the `projecty-local-ca` authority from
-  it, and the `projecty-tls` serving certificate from that authority. The
-  `Ingress` in `deploy/base` names the Secret and nothing else; the `aws`
-  overlay drops the field, because ACM terminates in front of the load balancer.
+  it, and the `projecty-tls` serving certificate from that authority.
+- **The deployment layer names no certificate.** A `tls` block on the Ingress
+  needs `hosts` to do anything — ingress-nginx maps SNI to a Secret by hostname
+  and ignores an entry without them, which would have reproduced the A4 defect
+  itself: a stated guarantee that does not hold. And the hostnames are not
+  shareable, because the same base renders for AWS. So each environment names
+  its certificate in its own platform layer: `--default-ssl-certificate` on the
+  controller here, an ACM annotation in front of the load balancer there.
 - `force-ssl-redirect` at the ingress is what replaced
   `UseHttpsRedirection()` — the redirect now lives at the only hop that knows
   the original scheme.

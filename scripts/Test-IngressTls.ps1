@@ -1,7 +1,8 @@
 [CmdletBinding()]
 param(
-    [string]$HttpsBase = 'https://localhost:8443',
-    [string]$HttpBase = 'http://localhost:8080',
+    [string]$HttpsHost = 'localhost',
+    [int]$HttpsPort = 8443,
+    [int]$HttpPort = 8080,
     # CI has no application images in the cluster, so it stands two busybox
     # listeners in for the console and the gateway -- the same fixture pattern
     # the NetworkPolicy acceptance uses. What is proven is the edge: the chain,
@@ -13,10 +14,6 @@ param(
 $ErrorActionPreference = 'Stop'
 $tools = & (Join-Path $PSScriptRoot 'kind\Install-ProjectYKubernetesTools.ps1')
 $kubectl = $tools.Kubectl
-
-if (-not (Get-Command curl -ErrorAction SilentlyContinue) -and -not (Get-Command curl.exe -ErrorAction SilentlyContinue)) {
-    throw 'curl is required to verify the certificate chain against an explicit authority.'
-}
 
 $fixtures = @"
 apiVersion: v1
@@ -72,76 +69,160 @@ spec:
       resources: {requests: {cpu: 5m, memory: 8Mi}, limits: {cpu: 50m, memory: 32Mi}}
 "@
 
-function Invoke-Probe {
+# The chain is validated in .NET rather than by curl.
+#
+# curl on Windows is built against schannel, which ignores --cacert: it can only
+# trust what the machine already trusts, so it answers 60 for a certificate from
+# an authority that is deliberately in no trust store. Pinning the chain to our
+# own CA is the entire point of this test, so it is done here, the same way on
+# every platform the runbook names.
+function Invoke-TlsRequest {
     param(
-        [Parameter(Mandatory)] [string]$Url,
-        [string[]]$ExtraArguments = @()
+        [Parameter(Mandatory)] [string]$TargetHost,
+        [Parameter(Mandatory)] [int]$Port,
+        [Parameter(Mandatory)] [string]$Path,
+        # $null means "trust nothing extra", which must fail.
+        [System.Security.Cryptography.X509Certificates.X509Certificate2]$Authority
     )
 
-    $body = [System.IO.Path]::GetTempFileName()
+    $script:nameMatched = $false
+    $client = New-Object System.Net.Sockets.TcpClient
     try {
-        $arguments = @('--silent', '--show-error', '--max-time', '20', '--output', $body, '--write-out', '%{http_code}') + $ExtraArguments + @($Url)
-        $status = (& curl @arguments 2>&1 | Out-String).Trim()
-        [pscustomobject]@{ ExitCode = $LASTEXITCODE; Status = $status }
+        $client.ReceiveTimeout = 20000
+        $client.SendTimeout = 20000
+        $client.Connect($TargetHost, $Port)
+
+        $validation = [System.Net.Security.RemoteCertificateValidationCallback] {
+            param($senderObject, $certificate, $chain, $sslPolicyErrors)
+
+            # A hostname mismatch is a failure of the SAN, not of the chain, so
+            # it is recorded separately instead of folded into one bit.
+            $script:nameMatched = -not $sslPolicyErrors.HasFlag([System.Net.Security.SslPolicyErrors]::RemoteCertificateNameMismatch)
+
+            if (-not $Authority) { return $false }
+
+            $leaf = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2 $certificate
+            $verifier = New-Object System.Security.Cryptography.X509Certificates.X509Chain
+            $verifier.ChainPolicy.RevocationMode = [System.Security.Cryptography.X509Certificates.X509RevocationMode]::NoCheck
+            # The authority is offered as an extra root, and the chain that gets
+            # built is then required to actually end at it. Allowing an unknown
+            # CA without checking where the chain landed would trust anything.
+            $verifier.ChainPolicy.VerificationFlags = [System.Security.Cryptography.X509Certificates.X509VerificationFlags]::AllowUnknownCertificateAuthority
+            $verifier.ChainPolicy.ExtraStore.Add($Authority) | Out-Null
+            if (-not $verifier.Build($leaf)) { return $false }
+            $root = $verifier.ChainElements[$verifier.ChainElements.Count - 1].Certificate
+            return $root.Thumbprint -eq $Authority.Thumbprint
+        }
+
+        $ssl = New-Object System.Net.Security.SslStream $client.GetStream(), $false, $validation
+        try {
+            $ssl.AuthenticateAsClient($TargetHost, $null, [System.Security.Authentication.SslProtocols]::Tls12, $false)
+            $request = "GET $Path HTTP/1.1`r`nHost: ${TargetHost}:${Port}`r`nConnection: close`r`nAccept: */*`r`n`r`n"
+            $bytes = [System.Text.Encoding]::ASCII.GetBytes($request)
+            $ssl.Write($bytes, 0, $bytes.Length)
+            $ssl.Flush()
+            $reader = New-Object System.IO.StreamReader $ssl
+            $statusLine = $reader.ReadLine()
+            [pscustomobject]@{
+                Handshake = 'verified'
+                NameMatched = $script:nameMatched
+                Status = ($statusLine -split ' ')[1]
+            }
+        } finally {
+            $ssl.Dispose()
+        }
+    } catch {
+        [pscustomobject]@{
+            Handshake = 'refused'
+            NameMatched = $script:nameMatched
+            Status = $null
+            Reason = $_.Exception.Message
+        }
     } finally {
-        Remove-Item -LiteralPath $body -Force -ErrorAction SilentlyContinue
+        $client.Close()
     }
 }
 
 # The authority, not the leaf. Trusting the served certificate would prove only
-# that the ingress serves something; trusting the CA proves the leaf was issued
+# that the ingress serves something; pinning the CA proves the leaf was issued
 # from the authority this cluster created.
 $encodedCa = & $kubectl get secret projecty-local-ca --namespace cert-manager -o jsonpath='{.data.ca\.crt}'
 if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($encodedCa)) {
     throw 'Could not read the local certificate authority.'
 }
-$caFile = Join-Path ([System.IO.Path]::GetTempPath()) "projecty-local-ca-$PID.crt"
-[System.IO.File]::WriteAllBytes($caFile, [System.Convert]::FromBase64String($encodedCa))
-$emptyAuthority = Join-Path ([System.IO.Path]::GetTempPath()) "projecty-empty-authority-$PID.crt"
-Set-Content -LiteralPath $emptyAuthority -Value '' -NoNewline
+$authority = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2 (, [System.Convert]::FromBase64String($encodedCa))
 
 try {
     if ($UseFixtureBackends) {
+        # A previous run tears the fixtures down without waiting, so a rerun can
+        # find a pod still terminating. `apply` then reports it unchanged and
+        # `wait` is satisfied by the dying pod, which serves nothing -- a 503
+        # that looks like a wiring bug. Delete and wait for it to be gone first.
+        $fixtures | & $kubectl delete -f - --ignore-not-found --wait --timeout=90s | Out-Null
+
         $fixtures | & $kubectl apply -f - | Out-Null
         if ($LASTEXITCODE -ne 0) { throw 'Could not create the TLS edge fixtures.' }
         & $kubectl wait --namespace projecty --for=condition=Ready pod/console-tls-fixture pod/api-gateway-tls-fixture --timeout=120s | Out-Null
         if ($LASTEXITCODE -ne 0) { throw 'The TLS edge fixtures did not become ready.' }
+
+        # A ready pod is not a reloaded ingress. The controller has to observe
+        # the new EndpointSlice and reload before it stops answering 503, and
+        # nothing in `kubectl wait` covers that -- so the edge is polled until
+        # it converges, and only then does the run start asserting.
+        $converged = $false
+        for ($attempt = 1; $attempt -le 30; $attempt++) {
+            $probe = Invoke-TlsRequest -TargetHost $HttpsHost -Port $HttpsPort -Path '/' -Authority $authority
+            if ($probe.Handshake -eq 'verified' -and $probe.Status -eq '200') {
+                $converged = $true
+                break
+            }
+            Start-Sleep -Seconds 2
+        }
+        if (-not $converged) { throw 'The ingress did not start serving the TLS edge fixtures.' }
     }
 
-    # No --insecure and no --resolve override: the SAN has to actually cover
-    # what a visitor types, and the chain has to reach the local authority.
-    $console = Invoke-Probe -Url "$HttpsBase/" -ExtraArguments @('--cacert', $caFile)
-    if ($console.ExitCode -ne 0) { throw "The console is not reachable over TLS: curl exited $($console.ExitCode)." }
+    $console = Invoke-TlsRequest -TargetHost $HttpsHost -Port $HttpsPort -Path '/' -Authority $authority
+    if ($console.Handshake -ne 'verified') { throw "The console certificate did not verify: $($console.Reason)" }
+    if (-not $console.NameMatched) { throw "The certificate does not cover $HttpsHost." }
     if ($console.Status -ne '200') { throw "The console answered $($console.Status) over TLS." }
 
-    $gateway = Invoke-Probe -Url "$HttpsBase/health/ready" -ExtraArguments @('--cacert', $caFile)
-    if ($gateway.ExitCode -ne 0) { throw "The gateway is not reachable over TLS: curl exited $($gateway.ExitCode)." }
+    $gateway = Invoke-TlsRequest -TargetHost $HttpsHost -Port $HttpsPort -Path '/health/ready' -Authority $authority
+    if ($gateway.Handshake -ne 'verified') { throw "The gateway certificate did not verify: $($gateway.Reason)" }
     if ($gateway.Status -ne '200') { throw "The gateway readiness endpoint answered $($gateway.Status) over TLS." }
 
-    # An untrusted client must fail. If it succeeded, the two probes above would
-    # have proven nothing about the chain.
-    $untrusted = Invoke-Probe -Url "$HttpsBase/" -ExtraArguments @('--cacert', $emptyAuthority)
-    if ($untrusted.ExitCode -eq 0) { throw 'The ingress certificate verified against an empty authority.' }
+    # A client trusting nothing extra must fail. If it succeeded, the two probes
+    # above would have proven nothing about the chain.
+    $untrusted = Invoke-TlsRequest -TargetHost $HttpsHost -Port $HttpsPort -Path '/' -Authority $null
+    if ($untrusted.Handshake -eq 'verified') { throw 'The ingress certificate verified with no authority at all.' }
 
     # The redirect is what replaced UseHttpsRedirection, so it is verified where
     # it now lives instead of being trusted to an annotation.
-    $redirect = Invoke-Probe -Url "$HttpBase/"
-    if ($redirect.Status -notin @('301', '308')) {
-        throw "Plain HTTP answered $($redirect.Status) instead of redirecting to TLS."
+    $plain = [System.Net.HttpWebRequest]::Create("http://${HttpsHost}:${HttpPort}/")
+    $plain.AllowAutoRedirect = $false
+    $plain.Timeout = 20000
+    try {
+        $response = $plain.GetResponse()
+        $redirectStatus = [int]$response.StatusCode
+        $response.Close()
+    } catch [System.Net.WebException] {
+        if (-not $_.Exception.Response) { throw }
+        $redirectStatus = [int]$_.Exception.Response.StatusCode
+    }
+    if ($redirectStatus -notin @(301, 308)) {
+        throw "Plain HTTP answered $redirectStatus instead of redirecting to TLS."
     }
 
     [ordered]@{
         observedAt = [DateTimeOffset]::UtcNow.ToString('o')
-        authority = 'cert-manager/projecty-local-ca'
+        authority = "cert-manager/projecty-local-ca $($authority.Thumbprint)"
         backends = if ($UseFixtureBackends) { 'busybox fixtures standing in for console and gateway' } else { 'the running console and gateway' }
-        console = "$HttpsBase/ verified against the local authority, 200"
-        gateway = "$HttpsBase/health/ready verified against the local authority, 200"
+        console = "https://${HttpsHost}:${HttpsPort}/ chained to the local authority, name matched, 200"
+        gateway = "https://${HttpsHost}:${HttpsPort}/health/ready chained to the local authority, 200"
         untrustedClient = 'rejected'
-        plainHttp = "$($redirect.Status) redirect to TLS"
+        plainHttp = "$redirectStatus redirect to TLS"
     } | ConvertTo-Json
 } finally {
     if ($UseFixtureBackends) {
         $fixtures | & $kubectl delete -f - --ignore-not-found --wait=false | Out-Null
     }
-    Remove-Item -LiteralPath $caFile, $emptyAuthority -Force -ErrorAction SilentlyContinue
 }

@@ -10,11 +10,16 @@ metadata:
     nginx.ingress.kubernetes.io/force-ssl-redirect: 'true'
 spec:
   ingressClassName: nginx
-  # No hosts: nginx serves this as the default certificate for every request
-  # that reaches it. The Secret is filled by the platform layer, never
-  # committed -- cert-manager locally, ACM in front of the load balancer on AWS.
-  tls:
-    - secretName: projecty-tls
+  # There is deliberately no `tls` block and no host.
+  #
+  # A `tls` block needs `hosts` to mean anything -- ingress-nginx maps SNI to a
+  # Secret by hostname, and an entry without hosts is silently ignored, which is
+  # the A4 defect in miniature: a stated guarantee that does not hold. And the
+  # hostnames are not shareable, since this base also renders for AWS.
+  #
+  # So the certificate is named by the platform layer of each environment, not
+  # by this file: the controller's --default-ssl-certificate on kind, an ACM
+  # annotation in front of the load balancer on AWS. See ADR 0025.
   rules:
     - http:
         paths:
