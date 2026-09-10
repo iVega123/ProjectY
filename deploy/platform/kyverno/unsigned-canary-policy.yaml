@@ -1,29 +1,43 @@
-apiVersion: kyverno.io/v1
-kind: ClusterPolicy
+apiVersion: policies.kyverno.io/v1beta1
+kind: ImageValidatingPolicy
 metadata:
   name: projecty-unsigned-canary
 spec:
-  background: false
+  validationActions: [Deny]
+  failurePolicy: Fail
   webhookConfiguration:
-    failurePolicy: Fail
     timeoutSeconds: 30
-  rules:
-    - name: reject-unsigned-canary
-      match:
-        any:
-          - resources:
-              kinds: [Pod]
-              names: [projecty-unsigned-canary]
-              namespaces: [projecty]
-      verifyImages:
-        - imageReferences: [ghcr.io/kyverno/test-verify-image:unsigned]
-          failureAction: Enforce
-          mutateDigest: false
-          required: true
-          verifyDigest: false
-          attestors:
-            - count: 1
-              entries:
-                - keyless:
-                    subject: https://github.com/iVega123/ProjectY/.github/workflows/ci.yml@refs/heads/main
-                    issuer: https://token.actions.githubusercontent.com
+  evaluation:
+    background:
+      enabled: false
+  matchConstraints:
+    resourceRules:
+      - apiGroups: ['']
+        apiVersions: [v1]
+        operations: [CREATE, UPDATE]
+        resources: [pods]
+  matchConditions:
+    - name: projecty-canary
+      expression: >-
+        object.metadata.namespace == 'projecty' &&
+        object.metadata.name == 'projecty-unsigned-canary'
+  matchImageReferences:
+    - glob: ghcr.io/kyverno/test-verify-image:unsigned
+  attestors:
+    - name: projectyMain
+      cosign:
+        keyless:
+          identities:
+            - subject: https://github.com/iVega123/ProjectY/.github/workflows/ci.yml@refs/heads/main
+              issuer: https://token.actions.githubusercontent.com
+        ctlog:
+          url: https://rekor.sigstore.dev
+  validations:
+    - expression: >-
+        images.containers.map(image,
+          verifyImageSignatures(image, [attestors.projectyMain])).all(count, count > 0)
+      message: The unsigned admission canary must be rejected.
+  validationConfigurations:
+    mutateDigest: false
+    required: true
+    verifyDigest: false

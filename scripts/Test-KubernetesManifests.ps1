@@ -20,12 +20,37 @@ try {
 
         $documents = [regex]::Split($rendered, '(?m)^---\s*$')
         $workloads = @($documents | Where-Object { $_ -match '(?m)^kind:\s+(Deployment|StatefulSet|Job)\s*$' })
+        if ($workloads.Count -ne 19) { throw "$overlay renders $($workloads.Count) workloads; expected 19." }
+        $serviceAccounts = @($documents | Where-Object { $_ -match '(?m)^kind:\s+ServiceAccount\s*$' } | ForEach-Object {
+            [regex]::Match($_, '(?m)^  name:\s*([^\s]+)').Groups[1].Value
+        })
         foreach ($workload in $workloads) {
-            $name = [regex]::Match($workload, '(?ms)^metadata:\s*\n\s+name:\s*([^\s]+)').Groups[1].Value
+            $name = [regex]::Match($workload, '(?m)^  name:\s*([^\s]+)').Groups[1].Value
             if ($workload -notmatch '(?m)^\s+requests:\s*') { throw "$overlay/$name has no resource requests." }
             if ($workload -notmatch '(?m)^\s+limits:\s*') { throw "$overlay/$name has no resource limits." }
             if ($workload -notmatch 'runAsNonRoot:\s+true') { throw "$overlay/$name is not declared non-root." }
             if ($workload -notmatch 'allowPrivilegeEscalation:\s+false') { throw "$overlay/$name allows privilege escalation." }
+            if ($workload -notmatch '(?ms)capabilities:.*?drop:\s*(?:\[ALL\]|\n\s*-\s*ALL)') { throw "$overlay/$name does not drop all Linux capabilities." }
+            if ($workload -notmatch 'automountServiceAccountToken:\s+false') { throw "$overlay/$name mounts a service-account token by default." }
+            $serviceAccount = [regex]::Match($workload, 'serviceAccountName:\s*([^\s]+)').Groups[1].Value
+            if ([string]::IsNullOrWhiteSpace($serviceAccount) -or $serviceAccounts -notcontains $serviceAccount) {
+                throw "$overlay/$name does not reference a declared ServiceAccount."
+            }
+        }
+
+        $networkPolicies = @($documents | Where-Object { $_ -match '(?m)^kind:\s+NetworkPolicy\s*$' })
+        $externalSecrets = @($documents | Where-Object { $_ -match '(?m)^kind:\s+ExternalSecret\s*$' })
+        if ($networkPolicies.Count -lt 18 -or $rendered -notmatch '(?m)^\s+name:\s+default-deny\s*$') {
+            throw "$overlay does not carry the default-deny and ownership NetworkPolicies."
+        }
+        if ($externalSecrets.Count -ne 9) { throw "$overlay renders $($externalSecrets.Count) ExternalSecrets; expected 9." }
+        if ($rendered -match 'secretRef:\s*\{name:\s*projecty-runtime\}') { throw "$overlay still uses the former shared runtime Secret." }
+        if ($rendered -notmatch 'pod-security\.kubernetes\.io/enforce:\s+restricted') { throw "$overlay does not enforce restricted Pod Security." }
+        if ($overlay -eq 'selfhost' -and $rendered -notmatch '(?ms)^kind:\s+SecretStore.*?provider:\s*\n\s+kubernetes:') {
+            throw 'selfhost does not use the Kubernetes External Secrets provider.'
+        }
+        if ($overlay -eq 'aws' -and $rendered -notmatch '(?ms)^kind:\s+SecretStore.*?provider:\s*\n\s+aws:') {
+            throw 'aws does not use the AWS External Secrets provider.'
         }
 
         foreach ($application in $expectedApplications) {
@@ -37,7 +62,7 @@ try {
                 throw "$overlay is missing the $application Service."
             }
         }
-        Write-Host "PASS: $overlay renders $($workloads.Count) bounded, non-root workloads"
+        Write-Host "PASS: $overlay renders $($workloads.Count) bounded, isolated workloads with external secrets"
     }
 } finally {
     Pop-Location

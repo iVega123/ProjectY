@@ -58,7 +58,39 @@ if (-not $isWindowsHost) {
     if ($LASTEXITCODE -ne 0) { throw 'Could not make kind and kubectl executable.' }
 }
 
+$helmVersion = 'v4.2.4'
+$helmPlatform = if ($isWindowsHost) { 'windows-amd64' } else { 'linux-amd64' }
+$helmArchiveName = if ($isWindowsHost) { "helm-$helmVersion-$helmPlatform.zip" } else { "helm-$helmVersion-$helmPlatform.tar.gz" }
+$helmArchive = Join-Path $toolDirectory $helmArchiveName
+$helmDirectory = Join-Path $toolDirectory $helmPlatform
+$helmName = if ($isWindowsHost) { 'helm.exe' } else { 'helm' }
+$helmPath = Join-Path $helmDirectory $helmName
+$helmUrl = "https://get.helm.sh/$helmArchiveName"
+$helmChecksum = Join-Path $toolDirectory "$helmArchiveName.sha256sum"
+
+if (-not (Test-Path -LiteralPath $helmPath)) {
+    if (-not (Test-Path -LiteralPath $helmArchive)) {
+        Invoke-WebRequest -Uri $helmUrl -OutFile $helmArchive
+    }
+    if (-not (Test-Path -LiteralPath $helmChecksum)) {
+        Invoke-WebRequest -Uri "$helmUrl.sha256sum" -OutFile $helmChecksum
+    }
+    $expectedHelm = ((Get-Content -LiteralPath $helmChecksum -Raw).Trim() -split '\s+')[0].ToLowerInvariant()
+    $actualHelm = (Get-FileHash -LiteralPath $helmArchive -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($actualHelm -ne $expectedHelm) {
+        throw "Helm checksum mismatch: expected $expectedHelm, got $actualHelm"
+    }
+    if ($isWindowsHost) {
+        Expand-Archive -LiteralPath $helmArchive -DestinationPath $toolDirectory -Force
+    } else {
+        & tar -xzf $helmArchive -C $toolDirectory
+        if ($LASTEXITCODE -ne 0) { throw 'Could not unpack Helm.' }
+        & chmod +x $helmPath
+    }
+}
+
 [pscustomobject]@{
     Kind = $kindPath
     Kubectl = $kubectlPath
+    Helm = $helmPath
 }

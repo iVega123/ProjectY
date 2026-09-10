@@ -7,3 +7,11 @@ description = "ProjectY synthetic secret used to prove the CI gate"
 regex = '''PROJECTY_GITLEAKS_CANARY_[0-9A-F]{16}'''
 keywords = ["PROJECTY_GITLEAKS_CANARY_"]
 
+[[allowlists]]
+description = "kubectl availability condition is a CLI flag, not an API credential"
+targetRules = ["generic-api-key"]
+condition = "AND"
+regexTarget = "line"
+paths = ['''(^|/)scripts/kind/Install-ExternalSecrets\.ps1$''']
+regexes = ['''kubectl wait --namespace external-secrets --for=condition=Available deployment/external-secrets''']
+

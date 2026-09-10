@@ -7,6 +7,8 @@ spec:
     metadata:
       labels: {app.kubernetes.io/name: cockroach-schema, projecty.io/tier: setup}
     spec:
+      serviceAccountName: cockroach-schema
+      automountServiceAccountToken: false
       restartPolicy: OnFailure
       securityContext:
         runAsNonRoot: true
@@ -33,6 +35,8 @@ spec:
     metadata:
       labels: {app.kubernetes.io/name: kafka-topics, projecty.io/tier: setup}
     spec:
+      serviceAccountName: kafka-topics
+      automountServiceAccountToken: false
       restartPolicy: OnFailure
       securityContext:
         runAsNonRoot: true
@@ -58,6 +62,8 @@ spec:
     metadata:
       labels: {app.kubernetes.io/name: cassandra-schema, projecty.io/tier: setup}
     spec:
+      serviceAccountName: cassandra-schema
+      automountServiceAccountToken: false
       restartPolicy: OnFailure
       securityContext:
         runAsNonRoot: true
@@ -83,6 +89,8 @@ spec:
     metadata:
       labels: {app.kubernetes.io/name: schema-contracts, projecty.io/tier: setup}
     spec:
+      serviceAccountName: schema-contracts
+      automountServiceAccountToken: false
       restartPolicy: OnFailure
       securityContext:
         runAsNonRoot: true
