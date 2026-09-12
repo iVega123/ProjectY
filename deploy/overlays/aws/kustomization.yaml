@@ -11,3 +11,14 @@ patches:
       version: v1
       kind: Ingress
       name: projecty
+  - patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/envFrom/-
+        value:
+          configMapRef:
+            name: projecty-cloud-runtime
+    target:
+      group: apps
+      version: v1
+      kind: Deployment
+      name: (api-gateway|identity|rental-core|billing|risk-pricing|telemetry|console)

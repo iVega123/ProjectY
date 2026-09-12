@@ -794,11 +794,17 @@ jobs:
       - name: Verify canonical formatting
         run: terraform fmt -check -recursive infra
 
-      - name: Validate capability module schemas
-        working-directory: infra/tests/aws-modules
+      - name: Verify state-layer blast-radius boundaries
+        shell: pwsh
+        run: ./scripts/Test-TerraformLayers.ps1
+
+      - name: Validate every Terraform root without contacting a backend
         run: |
-          terraform init -backend=false -input=false
-          terraform validate -no-color
+          for root in infra/tests/aws-modules infra/bootstrap infra/envs/aws-mid/*; do
+            [[ -d "$root" ]] || continue
+            terraform -chdir="$root" init -backend=false -input=false
+            terraform -chdir="$root" validate -no-color
+          done
 
       - name: Set up TFLint
         uses: terraform-linters/setup-tflint@v6

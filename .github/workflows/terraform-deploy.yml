@@ -1,0 +1,112 @@
+name: Terraform deployment
+
+on:
+  pull_request:
+    paths:
+      - 'infra/**'
+      - '.github/workflows/terraform-deploy.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'infra/**'
+      - '.github/workflows/terraform-deploy.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+  pull-requests: write
+
+concurrency:
+  group: terraform-aws-mid-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: false
+
+env:
+  TF_IN_AUTOMATION: 'true'
+  TF_INPUT: 'false'
+  TF_VAR_state_bucket: ${{ vars.AWS_TERRAFORM_STATE_BUCKET }}
+  AWS_REGION: ${{ vars.AWS_REGION }}
+
+jobs:
+  plan:
+    name: Plan aws-mid
+    if: github.event_name == 'pull_request' && vars.AWS_TERRAFORM_PLAN_ROLE_ARN != '' && vars.AWS_TERRAFORM_STATE_BUCKET != ''
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: 1.16.2
+          terraform_wrapper: false
+
+      - name: Exchange GitHub OIDC token for the read-only plan role
+        uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: ${{ vars.AWS_TERRAFORM_PLAN_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Plan all state layers in dependency order
+        id: plan
+        shell: bash
+        run: |
+          set -euo pipefail
+          : > terraform-plan.md
+          for layer in 00-network 10-data 20-platform 30-workloads; do
+            root="infra/envs/aws-mid/$layer"
+            terraform -chdir="$root" init \
+              -backend-config="bucket=$TF_VAR_state_bucket" \
+              -backend-config="region=$AWS_REGION"
+            terraform -chdir="$root" plan -no-color -out="$RUNNER_TEMP/$layer.tfplan"
+            {
+              echo "<details><summary>aws-mid / $layer</summary>"
+              echo
+              echo '```terraform'
+              terraform -chdir="$root" show -no-color "$RUNNER_TEMP/$layer.tfplan"
+              echo '```'
+              echo '</details>'
+            } >> terraform-plan.md
+          done
+
+      - name: Post the reviewed plan on the pull request
+        if: always() && steps.plan.outcome != 'skipped'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          if [[ ! -s terraform-plan.md ]]; then
+            printf 'Terraform planning failed before producing output. See the workflow log.\n' > terraform-plan.md
+          fi
+          head -c 60000 terraform-plan.md > terraform-plan-comment.md
+          gh pr comment '${{ github.event.pull_request.number }}' --body-file terraform-plan-comment.md
+
+  apply:
+    name: Apply aws-mid
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.AWS_TERRAFORM_APPLY_ROLE_ARN != '' && vars.AWS_TERRAFORM_STATE_BUCKET != ''
+    environment: aws-mid
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: 1.16.2
+          terraform_wrapper: false
+
+      - name: Exchange GitHub OIDC token for the apply role
+        uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: ${{ vars.AWS_TERRAFORM_APPLY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Apply all state layers in dependency order
+        shell: bash
+        run: |
+          set -euo pipefail
+          for layer in 00-network 10-data 20-platform 30-workloads; do
+            root="infra/envs/aws-mid/$layer"
+            terraform -chdir="$root" init \
+              -backend-config="bucket=$TF_VAR_state_bucket" \
+              -backend-config="region=$AWS_REGION"
+            terraform -chdir="$root" apply -auto-approve
+          done
