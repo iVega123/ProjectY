@@ -798,6 +798,10 @@ jobs:
         shell: pwsh
         run: ./scripts/Test-TerraformLayers.ps1
 
+      - name: Verify per-service AWS workload identity
+        shell: pwsh
+        run: ./scripts/Test-AwsIdentityPolicies.ps1
+
       - name: Validate every Terraform root without contacting a backend
         run: |
           for root in infra/tests/aws-modules infra/bootstrap infra/envs/aws-mid/*; do
