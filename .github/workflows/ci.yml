@@ -802,13 +802,20 @@ jobs:
         shell: pwsh
         run: ./scripts/Test-AwsIdentityPolicies.ps1
 
+      - name: Verify the honest local fidelity boundary
+        shell: pwsh
+        run: ./scripts/Test-LocalTerraform.ps1
+
       - name: Validate every Terraform root without contacting a backend
         run: |
-          for root in infra/tests/aws-modules infra/bootstrap infra/envs/aws-mid/*; do
+          for root in infra/tests/aws-modules infra/bootstrap infra/envs/aws-mid/* infra/envs/local; do
             [[ -d "$root" ]] || continue
             terraform -chdir="$root" init -backend=false -input=false
             terraform -chdir="$root" validate -no-color
           done
+
+      - name: Plan the local composition with mocked providers
+        run: terraform -chdir=infra/envs/local test -no-color
 
       - name: Set up TFLint
         uses: terraform-linters/setup-tflint@v6
