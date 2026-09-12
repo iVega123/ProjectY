@@ -801,6 +801,7 @@ jobs:
       - name: Validate every Terraform root without contacting a backend
         run: |
           for root in infra/tests/aws-modules infra/bootstrap infra/envs/aws-mid/*; do
+            [[ -d "$root" ]] || continue
             terraform -chdir="$root" init -backend=false -input=false
             terraform -chdir="$root" validate -no-color
           done
