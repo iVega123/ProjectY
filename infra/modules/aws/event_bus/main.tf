@@ -56,4 +56,3 @@ resource "aws_msk_cluster" "this" {
     }
   }
 }
-

@@ -8,4 +8,3 @@ output "network" {
     availability_zones = var.availability_zones
   }
 }
-

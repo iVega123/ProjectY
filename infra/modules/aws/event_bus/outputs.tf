@@ -19,4 +19,3 @@ output "event_bus" {
     tls               = true
   }
 }
-

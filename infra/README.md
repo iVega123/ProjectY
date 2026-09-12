@@ -13,4 +13,3 @@ endpoints and Kubernetes Secret names; cloud resource ARNs stay below the
 workloads boundary.
 
 See [the module contract](modules/CONTRACT.md) before adding another provider.
-

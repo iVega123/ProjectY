@@ -108,4 +108,3 @@ module "kubernetes_cluster" {
   node_instance_types = ["m7g.large"]
   tags                = local.tags
 }
-

@@ -3,4 +3,3 @@ resource "aws_keyspaces_keyspace" "this" {
 
   tags = merge(var.tags, { Name = var.name })
 }
-

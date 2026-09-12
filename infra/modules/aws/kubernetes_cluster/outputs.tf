@@ -16,4 +16,3 @@ output "cluster" {
   }
   sensitive = true
 }
-

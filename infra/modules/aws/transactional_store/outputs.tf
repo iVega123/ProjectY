@@ -13,4 +13,3 @@ output "database" {
     name = var.database_name
   }
 }
-

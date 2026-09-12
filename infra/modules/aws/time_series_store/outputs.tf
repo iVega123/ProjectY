@@ -13,4 +13,3 @@ output "keyspace" {
     name = aws_keyspaces_keyspace.this.name
   }
 }
-

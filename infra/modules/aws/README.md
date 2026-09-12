@@ -18,4 +18,3 @@ The cost profiles select only the modules needed for their recovery promise.
 The managed transactional profiles use CockroachDB Cloud through its official
 provider, because ADR 0004 requires the local and managed engines to be the same.
 The RDS implementation remains the contract-compatible, AWS-only alternative.
-

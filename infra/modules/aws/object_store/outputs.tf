@@ -14,4 +14,3 @@ output "bucket" {
     region = aws_s3_bucket.this.region
   }
 }
-

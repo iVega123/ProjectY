@@ -34,4 +34,3 @@ The required capability names are:
 A future `modules/gcp` or `modules/local` implementation satisfies this file,
 not the internals of `modules/aws`. Swapping an implementation therefore changes
 composition only; `30-workloads` continues to consume the same object shape.
-

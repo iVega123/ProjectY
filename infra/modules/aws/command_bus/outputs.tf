@@ -6,4 +6,3 @@ output "connection" {
     secret_reference = aws_secretsmanager_secret.client.name
   }
 }
-
