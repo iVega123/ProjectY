@@ -68,3 +68,14 @@ services/billing/build/
 
 # Pinned local Kubernetes tools downloaded by the Tilt bootstrap
 .tools/
+
+# Terraform local state, provider downloads and generated plans
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
