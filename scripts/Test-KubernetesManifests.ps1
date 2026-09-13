@@ -26,6 +26,19 @@ try {
         if ($logicalWorkloadCount -ne 20) {
             throw "$overlay renders $logicalWorkloadCount logical workloads; expected 20."
         }
+        # Re-applying a completed Job does not run it again. The schema Job is
+        # named after the newest migration so that adding one creates a new Job
+        # on the next apply, instead of shipping binaries that need columns the
+        # database never received (#59).
+        $newestMigration = Get-ChildItem (Join-Path $root 'deploy/db/sql') -File |
+            Where-Object { $_.Name -match '^\d{3}_.+\.sql$' } |
+            ForEach-Object { $_.Name.Substring(0, 3) } |
+            Sort-Object | Select-Object -Last 1
+        $schemaJob = "cockroach-schema-$newestMigration"
+        $schemaJobPattern = "(?m)^  name:\s*$([regex]::Escape($schemaJob))\s*$"
+        if (-not ($workloads | Where-Object { $_ -match '(?m)^kind:\s+Job\s*$' -and $_ -match $schemaJobPattern })) {
+            throw "$overlay does not render the $schemaJob Job; rename the schema Job in deploy/base/initialization.yaml (and the Tiltfile) when adding migration $newestMigration."
+        }
         if ($overlay -eq 'aws' -and
             ($operatorManagedWorkloads.Count -ne 1 -or
              $rendered -notmatch '(?m)^\s+min\.insync\.replicas:\s+2\s*$' -or

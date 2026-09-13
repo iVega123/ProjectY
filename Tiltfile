@@ -143,7 +143,9 @@ if orchestrator == 'kubernetes':
             k8s_resource(infrastructure_resource, resource_deps = ['projecty-platform'], labels = ['infra'])
         k8s_resource('rabbitmq', resource_deps = ['projecty-platform', 'rabbitmq-secrets'], labels = ['infra'])
         k8s_resource('minio', resource_deps = ['projecty-platform', 'minio-secrets'], labels = ['infra'])
-        k8s_resource('cockroach-schema', resource_deps = ['projecty-platform', 'cockroachdb'], labels = ['setup'])
+        # The Job is named after the newest migration (deploy/base/initialization.yaml);
+        # the resource keeps a stable name so the services can depend on it.
+        k8s_resource(workload = 'cockroach-schema-007', new_name = 'cockroach-schema', resource_deps = ['projecty-platform', 'cockroachdb'], labels = ['setup'])
         k8s_resource('kafka-topics', resource_deps = ['projecty-platform', 'kafka'], labels = ['setup'])
         k8s_resource('cassandra-schema', resource_deps = ['projecty-platform', 'cassandra'], labels = ['setup'])
         k8s_resource('schema-contracts', resource_deps = ['projecty-platform', 'schema-registry', 'kafka-topics'], labels = ['setup'])

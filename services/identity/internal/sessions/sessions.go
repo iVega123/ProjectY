@@ -250,6 +250,21 @@ func (s *Store) Revoked(ctx context.Context, after time.Time) ([]AccessToken, er
 	return revoked, err
 }
 
+// Ready diz se o schema tem o que este código grava e lê.
+//
+// As colunas do access token chegam pela migração 007, e um binário que as usa
+// subindo antes dela responde erro de banco em todo login e renovação. A
+// prontidão do identity pergunta isto, e é o que segura o rollout até o Job de
+// schema ter rodado.
+func (s *Store) Ready(ctx context.Context) error {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT access_token_id, access_expires_at FROM refresh_tokens LIMIT 0`)
+	if err != nil {
+		return fmt.Errorf("o schema de refresh_tokens não tem as colunas da migração 007: %w", err)
+	}
+	return rows.Close()
+}
+
 // Sweep apaga o que já não pode mais ser usado. Sem isso a tabela só cresce, e
 // a detecção de reapresentação passa a varrer sete dias de tokens mortos.
 func (s *Store) Sweep(ctx context.Context) (int64, error) {

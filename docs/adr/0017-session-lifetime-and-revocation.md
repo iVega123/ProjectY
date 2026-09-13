@@ -73,8 +73,14 @@ on both sides: gateway `the_denylist_key_is_the_one_identity_writes`, identity
   lost to an outage or a restart is back within one pass.
 - **Each key expires 60 seconds after its token.** The gateway accepts a token up
   to its 30 second clock-skew leeway past `exp`, so a key that vanished at `exp`
-  would let a revoked token through for those seconds. The expiry is absolute,
-  so a rewrite never extends it.
+  would let a revoked token through for those seconds. The gateway refuses to
+  start with a leeway above 60 seconds, and both sides pin the number. The
+  expiry is absolute, so a rewrite never extends it.
+- **Migration 007 reaches the database before the binary that needs it.** The
+  schema Job is named after the newest migration, `cockroach-schema-007`,
+  because re-applying a completed Job does not run it again. identity is not
+  ready until the columns exist, so a rollout that arrives first receives no
+  traffic.
 
 **What that leaves, stated:**
 

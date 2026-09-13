@@ -224,6 +224,13 @@ func serve(settings config.Config, database *sql.DB, logger *slog.Logger) error 
 			http.Error(writer, "database", http.StatusServiceUnavailable)
 			return
 		}
+		// Pronto só com o schema que este binário usa. Um rollout que chega
+		// antes do Job de schema fica sem receber tráfego, em vez de responder
+		// erro de banco em todo login (#59).
+		if err := sessionStore.Ready(probe); err != nil {
+			http.Error(writer, "schema", http.StatusServiceUnavailable)
+			return
+		}
 		if ring.Active().ID == "" {
 			http.Error(writer, "signing key", http.StatusServiceUnavailable)
 			return

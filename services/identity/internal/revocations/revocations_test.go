@@ -24,6 +24,17 @@ func TestTheKeyIsTheOneTheGatewayReads(t *testing.T) {
 	}
 }
 
+// TestTheMarginIsTheOneTheGatewayCapsItsSkewAt: o portão aceita um token até a
+// folga de relógio depois do `exp`, e recusa subir com folga maior que 60 s
+// (`DENYLIST_KEY_MARGIN`, em services/api-gateway/src/config.rs). Encurtar esta
+// margem sem baixar aquele teto deixaria um token revogado voltar a criar
+// aluguel no fim da folga.
+func TestTheMarginIsTheOneTheGatewayCapsItsSkewAt(t *testing.T) {
+	if Margin != 60*time.Second {
+		t.Fatalf("margem %v; o portão limita a folga de relógio a 60 s", Margin)
+	}
+}
+
 func TestSyncOnceCopiesWhatTheDatabaseRevoked(t *testing.T) {
 	alive := sessions.AccessToken{ID: "vivo", ExpiresAt: time.Now().Add(4 * time.Minute)}
 	source := fakeSource{tokens: []sessions.AccessToken{alive}, asked: &struct{ after time.Time }{}}

@@ -27,9 +27,12 @@ import (
 
 // Margin é quanto a chave sobrevive ao token.
 //
-// O portão aceita um token até GATEWAY_JWT_CLOCK_SKEW_SECS (30 s) depois do
-// `exp`. Uma chave que sumisse no `exp` exato deixaria um token revogado criar
-// aluguel nesses segundos.
+// O portão aceita um token até GATEWAY_JWT_CLOCK_SKEW_SECS (30 s por padrão)
+// depois do `exp`. Uma chave que sumisse no `exp` exato deixaria um token
+// revogado criar aluguel nesses segundos. O portão recusa subir com uma folga
+// maior que esta margem (`clock_skew_within_denylist_margin`), e o valor está
+// preso dos dois lados: aqui, em `TestTheMarginIsTheOneTheGatewayCapsItsSkewAt`,
+// e lá, em `DENYLIST_KEY_MARGIN`.
 const Margin = time.Minute
 
 // ResyncInterval é de quanto em quanto tempo a denylist é refeita a partir do
