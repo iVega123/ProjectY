@@ -354,8 +354,30 @@ async fn proxy_inner(state: Arc<AppState>, request: Request) -> Response {
 }
 
 fn rate_limit_key(bucket: &str, principal: &str) -> String {
-    let digest = Sha256::digest(principal.as_bytes());
-    format!("projecty:ratelimit:{bucket}:{digest:x}")
+    use std::fmt::Write as _;
+
+    // digest 0.11 returns a hybrid-array Array, which has no LowerHex; the key is
+    // the same lowercase hex the 0.10 GenericArray printed.
+    let mut key = format!("projecty:ratelimit:{bucket}:");
+    for byte in Sha256::digest(principal.as_bytes()) {
+        write!(key, "{byte:02x}").expect("writing to a String cannot fail");
+    }
+    key
+}
+
+#[cfg(test)]
+mod rate_limit_key_tests {
+    use super::rate_limit_key;
+
+    // Keys already live in Redis. A change of digest crate must not change how a
+    // principal maps to its bucket, or every limit resets on deploy.
+    #[test]
+    fn the_key_is_the_bucket_and_the_lowercase_sha256_of_the_principal() {
+        assert_eq!(
+            rate_limit_key("rentals", "rider-123"),
+            "projecty:ratelimit:rentals:435f56fcd9aaab513aa2f96fdc33db99e06495c5ffefdfd5398833be23f7fa98"
+        );
+    }
 }
 
 /// A cesta estrita é das rotas de credencial, e não do processo que as serve.
@@ -839,7 +861,7 @@ mod tests {
         Audiences, AuthConfig, RateLimitConfig, ResilienceConfig, Secret, SensitiveString,
         TokenBucketConfig, UpstreamResilienceConfig, Upstreams,
     };
-    use hmac::{Hmac, Mac};
+    use hmac::{Hmac, KeyInit, Mac};
     use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
     use serde::Serialize;
     use serde_json::{Value, json};
