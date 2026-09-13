@@ -6,7 +6,7 @@ rust-version = "1.98"
 
 [dependencies]
 axum = "0.8.9"
-base64 = "0.22.1"
+base64 = "0.23.1"
 image = { version = "0.25.10", default-features = false, features = ["png", "bmp", "jpeg"] }
 tokio = { version = "1.53.1", features = ["macros", "net", "rt-multi-thread", "signal", "sync"] }
 serde = { version = "1.0.228", features = ["derive"] }
