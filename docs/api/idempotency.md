@@ -22,13 +22,19 @@ used in Redis keys.
 | Redis unavailable before the claim is acquired | `503 Service Unavailable`; the request does not execute. |
 | Endpoint execution throws after a possible side effect | `503 Service Unavailable`; the unknown outcome is retained and the same key never executes again. |
 | Redis fails after the endpoint completes | `503 Service Unavailable` reports an unknown outcome; the pending claim is retained. |
+| Redis crashes within one second of acknowledging a claim | The claim can be lost. A retry with the same key is then treated as new and can execute again. |
 
 Pending claims and successful responses remain protected for 24 hours. Using
 the full retention TTL for in-flight work prevents a second replica from
 claiming a long-running or ambiguously failed request. The duration and maximum
 key length are configurable through the `Idempotency` configuration section.
-The Compose stacks store Redis data in an append-only, persistent volume and
-fsync every idempotency write before Redis acknowledges it.
+The Compose and Kubernetes stacks store Redis data in an append-only, persistent
+volume with `appendfsync everysec`: an idempotency write is fsynced within one
+second of being acknowledged, not before. A Redis crash (not a clean restart,
+which flushes the log) can therefore lose up to the last second of claims, and a
+retry of one of those requests can run its mutation a second time.
+[ADR 0026](../adr/0026-redis-durability-follows-the-consumer.md) records why that
+window was accepted.
 
 Example against RentalOperations:
 
