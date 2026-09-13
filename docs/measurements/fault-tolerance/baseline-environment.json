@@ -1,0 +1,10 @@
+﻿{
+    "cpus":  "32",
+    "duration":  "30s",
+    "commit":  "b58da8104f2a87ff4cfb9fb97ba6f967cd7bb56f",
+    "memoryBytes":  "66091405312",
+    "docker":  "29.7.2",
+    "mode":  "baseline",
+    "measuredAt":  "2026-09-13T00:52:43.3171650Z",
+    "vus":  5
+}

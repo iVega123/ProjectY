@@ -1,0 +1,6 @@
+﻿{
+    "pendingAfterDrain":  0,
+    "pendingAtRecovery":  80,
+    "rentalEvents":  180,
+    "drainSeconds":  3
+}

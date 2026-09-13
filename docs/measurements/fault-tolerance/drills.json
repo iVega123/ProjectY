@@ -1,0 +1,39 @@
+{
+  "measuredAt": "2026-09-13T01:37:45.498Z",
+  "commit": "b1ba1dc30e71f4400ee9074212f10cc5197f7fba",
+  "drills": {
+    "service-killed": {
+      "rentalStatus": 200,
+      "rentalDurationMs": 316,
+      "listingStatus": 200
+    },
+    "risk-pricing-stopped": {
+      "rentalStatus": 200,
+      "rentalDurationMs": 107,
+      "runningRentalDurationMs": 118,
+      "totalCost": 210,
+      "riskScoredWhileRunning": {
+        "before": 1,
+        "after": 2
+      },
+      "riskScoredDuringOutage": {
+        "before": 2,
+        "after30s": 2
+      },
+      "riskScoredAfterRecovery": 3
+    },
+    "billing-stopped": {
+      "listingStatus": 200,
+      "rows": 3,
+      "missing": [
+        "invoices",
+        "rider"
+      ]
+    },
+    "cassandra-down": {
+      "positionBroadcast": true,
+      "historyErrorsBefore": 0,
+      "historyErrorsAfter": 1
+    }
+  }
+}

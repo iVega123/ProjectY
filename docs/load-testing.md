@@ -52,13 +52,27 @@ powershell -File scripts/Run-LoadTest.ps1 -KeepStack
 powershell -File scripts/Run-LoadTest.ps1 -Mode slow-db -KeepStack -NoBuild
 powershell -File scripts/Run-LoadTest.ps1 -Mode db-down -KeepStack -NoBuild
 powershell -File scripts/Run-LoadTest.ps1 -Mode rabbit-down -KeepStack -NoBuild
+powershell -File scripts/Run-LoadTest.ps1 -Mode redis-down -KeepStack -NoBuild
+powershell -File scripts/Run-LoadTest.ps1 -Mode bad-network -KeepStack -NoBuild
+powershell -File scripts/Run-LoadTest.ps1 -Mode kafka-down -Polyglot -KeepStack -NoBuild
 ```
 
-Each run resets only its isolated fixture data, warms up, then injects the toxic.
-k6 clears its toxic in teardown. Threshold failures during a deliberate outage
-remain nonzero exits and are evidence of the measured failure, not a waived gate.
-A later run starts with an explicit proxy reset. Kafka resilience is not inferred
-from the RabbitMQ scenario; its target acceptance criteria remain open.
+Each run resets only its isolated fixture data, warms up, then injects the same
+toxics as the matching Tilt drill in `deploy/chaos/drills.json`. k6 clears them
+in teardown. Threshold failures during a deliberate outage remain nonzero exits
+and are evidence of the measured failure, not a waived gate. A later run starts
+with an explicit proxy reset.
+
+`kafka-down` needs `-Polyglot`, because Kafka exists only in that topology. After
+k6 clears the toxic, the runner keeps polling the outbox until the rental events
+left by the outage have drained, and writes `load/results/kafka-down-drain.json`
+with the backlog at recovery and the time it took. A backlog that does not drain
+within 180 seconds fails the run.
+
+`scripts/Test-RentalCoreReplicas.ps1` builds on the same fixture: it scales
+rental-core to two replicas, runs `kafka-down`, and passes only when both replicas
+published part of the backlog, their counts add up to it, and the topic grew by
+exactly the number of rental events written.
 
 The `ProjectY — load and resilience` dashboard overlays the k6 percentiles,
 creation/rejection rates, error rate, service health, gateway breaker state and

@@ -195,38 +195,48 @@ the scans that run before publication.
 Dependency fault injection in the active development stack: [commands and recovery contract](docs/dependency-fault-injection.md).
 
 [Tilt chaos drills: injection, expected behavior and observation points](docs/chaos-drills.md).
-See the [active degradation contract and prerequisite gaps](docs/degradation-contract.md) for what each dependency failure does today.
+See the [degradation contract](docs/degradation-contract.md) for what each dependency failure stops, what continues, and the test and drill that prove it.
 
 ## Measured load and chaos
 
-Measured 2026-09-05 on AMD Ryzen 9 9950X3D2, Docker 29.7.2 with 32 logical CPUs
-and 61.55 GiB RAM; 5 VUs for 30 seconds using one seeded rider and the default limiter.
+Measured 2026-09-13 on the full polyglot stack with every dependency behind Toxiproxy:
+AMD Ryzen 9 9950X3D2, Docker 29.7.2 with 32 logical CPUs and 61.55 GiB RAM; 5 VUs for
+30 seconds using one seeded rider and the default limiter.
 
-| Scenario | Created | Rate limited (429) | Unexpected errors | Successful p95 / p99 |
-|---|---:|---:|---:|---:|
-| Normal | 179 | 1,220 | 0% | 37.8 / 87.2 ms |
-| MongoDB +500 ms | 88 | 0 | 4.35% | 1,528.8 / 2,533.0 ms |
-| MongoDB down | 0 | 957 | 15.76% | N/A |
-| RabbitMQ down | 179 | 1,231 | 0% | 26.9 / 33.2 ms |
+| Scenario | Created | Rate limited (429) | Unexpected errors | Successful p95 / p99 | 503 refusal median / p99 |
+|---|---:|---:|---:|---:|---:|
+| Normal | 179 | 1,205 | 0% | 42.1 / 50.1 ms | — |
+| Kafka down | 179 | 1,206 | 0% | 41.1 / 43.5 ms | — |
+| Bad network | 177 | 1,139 | 0.15% | 104.6 / 110.0 ms | 92.6 / 102.2 ms |
+| CockroachDB down | 0 | 1,152 | 13.4% | — | 4.6 / 2,019.7 ms |
+| CockroachDB +500 ms | 0 | 1,127 | 13.6% | — | 4.8 / 2,509.2 ms |
+| Redis down | 0 | 0 | 100% | — | 252.2 / 252.9 ms |
 
-Reproduce: `powershell -File scripts/Run-LoadTest.ps1`; append
-`-Mode slow-db`, `-Mode db-down` or `-Mode rabbit-down` for fault runs.
-Both database fault runs fail the unchanged k6 thresholds. The numbers above
-were measured while rentals still lived in MongoDB; the store changed in #135
-and the runs have not been repeated. These measurements
-include rate limiting and do not estimate maximum capacity.
-[Raw results and caveats](docs/measurements/epic-9/README.md).
+Reproduce: `powershell -File scripts/Run-LoadTest.ps1 -Polyglot`; append
+`-Mode kafka-down`, `bad-network`, `db-down`, `slow-db` or `redis-down` for fault runs.
+The database and Redis runs fail the unchanged k6 thresholds, and the table says why:
+without the database, rentals are refused — fast once the gateway breaker opens; without
+Redis, idempotent creation refuses closed by design. During the Kafka outage 80 rental
+events waited in the outbox and drained in 3 seconds after recovery. The slow-database
+run misses its acceptance criterion — no creation fits the gateway deadline at 500 ms
+per round trip — and is tracked in [#206](https://github.com/iVega123/ProjectY/issues/206).
+These measurements include rate limiting and do not estimate maximum capacity.
+[Raw results and caveats](docs/measurements/fault-tolerance/README.md);
+[the first measurement, against MongoDB](docs/measurements/epic-9/README.md).
 
-| Tilt drill | Injection | Acceptance / observation |
+| Tilt drill | Injection | Measured |
 |---|---|---|
-| Slow database | CockroachDB +500 ms | No-errors criterion failed against the previous store: [#160](https://github.com/iVega123/ProjectY/issues/160) |
-| Database down | CockroachDB timeout | Bounded refusals and gateway breaker; inspect traces and metrics |
-| Redis down | Redis timeout | Limiter open; revocation/idempotency closed |
-| Kafka down | Disabled | Waiting for Kafka rental path, #130 |
-| Bad network | CockroachDB slicer + connection byte limit | Error-rate acceptance still open |
-| Service killed | Disabled | Waiting for live tracking/map, #10 |
+| Slow database | CockroachDB +500 ms | Fails the no-5xx criterion: [#206](https://github.com/iVega123/ProjectY/issues/206) |
+| Database down | CockroachDB timeout | 503 with `Retry-After`; breaker opens, then refusals in milliseconds |
+| Redis down | Redis timeout | Limiter open; idempotency and revocation closed |
+| Kafka down | Kafka timeout | Rentals continue; outbox backlog drains on recovery |
+| Bad network | CockroachDB slicer + connection byte limit | 2 errors in 1,318 requests |
+| Service killed | Stop telemetry | Map freezes; rental creation and listing return 200 |
+| Cassandra down | Cassandra timeout | Live positions still accepted; history errors visible in spanmetrics |
+| Risk-pricing stopped | Stop risk-pricing | Rentals priced on the base rate; fallback counted |
+| Billing stopped | Stop billing | Rental list renders and names invoices as missing |
 
-Each Tilt drill has a clear button. [Detailed commands](docs/chaos-drills.md).
+Each Tilt drill has a clear button. [Inject X, expect Y, observe at Z](docs/chaos-drills.md).
 [Load and resilience dashboard](http://localhost:3000/d/projecty-load-resilience)
 uses port 13000 with the isolated load runner's `-KeepStack` option.
 

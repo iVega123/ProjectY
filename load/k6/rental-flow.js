@@ -28,7 +28,12 @@ const drills = {
   "slow-db": [{ proxy: "cockroachdb", type: "latency", attributes: { latency: 500, jitter: 0 } }],
   "db-down": [{ proxy: "cockroachdb", type: "timeout", attributes: { timeout: 0 } }],
   "rabbit-down": [{ proxy: "rabbitmq", type: "timeout", attributes: { timeout: 0 } }],
+  "redis-down": [{ proxy: "redis", type: "timeout", attributes: { timeout: 0 } }],
   "kafka-down": [{ proxy: "kafka", type: "timeout", attributes: { timeout: 0 } }],
+  "bad-network": [
+    { proxy: "cockroachdb", type: "slicer", attributes: { average_size: 64, size_variation: 16, delay: 100 } },
+    { proxy: "cockroachdb", type: "limit_data", attributes: { bytes: 60000 } },
+  ],
 };
 
 // A fixture semeia a moto n com um id determinístico (load/fixtures/seed-rental-core.sql).

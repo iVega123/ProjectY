@@ -109,13 +109,16 @@ try {
     $null = PingProxy
     $catalog = Get-Content 'deploy/chaos/drills.json' -Raw | ConvertFrom-Json
     foreach ($drill in $catalog) {
-        if (-not $drill.available) {
+        if ($drill.requires -notin @('core', 'full')) { throw "Drill does not declare the topology it needs: $($drill.id)" }
+        if ($drill.kind -eq 'container') {
+            # The fixture runs no application container. A stop that finds nothing
+            # must fail loudly, or a button would report a drill that never happened.
             $rejected = $false
-            try { & "$PSScriptRoot/Invoke-ChaosDrill.ps1" $drill.id -Url $api }
-            catch { $rejected = $true }
-            if (-not $rejected) { throw "Unavailable drill was executable: $($drill.id)" }
+            try { & "$PSScriptRoot/Invoke-ChaosDrill.ps1" $drill.id -Url $api -Project $project } catch { $rejected = $true }
+            if (-not $rejected) { throw "Container drill reported success without a container: $($drill.id)" }
             continue
         }
+        if (-not ($proxies | Where-Object { $_.name -eq $drill.proxy })) { throw "Drill targets an unknown proxy: $($drill.id)" }
         & "$PSScriptRoot/Invoke-ChaosDrill.ps1" $drill.id -Url $api
         $proxy = Invoke-RestMethod "$api/proxies/$($drill.proxy)" -UserAgent 'ProjectY-Chaos-Test/1.0'
         if (@($proxy.toxics).Count -ne @($drill.toxics).Count) { throw "Drill did not inject every toxic: $($drill.id)" }
