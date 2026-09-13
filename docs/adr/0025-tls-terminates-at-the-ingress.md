@@ -88,7 +88,8 @@ written, the canonical string had no digest of the payload, and it said so here.
   side can be deployed first and lock the other out. The same rule lets an
   attacker strip `x-identity-signature-v2` from a captured envelope and fall back
   to the signature that does not cover the body. Removing `v1` acceptance from
-  the three verifiers, the follow-up #191 names, closes it.
+  the three verifiers closes it; that is
+  [#274](https://github.com/iVega123/ProjectY/issues/274).
 
 What mTLS would add on top is therefore confidentiality, and with it the end of
 identical-request replay, since an attacker could no longer inject into the

@@ -110,7 +110,8 @@ sha256-of-body
     the new one, so the gateway can be deployed first.
 - **The price of that is a downgrade.** Stripping `x-identity-signature-v2` from a
   captured envelope falls back to the signature that does not cover the body.
-  It closes when the verifiers stop accepting `v1`, the follow-up of #191.
+  It closes when the verifiers stop accepting `v1`, tracked as
+  [#274](https://github.com/iVega123/ProjectY/issues/274).
   [ADR 0025](0025-tls-terminates-at-the-ingress.md) states what remains.
 
 Golden vectors pin the string on both sides. `signs_the_v2_envelopes_the_verifiers_pin`
