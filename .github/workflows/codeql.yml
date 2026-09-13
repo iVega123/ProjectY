@@ -70,8 +70,11 @@ jobs:
         working-directory: services/billing
         # --no-build-cache and --rerun-tasks so the compiler always runs; in-process
         # so it runs inside the build CodeQL is tracing, not in a Kotlin daemon.
+        # In-process also means the compiler shares Gradle's heap: at the default
+        # 512 MiB the garbage collector thrashed and Gradle stopped the build.
         run: >-
           gradle --no-daemon --no-build-cache --rerun-tasks
+          "-Dorg.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=1g"
           -Pkotlin.compiler.execution.strategy=in-process
           compileKotlin compileTestKotlin
 
