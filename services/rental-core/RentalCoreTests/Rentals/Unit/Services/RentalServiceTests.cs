@@ -1,10 +1,9 @@
 using AutoMapper;
 using Moq;
 using RentalCore.Errors;
-using RentalOperations.CrossCutting.Model;
-using RentalOperations.CrossCutting.Services;
 using RentalOperations.Domain;
 using RentalOperations.DTOs;
+using RentalOperations.Model;
 using RentalOperations.Repository;
 using RentalOperations.Services;
 
@@ -14,80 +13,94 @@ public sealed class RentalServiceTests
 {
     private static readonly Guid Motorcycle = Guid.Parse("11111111-1111-1111-1111-111111111111");
 
+    private static RentalCreateDto Request() => new()
+    {
+        MotorcycleId = Motorcycle,
+        StartDate = DateTime.UtcNow.Date.AddDays(1),
+        PredictedEndDate = DateTime.UtcNow.Date.AddDays(8)
+    };
+
+    private static Mock<IRentalRepository> Repository(
+        MotorcycleAvailability motorcycle = MotorcycleAvailability.Available,
+        bool overlaps = false)
+    {
+        var repository = new Mock<IRentalRepository>();
+        repository.Setup(r => r.ReadCreationPreconditionsAsync(
+                It.IsAny<string>(), Motorcycle, It.IsAny<DateTime>(), It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string rider, Guid _, DateTime _, DateTime _, CancellationToken _) =>
+                new RentalPreconditions(new RiderView(rider, true, 1, "Ada Lovelace"), motorcycle, overlaps));
+        return repository;
+    }
+
     [Theory]
-    [InlineData("database")]
-    [InlineData("rider")]
-    [InlineData("motorcycle")]
+    [InlineData("preconditions")]
     [InlineData("insert")]
     public async Task CreateRental_OnlyPreflightFailuresPermitIdempotentRetry(string stage)
     {
         var failure = new TimeoutException("dependency timeout");
-        var repository = new Mock<IRentalRepository>();
-        repository.Setup(r => r.HasOverlappingRentalAsync(It.IsAny<Guid>(), It.IsAny<DateTime>(), It.IsAny<DateTime>(), It.IsAny<CancellationToken>())).ReturnsAsync(false);
-        var riders = new Mock<IRiderProjectionStore>();
-        riders.Setup(r => r.GetAsync("rider", It.IsAny<CancellationToken>())).ReturnsAsync(new RiderView("rider", true, 1, "Ada Lovelace"));
-        var motorcycles = new Mock<IMotorcycleService>();
-        motorcycles.Setup(m => m.GetMotorcycleByIdAsync(Motorcycle)).ReturnsAsync(new Motorcycle { id = Motorcycle.ToString(), licensePlate = "ABC1D23" });
-        if (stage == "database") repository.Setup(r => r.HasOverlappingRentalAsync(It.IsAny<Guid>(), It.IsAny<DateTime>(), It.IsAny<DateTime>(), It.IsAny<CancellationToken>())).ThrowsAsync(failure);
-        if (stage == "rider") riders.Setup(r => r.GetAsync("rider", It.IsAny<CancellationToken>())).ThrowsAsync(failure);
-        if (stage == "motorcycle") motorcycles.Setup(m => m.GetMotorcycleByIdAsync(Motorcycle)).ThrowsAsync(failure);
-        if (stage == "insert") repository.Setup(r => r.CreateRentalAsync(It.IsAny<RentalOperations.Model.Rental>(), It.IsAny<CancellationToken>())).ThrowsAsync(failure);
-        var service = new RentalService(repository.Object, Mock.Of<IMapper>(), riders.Object, motorcycles.Object);
-        var request = new RentalCreateDto
-        {
-            MotorcycleId = Motorcycle,
-            StartDate = DateTime.UtcNow.AddDays(1),
-            PredictedEndDate = DateTime.UtcNow.AddDays(8)
-        };
-        var error = await Record.ExceptionAsync(() => service.CreateRentalAsync(request, "rider"));
+        var repository = Repository();
+        if (stage == "preconditions") repository.Setup(r => r.ReadCreationPreconditionsAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<DateTime>(), It.IsAny<DateTime>(), It.IsAny<CancellationToken>())).ThrowsAsync(failure);
+        if (stage == "insert") repository.Setup(r => r.CreateRentalAsync(It.IsAny<Rental>(), It.IsAny<CancellationToken>())).ThrowsAsync(failure);
+        var service = new RentalService(repository.Object, Mock.Of<IMapper>());
+        var error = await Record.ExceptionAsync(() => service.CreateRentalAsync(Request(), "rider"));
         if (stage is "insert") Assert.Same(failure, error);
         else
         {
             Assert.Same(failure, Assert.IsType<PreWriteDependencyException>(error).InnerException);
-            repository.Verify(r => r.CreateRentalAsync(
-                It.IsAny<RentalOperations.Model.Rental>(), It.IsAny<CancellationToken>()), Times.Never);
+            repository.Verify(r => r.CreateRentalAsync(It.IsAny<Rental>(), It.IsAny<CancellationToken>()), Times.Never);
         }
     }
 
     [Fact]
     public async Task CreateRental_WhenTheMotorcycleIsRetired_RejectsWithoutInsertingRental()
     {
-        var repository = new Mock<IRentalRepository>();
-        repository.Setup(candidate => candidate.HasOverlappingRentalAsync(
-                It.IsAny<Guid>(),
-                It.IsAny<DateTime>(),
-                It.IsAny<DateTime>(),
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(false);
-        var riders = new Mock<IRiderProjectionStore>();
-        riders.Setup(service => service.GetAsync("rider-1", It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new RiderView("rider-1", true, 1, "Ada Lovelace"));
-        var motorcycles = new Mock<IMotorcycleService>();
-        motorcycles.Setup(service => service.GetMotorcycleByIdAsync(Motorcycle))
-            .ReturnsAsync(new Motorcycle
-            {
-                id = Motorcycle.ToString(),
-                licensePlate = "RET0001",
-                model = "Retirement race",
-                year = 2026,
-                retiredAtUtc = DateTime.UtcNow
-            });
-        var service = new RentalService(
-            repository.Object,
-            Mock.Of<IMapper>(),
-            riders.Object,
-            motorcycles.Object);
-        var request = new RentalCreateDto
-        {
-            MotorcycleId = Motorcycle,
-            StartDate = DateTime.UtcNow.Date.AddDays(1),
-            PredictedEndDate = DateTime.UtcNow.Date.AddDays(8)
-        };
+        var repository = Repository(MotorcycleAvailability.Retired);
+        var service = new RentalService(repository.Object, Mock.Of<IMapper>());
 
         await Assert.ThrowsAsync<MotorcycleRetiredException>(() =>
-            service.CreateRentalAsync(request, "rider-1"));
+            service.CreateRentalAsync(Request(), "rider-1"));
         repository.Verify(candidate => candidate.CreateRentalAsync(
-            It.IsAny<RentalOperations.Model.Rental>(), It.IsAny<CancellationToken>()), Times.Never);
+            It.IsAny<Rental>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task CreateRental_WhenTheMotorcycleDoesNotExist_RejectsWithoutInsertingRental()
+    {
+        var repository = Repository(MotorcycleAvailability.Missing);
+        var service = new RentalService(repository.Object, Mock.Of<IMapper>());
+
+        await Assert.ThrowsAsync<ResourceNotFoundException>(() =>
+            service.CreateRentalAsync(Request(), "rider-1"));
+        repository.Verify(candidate => candidate.CreateRentalAsync(
+            It.IsAny<Rental>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task CreateRental_WhenTheScheduleOverlaps_RejectsWithoutInsertingRental()
+    {
+        var repository = Repository(overlaps: true);
+        var service = new RentalService(repository.Object, Mock.Of<IMapper>());
+
+        await Assert.ThrowsAsync<ActiveRentalConflictException>(() =>
+            service.CreateRentalAsync(Request(), "rider-1"));
+        repository.Verify(candidate => candidate.CreateRentalAsync(
+            It.IsAny<Rental>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task CreateRental_WritesTheProjectedRiderName()
+    {
+        Rental? written = null;
+        var repository = Repository();
+        repository.Setup(r => r.CreateRentalAsync(It.IsAny<Rental>(), It.IsAny<CancellationToken>()))
+            .Callback((Rental rental, CancellationToken _) => written = rental)
+            .ReturnsAsync((Rental rental, CancellationToken _) => rental);
+        var service = new RentalService(repository.Object, Mock.Of<IMapper>());
+
+        await service.CreateRentalAsync(Request(), "rider-1");
+
+        Assert.Equal("Ada Lovelace", written!.RiderName);
+        Assert.Equal("rider-1", written.UserId);
     }
 
     // Havia aqui um teste de normalização de placa -- " bus0y01 " tinha de virar
@@ -99,13 +112,12 @@ public sealed class RentalServiceTests
     [Fact]
     public async Task RentalsByIds_AreFilteredToTheCaller()
     {
-        var mine = new RentalOperations.Model.Rental { MotorcycleId = Motorcycle, UserId = "rider-1", Id = Guid.NewGuid() };
-        var theirs = new RentalOperations.Model.Rental { MotorcycleId = Motorcycle, UserId = "rider-2", Id = Guid.NewGuid() };
+        var mine = new Rental { MotorcycleId = Motorcycle, UserId = "rider-1", Id = Guid.NewGuid() };
+        var theirs = new Rental { MotorcycleId = Motorcycle, UserId = "rider-2", Id = Guid.NewGuid() };
         var repository = new Mock<IRentalRepository>();
         repository.Setup(r => r.GetRentalsByIdsAsync(It.IsAny<IReadOnlyCollection<Guid>>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync([mine, theirs]);
-        var service = new RentalService(
-            repository.Object, ProjectingMapper(), Mock.Of<IRiderProjectionStore>(), Mock.Of<IMotorcycleService>());
+        var service = new RentalService(repository.Object, ProjectingMapper());
 
         var visible = await service.GetRentalsByIdsAsync([mine.Id, theirs.Id], "rider-1", isAdmin: false);
 
@@ -117,13 +129,12 @@ public sealed class RentalServiceTests
     [Fact]
     public async Task RentalsByIds_AreNotFilteredForAnAdmin()
     {
-        var mine = new RentalOperations.Model.Rental { MotorcycleId = Motorcycle, UserId = "rider-1", Id = Guid.NewGuid() };
-        var theirs = new RentalOperations.Model.Rental { MotorcycleId = Motorcycle, UserId = "rider-2", Id = Guid.NewGuid() };
+        var mine = new Rental { MotorcycleId = Motorcycle, UserId = "rider-1", Id = Guid.NewGuid() };
+        var theirs = new Rental { MotorcycleId = Motorcycle, UserId = "rider-2", Id = Guid.NewGuid() };
         var repository = new Mock<IRentalRepository>();
         repository.Setup(r => r.GetRentalsByIdsAsync(It.IsAny<IReadOnlyCollection<Guid>>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync([mine, theirs]);
-        var service = new RentalService(
-            repository.Object, ProjectingMapper(), Mock.Of<IRiderProjectionStore>(), Mock.Of<IMotorcycleService>());
+        var service = new RentalService(repository.Object, ProjectingMapper());
 
         var visible = await service.GetRentalsByIdsAsync([mine.Id, theirs.Id], "an-admin", isAdmin: true);
 
@@ -137,11 +148,7 @@ public sealed class RentalServiceTests
         repository.Setup(candidate => candidate.IsMotorcycleCurrentlyRentedAsync(
                 Motorcycle, It.IsAny<CancellationToken>()))
             .ReturnsAsync(true);
-        var service = new RentalService(
-            repository.Object,
-            Mock.Of<IMapper>(),
-            Mock.Of<IRiderProjectionStore>(),
-            Mock.Of<IMotorcycleService>());
+        var service = new RentalService(repository.Object, Mock.Of<IMapper>());
 
         Assert.True(await service.IsMotorcycleCurrentlyRentedAsync(Motorcycle));
     }
@@ -158,7 +165,7 @@ public sealed class RentalServiceTests
     public async Task CloseRental_RecordsTheDateAndStatusWithoutSettling()
     {
         var start = DateTime.UtcNow.Date;
-        var rental = new RentalOperations.Model.Rental
+        var rental = new Rental
         {
             Id = Guid.NewGuid(),
             MotorcycleId = Motorcycle,
@@ -170,19 +177,18 @@ public sealed class RentalServiceTests
         var repository = new Mock<IRentalRepository>();
         repository.Setup(r => r.GetRentalByIdAsync(rental.Id.ToString(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(rental);
-        RentalOperations.Model.Rental? persisted = null;
+        Rental? persisted = null;
         repository.Setup(r => r.UpdateRentalAsync(
-                It.IsAny<RentalOperations.Model.Rental>(), It.IsAny<CancellationToken>()))
-            .Callback((RentalOperations.Model.Rental updated, CancellationToken _) => persisted = updated)
+                It.IsAny<Rental>(), It.IsAny<CancellationToken>()))
+            .Callback((Rental updated, CancellationToken _) => persisted = updated)
             .Returns(Task.CompletedTask);
-        var service = new RentalService(
-            repository.Object, Mock.Of<IMapper>(), Mock.Of<IRiderProjectionStore>(), Mock.Of<IMotorcycleService>());
+        var service = new RentalService(repository.Object, Mock.Of<IMapper>());
 
         await service.CloseRentalAsync(rental.Id.ToString(), "rider-1", start.AddDays(9));
 
         Assert.NotNull(persisted);
         Assert.Equal(start.AddDays(9), persisted!.EndDate);
-        Assert.Equal(RentalOperations.Model.RentalStatus.Completed, persisted.Status);
+        Assert.Equal(RentalStatus.Completed, persisted.Status);
         Assert.Equal(210m, persisted.InitCost);
     }
 
@@ -195,7 +201,7 @@ public sealed class RentalServiceTests
     public async Task CloseRental_BeforeTheRentalStarted_IsRefusedWithoutWriting()
     {
         var start = DateTime.UtcNow.Date;
-        var rental = new RentalOperations.Model.Rental
+        var rental = new Rental
         {
             Id = Guid.NewGuid(),
             MotorcycleId = Motorcycle,
@@ -207,13 +213,12 @@ public sealed class RentalServiceTests
         var repository = new Mock<IRentalRepository>();
         repository.Setup(r => r.GetRentalByIdAsync(rental.Id.ToString(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(rental);
-        var service = new RentalService(
-            repository.Object, Mock.Of<IMapper>(), Mock.Of<IRiderProjectionStore>(), Mock.Of<IMotorcycleService>());
+        var service = new RentalService(repository.Object, Mock.Of<IMapper>());
 
         await Assert.ThrowsAsync<InvalidRequestException>(() =>
             service.CloseRentalAsync(rental.Id.ToString(), "rider-1", start.AddDays(-1)));
         repository.Verify(r => r.UpdateRentalAsync(
-            It.IsAny<RentalOperations.Model.Rental>(), It.IsAny<CancellationToken>()), Times.Never);
+            It.IsAny<Rental>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     /// <summary>
@@ -224,7 +229,7 @@ public sealed class RentalServiceTests
     {
         var mapper = new Mock<IMapper>();
         mapper.Setup(m => m.Map<IReadOnlyList<ResponseRentalDTO>>(It.IsAny<object>()))
-            .Returns((object source) => ((IEnumerable<RentalOperations.Model.Rental>)source)
+            .Returns((object source) => ((IEnumerable<Rental>)source)
                 .Select(rental => new ResponseRentalDTO
                 {
                     RentalId = rental.Id.ToString(),

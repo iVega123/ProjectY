@@ -4,6 +4,7 @@ using NpgsqlTypes;
 using ProjectY.Shared.Pagination;
 using RentalOperations.Domain;
 using RentalOperations.Model;
+using RentalOperations.Services;
 using RentalCore.Errors;
 
 namespace RentalOperations.Repository;
@@ -41,6 +42,15 @@ public sealed class SqlRentalRepository(NpgsqlDataSource database) : IRentalRepo
           JOIN motorcycles AS m ON m.id = r.motorcycle_id
         """;
 
+    /// <summary>
+    /// O aluguel e o evento que o anuncia, numa instrução só.
+    ///
+    /// Eram três idas ao banco dentro de uma transação explícita -- o INSERT do
+    /// aluguel, o do outbox e o COMMIT -- e cada uma pagava a latência inteira.
+    /// Com os dois INSERTs encadeados por CTE, a instrução é a transação: o
+    /// outbox só recebe linha se o aluguel recebeu, e nenhum dos dois fica sem o
+    /// outro. É a mesma garantia do ADR 0009 por uma ida em vez de três (#206).
+    /// </summary>
     public async Task<Rental> CreateRentalAsync(Rental rental, CancellationToken token = default)
     {
         if (rental.Id == Guid.Empty)
@@ -48,57 +58,63 @@ public sealed class SqlRentalRepository(NpgsqlDataSource database) : IRentalRepo
             rental.Id = Guid.NewGuid();
         }
 
-        await using var connection = await database.OpenConnectionAsync(token);
-        await using var transaction = await connection.BeginTransactionAsync(token);
+        var envelope = RentalEventEnvelope.Create(rental, "rental.started");
+        int inserted;
         try
         {
-            int inserted;
-            await using (var insert = new NpgsqlCommand("""
+            await using var connection = await database.OpenConnectionAsync(token);
+            await using var insert = new NpgsqlCommand("""
                 WITH available AS (
                     SELECT id FROM motorcycles
                      WHERE id = @motorcycle AND retired_at IS NULL
                      FOR UPDATE
+                ),
+                rental AS (
+                    INSERT INTO rentals (id, rider_id, motorcycle_id, rider_name, starts_at,
+                                         predicted_ends_at, ends_at, init_cost, status)
+                    SELECT @id, @rider, available.id, @rider_name::text, @starts::timestamptz,
+                           @predicted::timestamptz, @ends::timestamptz, @init::decimal, @status
+                      FROM available
+                    RETURNING id
                 )
-                INSERT INTO rentals (id, rider_id, motorcycle_id, rider_name, starts_at,
-                                     predicted_ends_at, ends_at, init_cost, status)
-                SELECT @id, @rider, available.id, @rider_name, @starts::timestamptz,
-                       @predicted::timestamptz, @ends::timestamptz, @init::decimal, @status
-                  FROM available
-                """, connection, transaction))
-            {
-                insert.Parameters.AddWithValue("id", rental.Id);
-                insert.Parameters.AddWithValue("rider", rental.UserId);
-                insert.Parameters.AddWithValue("motorcycle", rental.MotorcycleId);
-                insert.Parameters.AddWithValue("rider_name", (object?)rental.RiderName ?? DBNull.Value);
-                insert.Parameters.AddWithValue("starts", Utc(rental.StartDate));
-                insert.Parameters.AddWithValue("predicted", Utc(rental.PredictedEndDate));
-                insert.Parameters.AddWithValue("ends", rental.EndDate is { } ends ? Utc(ends) : DBNull.Value);
-                insert.Parameters.AddWithValue("init", rental.InitCost);
-                insert.Parameters.AddWithValue("status", ToColumn(rental.Status));
-                inserted = await insert.ExecuteNonQueryAsync(token);
-            }
-
-            if (inserted == 0)
-            {
-                await transaction.RollbackAsync(token);
-                throw await RefusedAsync(rental, token);
-            }
-
-            await EnqueueAsync(connection, transaction, rental, "rental.started", token);
-            await transaction.CommitAsync(token);
-            return rental;
+                INSERT INTO outbox (aggregate_type, aggregate_id, event_type, topic, payload, trace_parent)
+                SELECT 'rental', @aggregate, @event_type, @topic, @payload, @trace::text
+                  FROM rental
+                """, connection);
+            insert.Parameters.AddWithValue("id", rental.Id);
+            insert.Parameters.AddWithValue("rider", rental.UserId);
+            insert.Parameters.AddWithValue("motorcycle", rental.MotorcycleId);
+            insert.Parameters.AddWithValue("rider_name", (object?)rental.RiderName ?? DBNull.Value);
+            insert.Parameters.AddWithValue("starts", Utc(rental.StartDate));
+            insert.Parameters.AddWithValue("predicted", Utc(rental.PredictedEndDate));
+            insert.Parameters.AddWithValue("ends", rental.EndDate is { } ends ? Utc(ends) : DBNull.Value);
+            insert.Parameters.AddWithValue("init", rental.InitCost);
+            insert.Parameters.AddWithValue("status", ToColumn(rental.Status));
+            insert.Parameters.AddWithValue("aggregate", RentalEventEnvelope.PartitionKey(rental));
+            insert.Parameters.AddWithValue("event_type", envelope.Id);
+            insert.Parameters.AddWithValue("topic", envelope.Topic);
+            insert.Parameters.Add(new NpgsqlParameter("payload", NpgsqlDbType.Bytea) { Value = envelope.Payload });
+            insert.Parameters.AddWithValue("trace", (object?)envelope.TraceParent ?? DBNull.Value);
+            inserted = await insert.ExecuteNonQueryAsync(token);
         }
         catch (PostgresException conflict) when (IsActiveRentalConflict(conflict))
         {
-            await transaction.RollbackAsync(token);
             throw new ActiveRentalConflictException(rental.MotorcycleId, conflict);
         }
         catch (PostgresException missing)
             when (missing.SqlState == PostgresErrorCodes.ForeignKeyViolation)
         {
-            await transaction.RollbackAsync(token);
             throw new ResourceNotFoundException("The motorcycle does not exist.");
         }
+
+        // A contagem é a do INSERT de fora, o do outbox -- que só tem linha
+        // quando o aluguel teve.
+        if (inserted == 0)
+        {
+            throw await RefusedAsync(rental, token);
+        }
+
+        return rental;
     }
 
     public async Task UpdateRentalAsync(Rental rental, CancellationToken token = default)
@@ -247,7 +263,16 @@ public sealed class SqlRentalRepository(NpgsqlDataSource database) : IRentalRepo
             rental => new Position(positions[rental.Id], rental.Id).ToCursor());
     }
 
-    public async Task<bool> HasOverlappingRentalAsync(
+    /// <summary>
+    /// A projeção do piloto, a moto e a agenda, numa ida ao banco.
+    ///
+    /// Eram três leituras em sequência, e sob o drill slow-db (+500 ms por
+    /// resposta) só elas gastavam 1,5 s dos 2,5 s que o gateway dá à requisição
+    /// (#206). A linha de <c>VALUES</c> existe para que a resposta volte mesmo
+    /// quando nem o piloto nem a moto existem -- ausência também é resposta.
+    /// </summary>
+    public async Task<RentalPreconditions> ReadCreationPreconditionsAsync(
+        string riderId,
         Guid motorcycleId,
         DateTime startDate,
         DateTime endDate,
@@ -258,18 +283,37 @@ public sealed class SqlRentalRepository(NpgsqlDataSource database) : IRentalRepo
         // predicted_ends_at quando não.
         await using var connection = await database.OpenConnectionAsync(token);
         await using var command = new NpgsqlCommand("""
-            SELECT 1
-              FROM rentals
-             WHERE motorcycle_id = @motorcycle
-               AND status IN ('active', 'closed')
-               AND starts_at < @ends
-               AND COALESCE(ends_at, predicted_ends_at) > @starts
-             LIMIT 1
+            SELECT r.rider_id, r.verified, r.verified_at_ms, r.rider_name,
+                   m.id IS NOT NULL AS motorcycle_known,
+                   m.retired_at IS NOT NULL AS motorcycle_retired,
+                   EXISTS (SELECT 1
+                             FROM rentals
+                            WHERE motorcycle_id = @motorcycle
+                              AND status IN ('active', 'closed')
+                              AND starts_at < @ends
+                              AND COALESCE(ends_at, predicted_ends_at) > @starts) AS overlaps
+              FROM (VALUES (1)) AS request (one)
+              LEFT JOIN rider_projection AS r ON r.rider_id = @rider
+              LEFT JOIN motorcycles AS m ON m.id = @motorcycle
             """, connection);
+        command.Parameters.AddWithValue("rider", riderId);
         command.Parameters.AddWithValue("motorcycle", motorcycleId);
         command.Parameters.AddWithValue("starts", Utc(startDate));
         command.Parameters.AddWithValue("ends", Utc(endDate));
-        return await command.ExecuteScalarAsync(token) is not null;
+        await using var reader = await command.ExecuteReaderAsync(token);
+        await reader.ReadAsync(token);
+
+        var rider = reader.IsDBNull(0)
+            ? null
+            : new RiderView(
+                reader.GetString(0),
+                reader.GetBoolean(1),
+                reader.GetInt64(2),
+                reader.IsDBNull(3) ? null : reader.GetString(3));
+        var motorcycle = !reader.GetBoolean(4)
+            ? MotorcycleAvailability.Missing
+            : reader.GetBoolean(5) ? MotorcycleAvailability.Retired : MotorcycleAvailability.Available;
+        return new RentalPreconditions(rider, motorcycle, reader.GetBoolean(6));
     }
 
     public async Task<bool> IsMotorcycleCurrentlyRentedAsync(

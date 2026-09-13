@@ -1,5 +1,4 @@
 using AutoMapper;
-using RentalOperations.CrossCutting.Services;
 using RentalOperations.Domain;
 using RentalOperations.DTOs;
 using RentalOperations.Model;
@@ -15,19 +14,11 @@ namespace RentalOperations.Services
     {
         private readonly IRentalRepository _repository;
         private readonly IMapper _mapper;
-        private readonly IRiderProjectionStore _riders;
-        private readonly IMotorcycleService _motorcycleService;
 
-        public RentalService(
-            IRentalRepository repository,
-            IMapper mapper,
-            IRiderProjectionStore riders,
-            IMotorcycleService motorcycleService)
+        public RentalService(IRentalRepository repository, IMapper mapper)
         {
             _repository = repository;
             _mapper = mapper;
-            _motorcycleService = motorcycleService;
-            _riders = riders;
         }
 
         /// <summary>
@@ -47,8 +38,15 @@ namespace RentalOperations.Services
 
             // Read locally, never over the network. Calling identity here would put
             // the fat event back on the request path it exists to remove, so this is
-            // asserted by a test rather than left to reviewer discipline.
-            var rider = await BeforeWriteAsync(() => _riders.GetAsync(userId, CancellationToken.None));
+            // asserted by a test rather than left to reviewer discipline. The rider,
+            // the motorcycle and the schedule come back in one read: each separate
+            // read paid the database's latency again (#206).
+            var preconditions = await BeforeWriteAsync(() => _repository.ReadCreationPreconditionsAsync(
+                userId,
+                createDto.MotorcycleId,
+                createDto.StartDate,
+                createDto.PredictedEndDate));
+            var rider = preconditions.Rider;
             if (rider == null)
             {
                 throw new RiderProjectionPendingException(userId);
@@ -58,13 +56,11 @@ namespace RentalOperations.Services
                 throw new RiderNotEntitledException();
             }
 
-            var motorcycle = await BeforeWriteAsync(
-                () => _motorcycleService.GetMotorcycleByIdAsync(createDto.MotorcycleId));
-            if (motorcycle == null)
+            if (preconditions.Motorcycle == MotorcycleAvailability.Missing)
             {
                 throw new ResourceNotFoundException("The motorcycle does not exist.");
             }
-            if (motorcycle.retiredAtUtc is not null)
+            if (preconditions.Motorcycle == MotorcycleAvailability.Retired)
             {
                 throw new MotorcycleRetiredException(createDto.MotorcycleId);
             }
@@ -72,10 +68,7 @@ namespace RentalOperations.Services
             // Uma sobreposição futura não é a mesma coisa que uma dupla reserva
             // agora, e o índice único parcial só recusa a segunda. Esta checagem
             // cobre a agenda; a corrida continua sendo decidida no INSERT.
-            if (await BeforeWriteAsync(() => _repository.HasOverlappingRentalAsync(
-                createDto.MotorcycleId,
-                createDto.StartDate,
-                createDto.PredictedEndDate)))
+            if (preconditions.Overlaps)
             {
                 throw new ActiveRentalConflictException(createDto.MotorcycleId);
             }
