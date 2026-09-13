@@ -2,7 +2,8 @@
   {
     "id": "slow-db",
     "label": "Slow database",
-    "available": true,
+    "kind": "toxic",
+    "requires": "core",
     "proxy": "cockroachdb",
     "toxics": [
       {
@@ -11,13 +12,14 @@
         "value": 500
       }
     ],
-    "expectation": "Latency should rise. Compare p95/p99 and 503s with baseline; the original no-5xx target is not yet proven.",
-    "observe": "Grafana rental SLO and database spans in Tempo."
+    "expectation": "Rental p99 rises by the injected latency; the gateway breaker stays closed and no 5xx is returned.",
+    "observe": "Grafana projecty-load-resilience (creation p99, breaker state) and database spans in Tempo."
   },
   {
     "id": "db-down",
     "label": "Database down",
-    "available": true,
+    "kind": "toxic",
+    "requires": "core",
     "proxy": "cockroachdb",
     "toxics": [
       {
@@ -26,13 +28,14 @@
         "value": 0
       }
     ],
-    "expectation": "Rental creation refuses with 503 and Retry-After; repeated failures open the gateway breaker.",
-    "observe": "Gateway /metrics, rental SLO, and trace projecty.degradation."
+    "expectation": "Rental endpoints refuse with 503 and Retry-After within the gateway deadline; repeated failures open the breaker and later refusals are immediate.",
+    "observe": "dependency_refusals_total{dependency=\"database\"}, gateway breaker state, and traces tagged projecty.degradation=database."
   },
   {
     "id": "redis-down",
     "label": "Redis down",
-    "available": true,
+    "kind": "toxic",
+    "requires": "core",
     "proxy": "redis",
     "toxics": [
       {
@@ -41,22 +44,30 @@
         "value": 0
       }
     ],
-    "expectation": "Rate limiting degrades open; high-value revocation and idempotency refuse closed.",
+    "expectation": "Rate limiting degrades open; revocation-checked and idempotent mutations refuse closed; ordinary authenticated reads continue.",
     "observe": "gateway_ratelimit_degraded_total and gateway 503 traces."
   },
   {
     "id": "kafka-down",
-    "label": "Kafka down (blocked)",
-    "available": false,
+    "label": "Kafka down",
+    "kind": "toxic",
+    "requires": "full",
     "proxy": "kafka",
-    "toxics": [],
-    "expectation": "Blocked: the active rental service has no Kafka producer/outbox; requires #130 and event-service work.",
-    "observe": "No active Kafka drill evidence exists."
+    "toxics": [
+      {
+        "name": "kafka-down",
+        "type": "timeout",
+        "value": 0
+      }
+    ],
+    "expectation": "Rental creation continues. Rental events accumulate in the outbox and drain after Clear; nothing is lost.",
+    "observe": "projecty_rental_outbox_pending rising then returning to 0, and dependency_degradations_total{dependency=\"kafka\"}."
   },
   {
     "id": "bad-network",
     "label": "Bad network",
-    "available": true,
+    "kind": "toxic",
+    "requires": "core",
     "proxy": "cockroachdb",
     "toxics": [
       {
@@ -70,16 +81,50 @@
         "value": 60000
       }
     ],
-    "expectation": "Fragment responses and interrupt long connections. Measure client retries and errors; unchanged error rate is not yet proven.",
-    "observe": "Database client spans, gateway resilience metrics and k6 error rate."
+    "expectation": "Database responses arrive fragmented and long connections are cut; pooled reconnects and gateway retries keep user-visible errors flat.",
+    "observe": "k6 error rate, database client spans and gateway retry metrics."
   },
   {
     "id": "service-killed",
-    "label": "Tracking stopped (blocked)",
-    "available": false,
-    "proxy": "telemetry",
-    "toxics": [],
-    "expectation": "Blocked: live tracking and the map are not present; requires #10.",
-    "observe": "No active map-freeze drill evidence exists."
+    "label": "Tracking stopped",
+    "kind": "container",
+    "requires": "full",
+    "service": "telemetry",
+    "expectation": "The live map freezes with its last marker in place; rentals, listing and the rest of the console continue.",
+    "observe": "Console Live map (Frozen · reconnecting), telemetry target health in Prometheus, rental creation in Grafana."
+  },
+  {
+    "id": "cassandra-down",
+    "label": "Cassandra down",
+    "kind": "toxic",
+    "requires": "full",
+    "proxy": "cassandra",
+    "toxics": [
+      {
+        "name": "cassandra-down",
+        "type": "timeout",
+        "value": 0
+      }
+    ],
+    "expectation": "Trip history stops; live positions are still accepted and served from Redis, and rental creation is unaffected.",
+    "observe": "traces_span_metrics_calls_total{span_name=\"cassandra.position\",status_code=\"STATUS_CODE_ERROR\"} and the console Live map."
+  },
+  {
+    "id": "risk-pricing-stopped",
+    "label": "Risk-pricing stopped",
+    "kind": "container",
+    "requires": "full",
+    "service": "risk-pricing",
+    "expectation": "Demand-based pricing stops; rentals are priced on the last published table, and unscored riders pay the base rate.",
+    "observe": "dependency_degradations_total{dependency=\"risk-pricing\"} and projecty_risk_projection_oldest_score_age_seconds."
+  },
+  {
+    "id": "billing-stopped",
+    "label": "Billing stopped",
+    "kind": "container",
+    "requires": "full",
+    "service": "billing",
+    "expectation": "The rental screen still lists every rental and says it is shown without invoices; creation and tracking continue.",
+    "observe": "Console rental list (without invoices) and api-gateway 5xx for /api/invoices in Grafana."
   }
 ]

@@ -234,5 +234,7 @@ if orchestrator == 'compose':
     chaos_shell = 'powershell' if os.name == 'nt' else 'pwsh'
     chaos_prefix = [chaos_shell, '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', 'scripts/Invoke-ChaosDrill.ps1']
     for drill in read_json('deploy/chaos/drills.json'):
-        cmd_button('chaos-' + drill['id'], resource = 'toxiproxy', argv = chaos_prefix + [drill['id']], text = drill['label'], disabled = not drill['available'])
-        cmd_button('chaos-clear-' + drill['id'], resource = 'toxiproxy', argv = chaos_prefix + [drill['id'], '-Clear'], text = 'Clear: ' + drill['label'], disabled = not drill['available'])
+        # Kafka, Cassandra, tracking and risk-pricing exist only in the full topology.
+        unavailable = drill['requires'] == 'full' and not full
+        cmd_button('chaos-' + drill['id'], resource = 'toxiproxy', argv = chaos_prefix + [drill['id']], text = drill['label'], disabled = unavailable)
+        cmd_button('chaos-clear-' + drill['id'], resource = 'toxiproxy', argv = chaos_prefix + [drill['id'], '-Clear'], text = 'Clear: ' + drill['label'], disabled = unavailable)
