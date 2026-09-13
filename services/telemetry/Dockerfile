@@ -1,4 +1,4 @@
-FROM elixir:1.18.4-otp-27-alpine AS development
+FROM elixir:1.20.3-otp-29-alpine AS development
 WORKDIR /workspace
 RUN apk upgrade --no-cache && apk add --no-cache build-base cmake protobuf curl
 RUN mix local.hex --force && mix local.rebar --force
