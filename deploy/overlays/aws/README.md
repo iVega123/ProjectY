@@ -1,11 +1,12 @@
-# AWS overlay placeholder
+# AWS Mid overlay
 
-This directory is reserved for the AWS deployment variant. It will contain only
-AWS-specific composition: managed-service endpoints, ingress and storage
-classes, workload identity, secret-provider references, image registries, and
-the selected cost profile. Canonical service contracts and dependency topology
-remain under `deploy/base/`.
+This overlay is the `aws-mid` workload composition. It installs a three-broker
+Kafka cluster through the Strimzi operator, replaces the base Kafka container
+with a stable bootstrap-service alias, reads runtime credentials from AWS
+Secrets Manager, and selects the production replica shape. Canonical service
+contracts and dependency topology remain under `deploy/base/`.
 
-The AWS overlay will land with the AWS/Terraform epic. It must be developed in
-the same repository tree and merged through short-lived task branches; it is
-not a long-lived environment branch.
+`infra/envs/aws-mid/30-workloads` owns the Strimzi Helm release before applying
+this Kustomize overlay. The deliberately cheaper single-container composition
+lives in `deploy/overlays/aws-low`; managed MSK is declared only in the
+review-only `infra/envs/aws-high` root.

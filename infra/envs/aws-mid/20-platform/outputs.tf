@@ -5,7 +5,13 @@ output "network" {
 
 output "connections" {
   description = "Data connections re-exported to 30-workloads."
-  value       = data.terraform_remote_state.data.outputs.connections
+  value = merge(data.terraform_remote_state.data.outputs.connections, {
+    event_bus = {
+      endpoint         = "projecty-kafka-kafka-bootstrap.projecty.svc.cluster.local"
+      port             = 9092
+      secret_reference = null
+    }
+  })
 }
 
 output "object_store" {

@@ -26,7 +26,7 @@ provider "registry.terraform.io/cockroachdb/cockroach" {
 
 provider "registry.terraform.io/hashicorp/aws" {
   version     = "6.64.0"
-  constraints = ">= 6.0.0, < 7.0.0"
+  constraints = ">= 6.0.0, 6.64.0, < 7.0.0"
   hashes = [
     "h1:/wtl8WUDUuXhCa2iiZA4Qm2uwo3sAi0zegrHiC7YiJ0=",
     "zh:07172315d67bc9781240272759cdfc7bd32b7e72384a56862c2c1da3cca99a81",
@@ -50,7 +50,7 @@ provider "registry.terraform.io/hashicorp/aws" {
 
 provider "registry.terraform.io/hashicorp/random" {
   version     = "3.9.1"
-  constraints = ">= 3.6.0, < 4.0.0"
+  constraints = ">= 3.6.0, 3.9.1, < 4.0.0"
   hashes = [
     "h1:7uiStw0Rl9KOdX5UNMG/sp9nyadoD4LZekQTiYlYPhE=",
     "zh:05f4734c1f0be840b711b3eff259ebc5fca436784c728955b1678078466f48d7",
