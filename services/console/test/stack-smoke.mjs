@@ -56,7 +56,20 @@ assert.ok(spans.some(s=>s.service==='api-gateway'),'Missing gateway trace');
 assert.ok(spans.some(s=>s.service==='rental-core'),'Missing rental trace');
 assert.ok(spans.some(s=>s.service==='telemetry'),'Missing Kafka telemetry consumer trace');
 assert.ok(spans.some(s=>s.service==='risk-pricing'),'Missing risk consumer trace');
-const metrics=await get('/api/metrics');
+// Os números globais chegam por push no metrics:global (#194). Esperar um push,
+// e não só a resposta do join, é o que prova que o telemetry está medindo.
+const live=await get('/api/metrics');
+const metrics=await new Promise((resolve,reject)=>{
+  const ws=new WebSocket(live.socketUrl+'?vsn=2.0.0&ticket='+encodeURIComponent(live.ticket));
+  const timeout=setTimeout(()=>{ws.close();reject(new Error('Global metrics were not pushed'))},25000);
+  ws.onopen=()=>ws.send(JSON.stringify(['1','1','metrics:global','phx_join',{}]));
+  ws.onmessage=({data})=>{
+    const [,ref,,event,body]=JSON.parse(data);
+    if(event==='phx_reply' && ref==='1' && body.status!=='ok') {clearTimeout(timeout);ws.close();reject(new Error(JSON.stringify(body)))}
+    if(event==='metrics') {clearTimeout(timeout);ws.close();resolve(body)}
+  };
+  ws.onerror=()=>{};
+});
 const report={measuredAt:new Date().toISOString(),action:{...action,grant:undefined},rentalId:rental.rentalId,position,services:[...new Set(spans.map(s=>s.service))],spans,metrics};
 writeFileSync('docs/measurements/polyglot-api.json',JSON.stringify(report,null,2)+'\n');
 writeFileSync('.env.console-session.json',JSON.stringify({token,cookie,rentalId:rental.rentalId,cursor,action}));

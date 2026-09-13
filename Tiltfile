@@ -109,7 +109,7 @@ if orchestrator == 'kubernetes':
             'default-deny', 'allow-dns', 'ingress-only-reaches-edge', 'gateway-to-owned-dependencies',
             'console-to-gateway', 'gateway-to-service-ingress', 'identity-to-owned-dependencies',
             'identity-to-media-guard', 'rental-core-to-owned-dependencies', 'billing-to-owned-dependencies',
-            'risk-pricing-to-owned-dependencies', 'telemetry-to-owned-dependencies', 'cockroachdb-owners',
+            'risk-pricing-to-owned-dependencies', 'telemetry-to-owned-dependencies', 'telemetry-cluster', 'cockroachdb-owners',
             'rabbitmq-owner', 'redis-owners', 'minio-owners', 'kafka-clients', 'cassandra-clients',
             'schema-registry-clients', 'data-service-egress', 'setup-to-data',
         ]

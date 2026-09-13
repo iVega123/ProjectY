@@ -39,6 +39,7 @@ $values['RABBITMQ_DEFAULT_PASS'] = $values['RENTAL_OPERATIONS_RABBITMQ_PASSWORD'
 $values['GatewayIdentity__SigningKey'] = $values['GATEWAY_IDENTITY_SIGNING_KEY']
 $values['TELEMETRY_SECRET_KEY_BASE'] = $values['GATEWAY_IDENTITY_SIGNING_KEY']
 $values['TELEMETRY_TICKET_KEY'] = $values['GATEWAY_IDENTITY_SIGNING_KEY']
+$values['TELEMETRY_RELEASE_COOKIE'] = $values['GATEWAY_IDENTITY_SIGNING_KEY']
 
 $data = @{}
 foreach ($entry in $values.GetEnumerator()) {

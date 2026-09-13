@@ -57,10 +57,29 @@ export default function Console() {
   },[]);
   useEffect(() => {
     if (!user) return;
-    let active = true;
-    const read = () => json('/api/metrics').then(data => {if(active) setMetrics(data)}).catch(() => {if(active) setMetrics(null)});
-    read(); const timer = setInterval(read,10000);
-    return () => {active=false; clearInterval(timer)};
+    // Os números são globais e chegam por push (#194): a aba se autentica uma vez
+    // por conexão e depois só escuta. O heartbeat é um quadro no socket aberto,
+    // não uma requisição a serviço nenhum.
+    let cancelled=false; let ws:WebSocket|null=null; let retry:ReturnType<typeof setTimeout>; let heartbeat:ReturnType<typeof setInterval>;
+    async function connect() {
+      try {
+        const auth = await json('/api/metrics');
+        if(cancelled) return;
+        const socket = ws = new WebSocket(auth.socketUrl+'?vsn=2.0.0&ticket='+encodeURIComponent(auth.ticket));
+        socket.onopen = () => socket.send(JSON.stringify(['1','1','metrics:global','phx_join',{}]));
+        socket.onmessage = ({data}) => {
+          const [,ref,,event,body] = JSON.parse(data);
+          if(event==='phx_reply' && ref==='1') {if(body.status!=='ok') socket.close(); else if(body.response?.metrics) setMetrics(body.response.metrics)}
+          if(event==='metrics') setMetrics(body);
+          if(event==='phx_close' || event==='phx_error') socket.close();
+        };
+        socket.onclose = () => {clearInterval(heartbeat); if(!cancelled) {setMetrics(null); retry=setTimeout(connect,5000)}};
+        socket.onerror = () => socket.close();
+        heartbeat=setInterval(() => {if(socket.readyState===WebSocket.OPEN) socket.send(JSON.stringify([null,String(++requestId.current),'phoenix','heartbeat',{}]))},25000);
+      } catch {if(!cancelled) {setMetrics(null); retry=setTimeout(connect,10000)}}
+    }
+    connect();
+    return () => {cancelled=true; clearTimeout(retry); clearInterval(heartbeat); ws?.close()};
   },[user]);
   useEffect(() => {
     setPosition(null); setPresence(0);

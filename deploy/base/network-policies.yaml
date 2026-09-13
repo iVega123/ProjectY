@@ -190,6 +190,25 @@ spec:
         - {protocol: TCP, port: 6379}
         - {protocol: TCP, port: 9042}
 ---
+# Replicas of telemetry talk to each other, and only to each other, on epmd and
+# the one distribution port pinned in rel/vm.args.eex (#194).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: telemetry-cluster}
+spec:
+  podSelector: {matchLabels: {app.kubernetes.io/name: telemetry}}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from: [{podSelector: {matchLabels: {app.kubernetes.io/name: telemetry}}}]
+      ports:
+        - {protocol: TCP, port: 4369}
+        - {protocol: TCP, port: 9100}
+  egress:
+    - to: [{podSelector: {matchLabels: {app.kubernetes.io/name: telemetry}}}]
+      ports:
+        - {protocol: TCP, port: 4369}
+        - {protocol: TCP, port: 9100}
+---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata: {name: cockroachdb-owners}

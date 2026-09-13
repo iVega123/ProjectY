@@ -209,6 +209,60 @@ async fn metrics(State(state): State<Arc<AppState>>) -> Response {
         .into_response()
 }
 
+#[derive(Serialize)]
+struct SessionIdentity {
+    subject: String,
+    roles: Vec<String>,
+}
+
+/// Quem é o portador deste token, e mais nada (#194).
+///
+/// O console precisava de uma sessão válida e do sujeito para servir números
+/// globais, e para isso lia uma página de até cem aluguéis e a jogava fora. Aqui
+/// a conferência é a de qualquer rota -- assinatura, emissor, audiência,
+/// validade -- e a resposta sai sem upstream, sem banco e sem Redis.
+///
+/// A audiência é a do rental-core porque é com ela que o console lê: um token
+/// que passa aqui passa nas leituras que a tela faz em seguida. Revogação não é
+/// consultada, como em toda leitura (ADR 0017), e a cota também não: não há
+/// upstream a proteger, e conferir o token com a JWKS em cache custa menos que a
+/// ida ao Redis que a cota faria.
+///
+/// Ela é atendida dentro do proxy, e não numa rota própria do Router, para
+/// passar pelo mesmo span `gateway.request` e pela mesma recusa de caminho não
+/// canônico que as outras rotas. Numa rota própria, o CodeQL também lia o
+/// `State` do handler como entrada do cliente e apontava a busca da JWKS -- uma
+/// URL de configuração -- como SSRF (alerta #11).
+async fn session(
+    state: &AppState,
+    method: &Method,
+    headers: &HeaderMap,
+    uri: &axum::http::Uri,
+) -> Response {
+    if method != Method::GET {
+        return problem(
+            StatusCode::METHOD_NOT_ALLOWED,
+            "urn:projecty:problem:method-not-allowed",
+            "Method not allowed",
+            "The session is only read.",
+            uri.to_string(),
+        );
+    }
+    let audience = state
+        .config
+        .auth
+        .audiences
+        .for_upstream(UpstreamName::RentalOperations);
+    match state.authenticator.authenticate(headers, audience).await {
+        Ok(identity) => Json(SessionIdentity {
+            subject: identity.subject,
+            roles: identity.roles,
+        })
+        .into_response(),
+        Err(error) => authentication_problem(error, uri),
+    }
+}
+
 async fn proxy(State(state): State<Arc<AppState>>, request: Request) -> Response {
     let parent_context = global::get_text_map_propagator(|propagator| {
         propagator.extract(&HeaderExtractor(request.headers()))
@@ -250,6 +304,9 @@ async fn proxy_inner(state: Arc<AppState>, request: Request) -> Response {
             "Clients must not send x-identity-* headers.",
             request.uri().to_string(),
         );
+    }
+    if path == "/session" {
+        return session(&state, request.method(), request.headers(), request.uri()).await;
     }
     let Some((upstream_name, base_url)) = state.config.upstreams.resolve(&path) else {
         return problem(
@@ -2201,6 +2258,76 @@ projecty.identity"
         assert_eq!(response.headers()[http::header::RETRY_AFTER], "1");
         assert_eq!(revocation.checks.load(Ordering::SeqCst), 1);
         assert_eq!(state.upstream_requests.load(Ordering::SeqCst), 0);
+    }
+
+    /// O #194: a sessão do console é conferida sem upstream nenhum, e a resposta
+    /// é o sujeito que o token carrega.
+    #[tokio::test]
+    async fn answers_who_the_session_is_without_an_upstream() {
+        let issuer = TestIssuer::new("session-key");
+        let (upstream, state) = spawn_security_upstream(Some(issuer.jwks())).await;
+        let mut config = test_config(upstream.clone());
+        config.auth.jwks_url = upstream.join(".well-known/jwks.json").unwrap();
+        let app = build_app(config).unwrap();
+        let token = issuer.token("projecty.rental-operations", &["Rider"]);
+        let response = app
+            .oneshot(
+                HttpRequest::get("/session")
+                    .header(AUTHORIZATION, format!("Bearer {token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(state.upstream_requests.load(Ordering::SeqCst), 0);
+        let body = response_json(response).await;
+        assert_eq!(body["subject"], "rider-123");
+        assert_eq!(body["roles"], json!(["Rider"]));
+    }
+
+    /// E ela é a mesma porta das outras rotas: sem token, ou com um token de
+    /// outra audiência, não há sujeito nenhum a devolver.
+    #[tokio::test]
+    async fn refuses_a_session_without_a_token_for_the_rental_audience() {
+        let issuer = TestIssuer::new("session-refusal-key");
+        let (upstream, _) = spawn_security_upstream(Some(issuer.jwks())).await;
+        let mut config = test_config(upstream.clone());
+        config.auth.jwks_url = upstream.join(".well-known/jwks.json").unwrap();
+        let app = build_app(config).unwrap();
+        let billing_token = issuer.token("projecty.billing", &["Rider"]);
+
+        for authorization in [None, Some(format!("Bearer {billing_token}"))] {
+            let mut request = HttpRequest::get("/session");
+            if let Some(value) = authorization {
+                request = request.header(AUTHORIZATION, value);
+            }
+            let response = app
+                .clone()
+                .oneshot(request.body(Body::empty()).unwrap())
+                .await
+                .unwrap();
+
+            assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+            assert_eq!(
+                response.headers()[WWW_AUTHENTICATE],
+                "Bearer error=\"invalid_token\""
+            );
+        }
+
+        // Só se lê a sessão; escrever nela não chega nem a conferir o token.
+        let rental_token = issuer.token("projecty.rental-operations", &["Rider"]);
+        let response = app
+            .oneshot(
+                HttpRequest::post("/session")
+                    .header(AUTHORIZATION, format!("Bearer {rental_token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::METHOD_NOT_ALLOWED);
     }
 
     #[tokio::test]

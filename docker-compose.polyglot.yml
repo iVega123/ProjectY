@@ -30,7 +30,6 @@ services:
       TELEMETRY_PUBLIC_URL: ws://localhost:4000/socket/websocket
       TELEMETRY_TICKET_KEY: '${GATEWAY_IDENTITY_SIGNING_KEY:?Set local signing key}'
       TEMPO_URL: http://tempo:3200
-      PROMETHEUS_URL: http://prometheus:9090
     healthcheck:
       test: [CMD, node, -e, "fetch('http://localhost:3001/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 10s
@@ -172,6 +171,8 @@ services:
     environment:
       TELEMETRY_SECRET_KEY_BASE: '${GATEWAY_IDENTITY_SIGNING_KEY:?Set local signing key}'
       TELEMETRY_TICKET_KEY: '${GATEWAY_IDENTITY_SIGNING_KEY:?Set local signing key}'
+      # The console's global numbers are measured here and pushed (#194).
+      PROMETHEUS_URL: http://prometheus:9090
       OTEL_SERVICE_NAME: telemetry
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
       OTEL_EXPORTER_OTLP_PROTOCOL: http_protobuf

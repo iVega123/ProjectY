@@ -5,4 +5,7 @@ if config_env() != :test do
     secret_key_base:
       Base.encode64(:crypto.hash(:sha512, System.fetch_env!("TELEMETRY_SECRET_KEY_BASE"))),
     check_origin: String.split(System.get_env("TELEMETRY_ORIGINS", "//localhost:3001"), ",")
+
+  # The headless service that lists every replica. Unset, the node runs alone.
+  config :projecty_telemetry, :dns_cluster_query, System.get_env("DNS_CLUSTER_QUERY")
 end

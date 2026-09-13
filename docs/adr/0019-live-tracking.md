@@ -17,6 +17,18 @@ replicas, bounds each rider/day partition to 86,400 rows. Redis keeps the last
 position and active rental state with the same TTL.
 Instances must share Redis and connect BEAM distribution for cross-node Presence.
 
+Replicas cluster through DNS (#194): each pod names its node after its IP,
+`DNS_CLUSTER_QUERY` resolves a headless service, and a NetworkPolicy opens epmd
+and one pinned distribution port between telemetry pods only. The cookie comes
+from the secret store, not the image.
+
+The same socket carries `metrics:global`, the console's three global numbers.
+One node, the smallest name in the cluster, queries Prometheus once per interval
+and broadcasts to every node, so neither users nor replicas multiply the
+queries. The topic tracks no Presence, because nobody reads its membership, and
+its channel does not expire with the ticket, because the open connection is
+what replaces per-tab polling. Per-user data stays request/response.
+
 ## Alternatives and costs
 
 Node WebSockets would reuse the console runtime but require implementing

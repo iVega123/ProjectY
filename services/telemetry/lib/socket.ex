@@ -1,9 +1,14 @@
 defmodule ProjectYTelemetry.Socket do
   use Phoenix.Socket
   channel("rental:*", ProjectYTelemetry.Channel)
+  channel("metrics:global", ProjectYTelemetry.MetricsChannel)
 
   # The console BFF issues a short-lived HMAC ticket only after an authenticated
   # gateway rental read. Ticket identity is independent of client position data.
+  #
+  # A ticket without a rental_id comes from the console's metrics route, after
+  # the gateway has only confirmed the session (#194). It opens metrics:global
+  # and no rental channel: joining rental:{id} requires the id the ticket carries.
   def connect(%{"ticket" => ticket}, socket, _info) do
     with [payload, signature] <- String.split(ticket, "."),
          {:ok, decoded} <- Base.url_decode64(payload, padding: false),
@@ -11,8 +16,9 @@ defmodule ProjectYTelemetry.Socket do
          expected <-
            :crypto.mac(:hmac, :sha256, System.fetch_env!("TELEMETRY_TICKET_KEY"), payload),
          true <- Plug.Crypto.secure_compare(mac, expected),
-         {:ok, %{"rider_id" => rider, "rental_id" => rental, "exp" => exp}} <-
-           Jason.decode(decoded),
+         {:ok, %{"rider_id" => rider, "exp" => exp} = claims} <- Jason.decode(decoded),
+         rental = Map.get(claims, "rental_id"),
+         true <- is_binary(rider) and (is_nil(rental) or is_binary(rental)),
          true <-
            is_integer(exp) and exp > System.system_time(:second) and
              exp <= System.system_time(:second) + 300 do

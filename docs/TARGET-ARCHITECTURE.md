@@ -273,10 +273,11 @@ The relay line is the sharpest: the benchmark creates ~7.3 rentals/s against a
 faster than it drains for the length of every load run, and empties afterwards.
 Nothing asserts on drain latency, only on depth, so it has never been seen.
 
-The load floor has the same shape on the read side: an idle console tab polls
-six times a minute, and each poll fetches a page of a hundred rentals to
+The load floor had the same shape on the read side: an idle console tab polled
+six times a minute, and each poll fetched a page of a hundred rentals to
 validate a session ([#194](https://github.com/iVega123/ProjectY/issues/194)).
-That cost scales with the number of **users**, not with what they do.
+That cost scaled with the number of **users**, not with what they did. The tab
+now authenticates once per connection, and telemetry pushes the global numbers.
 
 **The cheapest way to close this is not a load test.** It is running two
 replicas of everything, with no load at all, and fixing what appears. Meeting
@@ -312,8 +313,8 @@ leaves the repository demonstrable at the end of it.
    floor 4, and the only one that meets the failures while the system is calm.
    [#192](https://github.com/iVega123/ProjectY/issues/192) and
    [#70](https://github.com/iVega123/ProjectY/issues/70) are what it finds first.
-2. **The console's load floor** — [#194](https://github.com/iVega123/ProjectY/issues/194).
-   Until an idle tab costs nothing, any measurement is mostly measuring the poll.
+2. **The console's load floor** — [#194](https://github.com/iVega123/ProjectY/issues/194),
+   **done**: an idle tab holds a socket and makes no periodic request.
 3. **CockroachDB on more than one node**, with a connection budget per pod.
 4. **Epic 10** — the cluster, TLS terminated at the ingress
    ([#100](https://github.com/iVega123/ProjectY/issues/100), decided in ADR 0025),

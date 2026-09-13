@@ -293,8 +293,19 @@ spec:
           envFrom:
             - configMapRef: {name: projecty-runtime}
             - secretRef: {name: telemetry-secrets}
-          env: [{name: OTEL_SERVICE_NAME, value: telemetry}]
-          ports: [{name: http, containerPort: 4000}]
+          env:
+            - {name: OTEL_SERVICE_NAME, value: telemetry}
+            # BEAM distribution between replicas, so Presence and the
+            # metrics:global broadcast reach clients on every pod (#194). The
+            # node is named after the pod IP (rel/env.sh.eex) and finds the
+            # others through the headless service below.
+            - name: POD_IP
+              valueFrom: {fieldRef: {fieldPath: status.podIP}}
+            - {name: DNS_CLUSTER_QUERY, value: telemetry-cluster.projecty.svc.cluster.local}
+          ports:
+            - {name: http, containerPort: 4000}
+            - {name: epmd, containerPort: 4369}
+            - {name: distribution, containerPort: 9100}
           startupProbe: {httpGet: {path: /health/ready, port: http}, periodSeconds: 5, failureThreshold: 36}
           readinessProbe: {httpGet: {path: /health/ready, port: http}, periodSeconds: 5}
           livenessProbe: {httpGet: {path: /health/live, port: http}, periodSeconds: 10}
@@ -314,6 +325,18 @@ metadata: {name: telemetry}
 spec:
   selector: {app.kubernetes.io/name: telemetry}
   ports: [{name: http, port: 4000, targetPort: http}]
+---
+# One A record per replica, which is what DNS_CLUSTER_QUERY resolves. Not-ready
+# pods are listed too: readiness is about Redis, and a replica should join the
+# cluster before it takes traffic, not after.
+apiVersion: v1
+kind: Service
+metadata: {name: telemetry-cluster}
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  selector: {app.kubernetes.io/name: telemetry}
+  ports: [{name: epmd, port: 4369, targetPort: epmd}]
 ---
 apiVersion: apps/v1
 kind: Deployment
