@@ -2,7 +2,7 @@
 # .proto de contracts/ e o teste aplica o schema de deploy/db/sql. Copiar os
 # dois para cá seria manter duas cópias do que o #132 e o ADR 0004 decidiram ter
 # uma só.
-FROM gradle:8.14.3-jdk21-alpine AS development
+FROM gradle:9.7.1-jdk21-alpine AS development
 WORKDIR /src/services/billing
 COPY contracts /src/contracts
 COPY deploy/db/sql /src/deploy/db/sql
@@ -18,7 +18,7 @@ ENTRYPOINT ["gradle", "--no-daemon", "run"]
 FROM development AS builder
 RUN gradle --no-daemon --quiet installDist
 
-FROM eclipse-temurin:21-jre-alpine AS final
+FROM eclipse-temurin:25-jre-alpine AS final
 RUN apk upgrade --no-cache && apk add --no-cache curl
 WORKDIR /app
 # O agente do OpenTelemetry é a única parte da observabilidade que a JVM entrega
