@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
+import Link from 'next/link';
 import type { Attempt, Composed, Metrics, Position, RiderCard, Span } from '../lib/types';
 const LiveMap = dynamic(() => import('./map'), {ssr:false});
 const money = (n:number) => new Intl.NumberFormat('en-US',{style:'currency',currency:'BRL'}).format(n);
@@ -143,7 +144,7 @@ export default function Console() {
   const traceStart=spans.length ? Math.min(...spans.map(s=>s.start)) : 0;
   const traceLength=spans.length ? Math.max(...spans.map(s=>s.start+s.duration))-traceStart : 1;
   return <div className="shell">
-    <aside className="rail"><a className="brand" href="/" aria-label="ProjectY home">Y<span>↗</span></a><div className="rail-word">OPERATIONS</div><span className="rail-foot">PY / 10</span></aside>
+    <aside className="rail"><Link className="brand" href="/" aria-label="ProjectY home">Y<span>↗</span></Link><div className="rail-word">OPERATIONS</div><span className="rail-foot">PY / 10</span></aside>
     <main><header><div className="breadcrumb">PROJECT Y <span>/</span> OPERATIONS CONSOLE</div><div className="header-state"><i className={user?'dot':'dot muted'}/>{user?(rider?rider.name+' · CNH '+rider.cnhType:'Session connected'):'Sign-in required'}</div></header>
       <section className="intro"><div><div className="eyebrow">THE SYSTEM, IN MOTION</div><h1>Watch every move<span>.</span></h1><p>From a rider on the street to the events behind the ride.</p></div><div className="clock">{new Date(now).toISOString().slice(11,19)}<small>UTC / LIVE WORKSPACE</small></div></section>
       {!user && <form className="login panel" onSubmit={login}><div><strong>Connect to your fleet</strong><p>Use an access token from your configured identity provider.</p></div><label className="token-input">Gateway access token<input name="token" type="password" required autoComplete="off" maxLength={8192}/></label><button>Connect ↗</button></form>}
