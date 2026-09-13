@@ -59,6 +59,8 @@ builder.Services.AddSingleton(rabbit);
 // instrução em vez de um protocolo entre dois bancos.
 var connectionString = builder.Configuration.GetConnectionString("Postgresql")
     ?? throw new InvalidOperationException("ConnectionStrings:Postgresql is not configured.");
+// Bounded before anything opens a connection: see DatabaseDeadlines.
+connectionString = DatabaseDeadlines.Apply(connectionString);
 var database = new NpgsqlConnectionStringBuilder(connectionString);
 builder.Services
     .AddProjectYHealthChecks()

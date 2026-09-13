@@ -27,6 +27,8 @@ pub struct ResilienceConfig {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct UpstreamResilienceConfig {
     pub timeout: Duration,
+    /// The whole client request, retries included. No attempt outlives it.
+    pub deadline: Duration,
     pub max_concurrency: usize,
     pub breaker_failure_threshold: u32,
     pub breaker_open_duration: Duration,
@@ -363,6 +365,14 @@ fn upstream_resilience_from_env(
         &format!("{prefix}_TIMEOUT_MS"),
         default_timeout_ms,
     )?);
+    // Defaults to the per-attempt timeout: retries spend what is left of one
+    // budget instead of multiplying it. Without this, three 2.5 s attempts
+    // outlast any client that gives up at 5 s, and a request the client
+    // abandoned is never counted against the breaker.
+    let deadline = Duration::from_millis(positive_u64_from_env(
+        &format!("{prefix}_DEADLINE_MS"),
+        u64::try_from(timeout.as_millis()).unwrap_or(u64::MAX),
+    )?);
     let max_concurrency = positive_u64_from_env(&format!("{prefix}_MAX_CONCURRENCY"), 64)?;
     let breaker_failure_threshold =
         positive_u64_from_env(&format!("{prefix}_BREAKER_FAILURE_THRESHOLD"), 5)?;
@@ -397,6 +407,7 @@ fn upstream_resilience_from_env(
     }
     Ok(UpstreamResilienceConfig {
         timeout,
+        deadline,
         max_concurrency: usize::try_from(max_concurrency)
             .map_err(|_| format!("{prefix}_MAX_CONCURRENCY is too large"))?,
         breaker_failure_threshold: u32::try_from(breaker_failure_threshold)

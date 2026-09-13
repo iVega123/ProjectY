@@ -26,9 +26,21 @@ public static class LocalPricing
     private static PriceTable current = JsonSerializer.Deserialize<PriceTable>(
         File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "pricing-policy.json")))!;
     public static decimal DailyRate(int days) => Volatile.Read(ref current).Tiers.First(t => days <= t.MaxDays).DailyMinor / 100m;
-    public static decimal DailyRate(int days, string rider) => decimal.Round(
-        DailyRate(days) * (Scores.TryGetValue(rider, out var risk) && risk.Score <= 30 ? 0.95m : 1m),
-        2, MidpointRounding.AwayFromZero);
+    /// <summary>
+    /// The price never waits for risk-pricing. Without a published table the
+    /// packaged one applies; without a score the rider pays the base rate. Both
+    /// are the declared fallback, so both are counted rather than silent.
+    /// </summary>
+    public static decimal DailyRate(int days, string rider)
+    {
+        if (Interlocked.Read(ref tableAt) == 0) Degradation.Record("risk-pricing", "packaged-price-table");
+        if (!Scores.TryGetValue(rider, out var risk))
+        {
+            Degradation.Record("risk-pricing", "unscored-base-rate");
+            return DailyRate(days);
+        }
+        return decimal.Round(DailyRate(days) * (risk.Score <= 30 ? 0.95m : 1m), 2, MidpointRounding.AwayFromZero);
+    }
     public static void ApplyScore(string rider, int score, long at)
     {
         if (string.IsNullOrWhiteSpace(rider) || score is < 0 or > 100 || at <= 0)
@@ -45,7 +57,7 @@ public static class LocalPricing
         {
             if (at < tableAt) return;
             Volatile.Write(ref current, table);
-            tableAt = at;
+            Interlocked.Exchange(ref tableAt, at);
         }
     }
 }

@@ -435,17 +435,20 @@ async fn forward(
         0
     };
     let admission = policy.try_admit().map_err(ForwardError::Rejected)?;
+    let deadline = std::time::Instant::now() + resilience.deadline;
 
+    // Drawn when the previous attempt decides whether a retry fits, so the
+    // backoff is counted against the deadline before it is slept.
+    let mut retry_delay = std::time::Duration::ZERO;
     for attempt in 0..=max_retries {
         if attempt > 0 {
-            let delay = full_jitter_delay(resilience, attempt);
             info!(
                 upstream = ?upstream_name,
                 attempt,
-                delay_ms = delay.as_millis(),
+                delay_ms = retry_delay.as_millis(),
                 "retrying upstream request"
             );
-            tokio::time::sleep(delay).await;
+            tokio::time::sleep(retry_delay).await;
         }
 
         let client_span = info_span!(
@@ -482,12 +485,27 @@ async fn forward(
         };
 
         info!(upstream = ?upstream_name, path = %parts.uri, attempt, "proxying request");
-        let upstream_response = match upstream_request
-            .timeout(resilience.timeout)
+        let started = std::time::Instant::now();
+        let attempt_timeout = resilience
+            .timeout
+            .min(deadline.saturating_duration_since(started));
+        let sent = upstream_request
+            .timeout(attempt_timeout)
             .send()
             .instrument(client_span.clone())
-            .await
-        {
+            .await;
+        // A retry is attempted only when what is left of the deadline exceeds
+        // what this attempt took plus the backoff before the next one. An
+        // upstream that needed two seconds to refuse will not answer a retry in
+        // half a second, and waiting for it would turn its own 503 into a
+        // gateway timeout; nor may the sleep itself carry the request past it.
+        if attempt < max_retries {
+            retry_delay = full_jitter_delay(resilience, attempt + 1);
+        }
+        let retry_fits = attempt < max_retries
+            && deadline.saturating_duration_since(std::time::Instant::now())
+                > started.elapsed() + retry_delay;
+        let upstream_response = match sent {
             Ok(response) => {
                 client_span.record("http.response.status_code", response.status().as_u16());
                 if response.status().is_server_error() {
@@ -496,7 +514,7 @@ async fn forward(
                 }
                 response
             }
-            Err(error) if attempt < max_retries => {
+            Err(error) if retry_fits => {
                 client_span.record("otel.status_code", "ERROR");
                 client_span.record("error.type", error.to_string());
                 warn!(upstream = ?upstream_name, attempt, error = %error, "retryable upstream transport failure");
@@ -513,7 +531,7 @@ async fn forward(
                 };
             }
         };
-        if upstream_response.status().is_server_error() && attempt < max_retries {
+        if upstream_response.status().is_server_error() && retry_fits {
             continue;
         }
         if upstream_response.status().is_server_error() {
@@ -885,6 +903,7 @@ mod tests {
     fn test_resilience_config() -> UpstreamResilienceConfig {
         UpstreamResilienceConfig {
             timeout: Duration::from_millis(250),
+            deadline: Duration::from_millis(1_000),
             max_concurrency: 16,
             breaker_failure_threshold: 2,
             breaker_open_duration: Duration::from_millis(100),
@@ -1472,6 +1491,152 @@ mod tests {
             .unwrap();
         assert_eq!(second.status(), StatusCode::SERVICE_UNAVAILABLE);
         assert_eq!(identity_circuit_state(&app).await, "open");
+    }
+
+    /// An upstream that accepts the connection and never answers.
+    async fn spawn_silent_upstream() -> Url {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let mut held = Vec::new();
+            while let Ok((socket, _)) = listener.accept().await {
+                held.push(socket);
+            }
+        });
+        Url::parse(&format!("http://{address}/")).unwrap()
+    }
+
+    /// An upstream that takes `delay` to answer 503, counting what it receives.
+    async fn spawn_slow_refusal_upstream(delay: Duration) -> (Url, Arc<AtomicUsize>) {
+        let requests = Arc::new(AtomicUsize::new(0));
+        let counter = requests.clone();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let app = Router::new().fallback(move || {
+            let counter = counter.clone();
+            async move {
+                counter.fetch_add(1, Ordering::SeqCst);
+                tokio::time::sleep(delay).await;
+                StatusCode::SERVICE_UNAVAILABLE
+            }
+        });
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        (Url::parse(&format!("http://{address}/")).unwrap(), requests)
+    }
+
+    #[tokio::test]
+    async fn one_deadline_bounds_the_whole_request_including_retries() {
+        let mut config = test_config(spawn_silent_upstream().await);
+        config.resilience.identity.timeout = Duration::from_millis(200);
+        config.resilience.identity.deadline = Duration::from_millis(250);
+        config.resilience.identity.max_retries = 2;
+        config.resilience.identity.breaker_failure_threshold = 1;
+        let (app, _) = app_with_rate_limit(
+            config,
+            Ok(RateLimitDecision {
+                allowed: true,
+                remaining: 10,
+                retry_after_seconds: 1,
+            }),
+        );
+
+        let started = std::time::Instant::now();
+        let response = app
+            .clone()
+            .oneshot(
+                HttpRequest::post("/api/auth/login")
+                    .header("idempotency-key", "silent")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        // Three 200 ms attempts would take 600 ms; the deadline is 250 ms.
+        assert!(
+            started.elapsed() < Duration::from_millis(450),
+            "took {:?}",
+            started.elapsed()
+        );
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(response.headers()[http::header::RETRY_AFTER], "1");
+        assert_eq!(identity_circuit_state(&app).await, "open");
+    }
+
+    #[tokio::test]
+    async fn a_slow_refusal_is_returned_instead_of_retried_past_the_deadline() {
+        let (upstream, requests) = spawn_slow_refusal_upstream(Duration::from_millis(150)).await;
+        let mut config = test_config(upstream);
+        config.resilience.identity.timeout = Duration::from_millis(250);
+        config.resilience.identity.deadline = Duration::from_millis(250);
+        config.resilience.identity.max_retries = 2;
+        let (app, _) = app_with_rate_limit(
+            config,
+            Ok(RateLimitDecision {
+                allowed: true,
+                remaining: 10,
+                retry_after_seconds: 1,
+            }),
+        );
+
+        let response = app
+            .oneshot(
+                HttpRequest::post("/api/auth/login")
+                    .header("idempotency-key", "slow")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        // The upstream's own answer, not a gateway timeout, and no retry that
+        // could not have finished in the 100 ms that were left.
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(requests.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn a_retry_backoff_is_counted_against_the_deadline() {
+        let (upstream, _) = spawn_sequence_upstream(vec![
+            StatusCode::INTERNAL_SERVER_ERROR,
+            StatusCode::INTERNAL_SERVER_ERROR,
+            StatusCode::INTERNAL_SERVER_ERROR,
+        ])
+        .await;
+        let mut config = test_config(upstream);
+        config.resilience.identity.timeout = Duration::from_millis(250);
+        config.resilience.identity.deadline = Duration::from_millis(250);
+        config.resilience.identity.max_retries = 2;
+        config.resilience.identity.retry_base_delay = Duration::from_secs(10);
+        config.resilience.identity.retry_max_delay = Duration::from_secs(10);
+        let (app, _) = app_with_rate_limit(
+            config,
+            Ok(RateLimitDecision {
+                allowed: true,
+                remaining: 10,
+                retry_after_seconds: 1,
+            }),
+        );
+
+        let started = std::time::Instant::now();
+        let response = app
+            .oneshot(
+                HttpRequest::post("/api/auth/login")
+                    .header("idempotency-key", "fast-refusal")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        // The refusal is immediate, so almost all of the 250 ms is left; a
+        // backoff drawn from 0-10 s is retried only when it fits in that.
+        assert!(
+            started.elapsed() < Duration::from_millis(450),
+            "took {:?}",
+            started.elapsed()
+        );
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
     }
 
     #[tokio::test]

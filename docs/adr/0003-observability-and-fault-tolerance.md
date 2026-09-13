@@ -63,6 +63,17 @@ increments a distinct metric, so degradation is visible rather than silent.
 Fallbacks are explicit code paths, not accidents of exception handling. A row
 reading "unknown" is a defect, not an omission.
 
+> **Revised 2026-09-12 (#71).** Three rows above were written for a topology that
+> was not built. Rentals and their projections now share one CockroachDB, so
+> "reads from projections" while the primary store is down cannot happen; the
+> Redis row was already narrowed by ADR 0017, because revocation and idempotency
+> refuse closed; and pricing has no "fixed daily rate" separate from the tiered
+> table. The table is kept here as the original decision. The executable
+> contract -- what each failure actually stops, what continues, the test that
+> fails if the fallback is removed, and the drill that shows it -- is
+> [docs/degradation-contract.md](../degradation-contract.md). Where the two
+> disagree, the contract is the one with a test.
+
 Two dependencies fail in deliberately opposite directions. Rate limiting **fails
 open** — without Redis the request passes and a degradation counter rises,
 because losing the limiter beats losing availability. Token verification **fails

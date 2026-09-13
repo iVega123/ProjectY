@@ -72,37 +72,47 @@ defmodule ProjectYTelemetry.Store do
     end
   end
 
+  # Cassandra is history, not state: a failed write leaves the live position in
+  # Redis and returns :ok. The span says so, which is what makes the fallback
+  # visible -- spanmetrics exports it as
+  # traces_span_metrics_calls_total{span_name="cassandra.position",status_code="STATUS_CODE_ERROR"}.
   defp history(id, rider, p) do
     Tracer.with_span "cassandra.position", %{attributes: %{"db.system.name" => "cassandra"}} do
-      day = DateTime.from_unix!(p.recorded_at, :millisecond) |> DateTime.to_date()
-
-      statement =
-        "INSERT INTO projecty.rider_positions (rider_id, day, recorded_at, latitude, longitude, rental_id) VALUES (?, ?, ?, ?, ?, ?) USING TTL #{@ttl}"
-
-      with {:ok, query} <-
-             Xandra.prepare(ProjectYTelemetry.Cassandra, statement, timeout: 500),
-           {:ok, _} <-
-             Xandra.execute(
-               ProjectYTelemetry.Cassandra,
-               query,
-               [
-                 rider,
-                 day,
-                 p.recorded_at,
-                 p.latitude,
-                 p.longitude,
-                 id
-               ],
-               timeout: 500
-             ) do
-        :ok
-      else
-        _ -> Logger.warning("tracking history unavailable; live position retained in Redis")
+      case write_history(id, rider, p) do
+        :ok -> :ok
+        {:error, message} -> degraded(message)
       end
+    end
+  end
+
+  defp write_history(id, rider, p) do
+    day = DateTime.from_unix!(p.recorded_at, :millisecond) |> DateTime.to_date()
+
+    statement =
+      "INSERT INTO projecty.rider_positions (rider_id, day, recorded_at, latitude, longitude, rental_id) VALUES (?, ?, ?, ?, ?, ?) USING TTL #{@ttl}"
+
+    with {:ok, query} <-
+           Xandra.prepare(ProjectYTelemetry.Cassandra, statement, timeout: 500),
+         {:ok, _} <-
+           Xandra.execute(
+             ProjectYTelemetry.Cassandra,
+             query,
+             [rider, day, p.recorded_at, p.latitude, p.longitude, id],
+             timeout: 500
+           ) do
+      :ok
+    else
+      _ -> {:error, "tracking history unavailable; live position retained in Redis"}
     end
   catch
     :exit, _ ->
-      Logger.warning("tracking history connection unavailable; live position retained in Redis")
-      :ok
+      {:error, "tracking history connection unavailable; live position retained in Redis"}
+  end
+
+  defp degraded(message) do
+    Tracer.set_attribute("projecty.degradation", "cassandra")
+    Tracer.set_status(OpenTelemetry.status(:error, message))
+    Logger.warning(message)
+    :ok
   end
 end
