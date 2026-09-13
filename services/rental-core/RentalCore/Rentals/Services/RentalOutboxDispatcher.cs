@@ -57,35 +57,44 @@ public sealed class RentalOutboxDispatcher(NpgsqlDataSource database)
         TimeSpan? lease = null)
     {
         var claimToken = Guid.NewGuid();
-        var claimed = await ClaimAsync(claimToken, lease ?? ClaimLease, token);
-        var published = new List<Guid>(claimed.Count);
+        var leaseFor = lease ?? ClaimLease;
+        var claimed = await ClaimAsync(claimToken, leaseFor, token);
+        var published = 0;
+        var lostLease = false;
         Exception? failure = null;
         foreach (var pending in claimed)
         {
+            // A batch can take longer than one lease, so each row's lease is renewed
+            // just before its send. A row whose lease lapsed may already belong to
+            // another dispatcher; finding that ends the pass instead of sending it twice.
+            if (!await RenewAsync(pending.Id, claimToken, leaseFor, token))
+            {
+                lostLease = true;
+                break;
+            }
+
             try
             {
                 await transport.PublishAsync(pending, token);
-                published.Add(pending.Id);
             }
             catch (Exception error) when (!token.IsCancellationRequested)
             {
                 failure = error;
                 break;
             }
+
+            // Marked row by row and not cancellable: an event already on the topic
+            // but left unmarked is published again after the lease, which is a
+            // duplicate a shutdown later in the batch could have avoided.
+            await MarkPublishedAsync(pending.Id, claimToken, CancellationToken.None);
+            published++;
         }
 
-        // Not cancellable on purpose: an event already on the topic but left
-        // unmarked is published again after the lease, which is a duplicate the
-        // shutdown could have avoided.
-        if (published.Count > 0) await MarkPublishedAsync(published, claimToken, CancellationToken.None);
-        if (failure is not null)
-        {
-            await ReleaseAsync(claimToken, CancellationToken.None);
-            Degradation.Record("kafka", "event-propagation");
-        }
+        if (failure is not null || lostLease) await ReleaseAsync(claimToken, CancellationToken.None);
+        if (failure is not null) Degradation.Record("kafka", "event-propagation");
 
         await MeasureBacklogAsync(CancellationToken.None);
-        return new RelayPass(claimed.Count, published.Count, failure);
+        return new RelayPass(claimed.Count, published, failure);
     }
 
     private async Task<List<PendingRentalEvent>> ClaimAsync(Guid claimToken, TimeSpan lease, CancellationToken token)
@@ -137,15 +146,29 @@ public sealed class RentalOutboxDispatcher(NpgsqlDataSource database)
         return claimed;
     }
 
-    private async Task MarkPublishedAsync(List<Guid> ids, Guid claimToken, CancellationToken token)
+    private async Task<bool> RenewAsync(Guid id, Guid claimToken, TimeSpan lease, CancellationToken token)
+    {
+        await using var connection = await database.OpenConnectionAsync(token);
+        await using var command = new NpgsqlCommand("""
+            UPDATE outbox
+               SET claimed_until = now() + @lease
+             WHERE id = @id AND claim_token = @claim AND published_at IS NULL
+            """, connection);
+        command.Parameters.AddWithValue("id", id);
+        command.Parameters.AddWithValue("claim", claimToken);
+        command.Parameters.Add(new NpgsqlParameter("lease", NpgsqlDbType.Interval) { Value = lease });
+        return await command.ExecuteNonQueryAsync(token) == 1;
+    }
+
+    private async Task MarkPublishedAsync(Guid id, Guid claimToken, CancellationToken token)
     {
         await using var connection = await database.OpenConnectionAsync(token);
         await using var command = new NpgsqlCommand("""
             UPDATE outbox
                SET published_at = now(), claim_token = NULL, claimed_until = NULL
-             WHERE id = ANY(@ids) AND claim_token = @claim AND published_at IS NULL
+             WHERE id = @id AND claim_token = @claim AND published_at IS NULL
             """, connection);
-        command.Parameters.AddWithValue("ids", ids.ToArray());
+        command.Parameters.AddWithValue("id", id);
         command.Parameters.AddWithValue("claim", claimToken);
         await command.ExecuteNonQueryAsync(token);
     }

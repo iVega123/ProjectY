@@ -127,6 +127,80 @@ public sealed class OutboxDispatcherTests(RentalCoreDatabase database)
         Assert.Equal(0, await CountAsync(dataSource, "SELECT count(*) FROM outbox WHERE published_at IS NULL"));
     }
 
+    /// <summary>
+    /// A batch that outlives its lease. While the first row is being sent, the
+    /// other rows' leases lapse and a second dispatcher takes and publishes them.
+    /// Without renewing each row before its send, the first dispatcher would send
+    /// them again when it got there.
+    /// </summary>
+    [Fact]
+    [Trait("Category", "Integration")]
+    [Trait("Guarantee", "ADR-0009#transactional-outbox")]
+    public async Task ABatchThatOutlivesItsLease_DoesNotSendRowsAnotherDispatcherTook()
+    {
+        await database.ResetAsync();
+        await using var dataSource = NpgsqlDataSource.Create(database.ConnectionString);
+        var start = DateTime.UtcNow.AddMinutes(-5);
+        for (var index = 0; index < 3; index++)
+        {
+            await InsertAsync(dataSource, "slow-batch-" + index, "rental.started", start.AddMilliseconds(index));
+        }
+
+        var other = new FakeTransport();
+        var lapsed = false;
+        var slow = new FakeTransport
+        {
+            BeforePublish = async sending =>
+            {
+                if (lapsed) return;
+                lapsed = true;
+                await using (var expire = dataSource.CreateCommand(
+                    "UPDATE outbox SET claimed_until = now() - INTERVAL '1 second' WHERE id <> @id AND published_at IS NULL"))
+                {
+                    expire.Parameters.AddWithValue("id", sending.Id);
+                    await expire.ExecuteNonQueryAsync();
+                }
+                var taken = await new RentalOutboxDispatcher(dataSource).DispatchOnceAsync(other, CancellationToken.None);
+                Assert.Equal(2, taken.Published);
+            }
+        };
+
+        var pass = await new RentalOutboxDispatcher(dataSource).DispatchOnceAsync(slow, CancellationToken.None);
+
+        Assert.Equal(1, pass.Published);
+        var sent = slow.Published.Concat(other.Published).Select(item => item.Id).ToList();
+        Assert.Equal(3, sent.Count);
+        Assert.Equal(3, sent.Distinct().Count());
+        Assert.Equal(0, await CountAsync(dataSource, "SELECT count(*) FROM outbox WHERE published_at IS NULL"));
+    }
+
+    /// <summary>
+    /// Shutdown in the middle of a batch. The sends Kafka already acknowledged are
+    /// marked; only the interrupted row waits for the lease.
+    /// </summary>
+    [Fact]
+    [Trait("Category", "Integration")]
+    [Trait("Guarantee", "ADR-0009#transactional-outbox")]
+    public async Task ACancelledBatch_KeepsTheSendsAlreadyAcknowledged()
+    {
+        await database.ResetAsync();
+        await using var dataSource = NpgsqlDataSource.Create(database.ConnectionString);
+        var start = DateTime.UtcNow.AddMinutes(-5);
+        for (var index = 0; index < 3; index++)
+        {
+            await InsertAsync(dataSource, "shutdown-" + index, "rental.started", start.AddMilliseconds(index));
+        }
+
+        using var shutdown = new CancellationTokenSource();
+        var calls = 0;
+        var transport = new FakeTransport { OnPublish = () => { if (++calls == 3) shutdown.Cancel(); } };
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            new RentalOutboxDispatcher(dataSource).DispatchOnceAsync(transport, shutdown.Token));
+
+        Assert.Equal(2, transport.Published.Count);
+        Assert.Equal(2, await CountAsync(dataSource, "SELECT count(*) FROM outbox WHERE published_at IS NOT NULL"));
+    }
+
     private static async Task DrainAsync(NpgsqlDataSource dataSource, FakeTransport transport)
     {
         var dispatcher = new RentalOutboxDispatcher(dataSource);
@@ -179,12 +253,14 @@ public sealed class OutboxDispatcherTests(RentalCoreDatabase database)
         public volatile bool Available = true;
         public TimeSpan Delay { get; init; }
         public Action? OnPublish { get; init; }
+        public Func<PendingRentalEvent, Task>? BeforePublish { get; init; }
         public ConcurrentQueue<PendingRentalEvent> PublishedQueue { get; } = new();
         public IReadOnlyList<PendingRentalEvent> Published => PublishedQueue.ToList();
 
         public async Task PublishAsync(PendingRentalEvent pending, CancellationToken token)
         {
             OnPublish?.Invoke();
+            if (BeforePublish is not null) await BeforePublish(pending);
             token.ThrowIfCancellationRequested();
             if (!Available) throw new InvalidOperationException("Broker unavailable");
             if (Delay > TimeSpan.Zero) await Task.Delay(Delay, token);

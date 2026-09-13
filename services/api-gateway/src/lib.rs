@@ -437,16 +437,18 @@ async fn forward(
     let admission = policy.try_admit().map_err(ForwardError::Rejected)?;
     let deadline = std::time::Instant::now() + resilience.deadline;
 
+    // Drawn when the previous attempt decides whether a retry fits, so the
+    // backoff is counted against the deadline before it is slept.
+    let mut retry_delay = std::time::Duration::ZERO;
     for attempt in 0..=max_retries {
         if attempt > 0 {
-            let delay = full_jitter_delay(resilience, attempt);
             info!(
                 upstream = ?upstream_name,
                 attempt,
-                delay_ms = delay.as_millis(),
+                delay_ms = retry_delay.as_millis(),
                 "retrying upstream request"
             );
-            tokio::time::sleep(delay).await;
+            tokio::time::sleep(retry_delay).await;
         }
 
         let client_span = info_span!(
@@ -493,11 +495,16 @@ async fn forward(
             .instrument(client_span.clone())
             .await;
         // A retry is attempted only when what is left of the deadline exceeds
-        // what this attempt took. An upstream that needed two seconds to refuse
-        // will not answer a retry in half a second, and waiting for it would
-        // turn its own 503 into a gateway timeout.
+        // what this attempt took plus the backoff before the next one. An
+        // upstream that needed two seconds to refuse will not answer a retry in
+        // half a second, and waiting for it would turn its own 503 into a
+        // gateway timeout; nor may the sleep itself carry the request past it.
+        if attempt < max_retries {
+            retry_delay = full_jitter_delay(resilience, attempt + 1);
+        }
         let retry_fits = attempt < max_retries
-            && deadline.saturating_duration_since(std::time::Instant::now()) > started.elapsed();
+            && deadline.saturating_duration_since(std::time::Instant::now())
+                > started.elapsed() + retry_delay;
         let upstream_response = match sent {
             Ok(response) => {
                 client_span.record("http.response.status_code", response.status().as_u16());
@@ -1586,6 +1593,50 @@ mod tests {
         // could not have finished in the 100 ms that were left.
         assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
         assert_eq!(requests.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn a_retry_backoff_is_counted_against_the_deadline() {
+        let (upstream, _) = spawn_sequence_upstream(vec![
+            StatusCode::INTERNAL_SERVER_ERROR,
+            StatusCode::INTERNAL_SERVER_ERROR,
+            StatusCode::INTERNAL_SERVER_ERROR,
+        ])
+        .await;
+        let mut config = test_config(upstream);
+        config.resilience.identity.timeout = Duration::from_millis(250);
+        config.resilience.identity.deadline = Duration::from_millis(250);
+        config.resilience.identity.max_retries = 2;
+        config.resilience.identity.retry_base_delay = Duration::from_secs(10);
+        config.resilience.identity.retry_max_delay = Duration::from_secs(10);
+        let (app, _) = app_with_rate_limit(
+            config,
+            Ok(RateLimitDecision {
+                allowed: true,
+                remaining: 10,
+                retry_after_seconds: 1,
+            }),
+        );
+
+        let started = std::time::Instant::now();
+        let response = app
+            .oneshot(
+                HttpRequest::post("/api/auth/login")
+                    .header("idempotency-key", "fast-refusal")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        // The refusal is immediate, so almost all of the 250 ms is left; a
+        // backoff drawn from 0-10 s is retried only when it fits in that.
+        assert!(
+            started.elapsed() < Duration::from_millis(450),
+            "took {:?}",
+            started.elapsed()
+        );
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
     }
 
     #[tokio::test]
