@@ -13,7 +13,7 @@ services:
     depends_on:
       kafka: {condition: service_healthy}
   schema-init:
-    image: node:24-alpine
+    image: node:26-alpine
     networks: [projecty]
     volumes: [./contracts:/contracts:ro]
     command: [node, /contracts/register.mjs]
