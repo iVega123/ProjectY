@@ -171,9 +171,15 @@ func serve(settings config.Config, database *sql.DB, logger *slog.Logger) error 
 	}
 
 	sessionStore := sessions.NewStore(database, settings.RefreshTokenTTL)
+	denylist, err := startDenylist(ctx, settings, sessionStore, logger)
+	if err != nil {
+		return fmt.Errorf("abrindo a denylist: %w", err)
+	}
+	defer func() { _ = denylist.Close() }()
 	service := api.New(api.Dependencies{
 		Accounts:  accountStore,
 		Sessions:  sessionStore,
+		Denylist:  denylist,
 		Riders:    riderStore,
 		Gateway:   envelope,
 		Guard:     media.NewGuard(settings.MediaGuardURL),

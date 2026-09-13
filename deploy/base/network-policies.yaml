@@ -101,13 +101,15 @@ spec:
             matchExpressions:
               - key: app.kubernetes.io/name
                 operator: In
-                values: [cockroachdb, minio, media-guard, kafka, schema-registry]
+                values: [cockroachdb, minio, media-guard, kafka, schema-registry, redis]
       ports:
         - {protocol: TCP, port: 26257}
         - {protocol: TCP, port: 9000}
         - {protocol: TCP, port: 8092}
         - {protocol: TCP, port: 9092}
         - {protocol: TCP, port: 8080}
+        # A denylist do ADR 0017, que o identity grava ao encerrar sessão (#59).
+        - {protocol: TCP, port: 6379}
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -245,7 +247,7 @@ spec:
     - from:
         - podSelector:
             matchExpressions:
-              - {key: app.kubernetes.io/name, operator: In, values: [api-gateway, rental-core, telemetry]}
+              - {key: app.kubernetes.io/name, operator: In, values: [api-gateway, rental-core, telemetry, identity]}
       ports: [{protocol: TCP, port: 6379}]
 ---
 # Only the gateway keeps token buckets (#193).

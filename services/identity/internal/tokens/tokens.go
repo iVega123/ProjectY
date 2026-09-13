@@ -35,6 +35,29 @@ type Access struct {
 	ExpiresIn int
 }
 
+// Reservation é o que um access token vai ser antes de ter dono: o `jti` e a
+// janela de validade.
+//
+// Existe separado de [Minter.Mint] porque a sessão grava o `jti` na mesma
+// escrita que abre ou renova a família, e é isso que permite, ao sair, saber
+// quais access tokens negar (#59). Na renovação o dono só é conhecido depois de
+// o refresh token ser consumido, e o `jti` precisa estar na linha antes disso.
+type Reservation struct {
+	ID        string
+	IssuedAt  time.Time
+	ExpiresAt time.Time
+}
+
+// Reserve sorteia o `jti` e fixa a janela a partir de `now`.
+func (m Minter) Reserve(now time.Time) Reservation {
+	issuedAt := now.UTC().Truncate(time.Second)
+	return Reservation{
+		ID:        uuid.NewString(),
+		IssuedAt:  issuedAt,
+		ExpiresAt: issuedAt.Add(m.lifetime),
+	}
+}
+
 type claims struct {
 	Roles []string `json:"roles"`
 	jwt.RegisteredClaims
@@ -57,7 +80,7 @@ type claims struct {
 // responder pelo mesmo nome. Um token continua replayável nos serviços que
 // estão dentro dele -- a diferença é que agora esse conjunto é uma decisão de
 // quem emite, e não um efeito colateral de configuração.
-func (m Minter) Mint(key keys.Key, subject string, roles []string, now time.Time) (Access, error) {
+func (m Minter) Mint(key keys.Key, subject string, roles []string, reservation Reservation) (Access, error) {
 	if subject == "" {
 		return Access{}, fmt.Errorf("token sem sujeito")
 	}
@@ -65,9 +88,9 @@ func (m Minter) Mint(key keys.Key, subject string, roles []string, now time.Time
 		roles = []string{}
 	}
 
-	issuedAt := now.UTC().Truncate(time.Second)
-	expiresAt := issuedAt.Add(m.lifetime)
-	tokenID := uuid.NewString()
+	issuedAt := reservation.IssuedAt
+	expiresAt := reservation.ExpiresAt
+	tokenID := reservation.ID
 
 	token := jwt.NewWithClaims(jwt.SigningMethodEdDSA, claims{
 		Roles: roles,

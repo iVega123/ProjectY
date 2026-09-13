@@ -36,6 +36,7 @@ data:
   IDENTITY_ISSUER: projecty.identity
   IDENTITY_AUDIENCES: projecty.identity,projecty.rental-core,projecty.billing
   IDENTITY_ENVELOPE_AUDIENCE: projecty.identity
+  IDENTITY_REDIS_URL: redis://redis:6379/0
   IDENTITY_HEALTH_URL: http://127.0.0.1:8095/health/ready
   MEDIA_GUARD_URL: http://media-guard:8092
   MINIO_ENDPOINT: minio:9000

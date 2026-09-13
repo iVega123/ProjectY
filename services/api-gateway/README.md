@@ -78,7 +78,10 @@ password brute-force rule applied to a lookup.
 `POST /api/rental/create` additionally checks
 `projecty:revoked:jti:<jti>` in Redis. A present key rejects the token, and a
 Redis error or timeout returns `503` with `Retry-After: 1`; ordinary requests do
-not put Redis in their authentication path. Ambiguous paths (percent encoding,
+not put Redis in their authentication path. identity writes those keys when it
+ends a session, and rewrites them from CockroachDB every five seconds; the key
+format is pinned on both sides by `the_denylist_key_is_the_one_identity_writes`
+here and `TestTheKeyIsTheOneTheGatewayReads` in identity. Ambiguous paths (percent encoding,
 backslashes, duplicate/trailing separators, and dot segments) are rejected
 before route policy is selected so an upstream cannot normalize into a more
 privileged route.
