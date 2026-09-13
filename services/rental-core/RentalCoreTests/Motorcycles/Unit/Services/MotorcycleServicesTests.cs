@@ -58,7 +58,7 @@ namespace MotoHubTests.Unit.Services
         }
 
         [Fact]
-        public async void GetMotorcycleByLicensePlate_ExistingLicensePlate_ReturnsMotorcycleDTO()
+        public async Task GetMotorcycleByLicensePlate_ExistingLicensePlate_ReturnsMotorcycleDTO()
         {
             // Arrange
             var existingLicensePlate = "ABC123";
@@ -294,7 +294,7 @@ namespace MotoHubTests.Unit.Services
         }
 
         [Fact]
-        public async void UpdateMotorcycle_NonExistingMotorcycle_DoesNotUpdate()
+        public async Task UpdateMotorcycle_NonExistingMotorcycle_DoesNotUpdate()
         {
             // Arrange
             var nonExistingLicensePlate = "XYZ789";
