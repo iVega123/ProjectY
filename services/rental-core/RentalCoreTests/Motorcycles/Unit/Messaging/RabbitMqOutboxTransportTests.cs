@@ -12,50 +12,37 @@ public sealed class RabbitMqOutboxTransportTests
     [Fact]
     public async Task PublishAsync_EnablesAndWaitsForPublisherConfirms()
     {
-        var channel = new Mock<IModel>();
-        var properties = new Mock<IBasicProperties>();
-        properties.SetupAllProperties();
-        channel.Setup(item => item.CreateBasicProperties()).Returns(properties.Object);
-        var connection = new Mock<IConnection>();
-        connection.Setup(item => item.CreateModel()).Returns(channel.Object);
-        var connectionProvider = new Mock<IRabbitMqConnectionProvider>();
-        connectionProvider.Setup(item => item.Create()).Returns(connection.Object);
-        var options = new OutboxRelayOptions
-        {
-            ServiceName = "test",
-            HostName = "rabbitmq",
-            VirtualHost = "test",
-            UserName = "test",
-            Password = "test"
-        };
-        var transport = new RabbitMqOutboxTransport(options, connectionProvider.Object);
-        var message = new OutboxMessage
-        {
-            AggregateType = "motorcycle",
-            AggregateId = "motorcycle-1",
-            AggregateSequence = 0,
-            EventType = "motorcycle.updated.v1",
-            Destination = "motorcycle-events",
-            Payload = "{}"
-        };
+        var broker = new FakeBroker();
+        var transport = new RabbitMqOutboxTransport(Options(), broker.Provider);
+        var message = Message();
 
         await transport.PublishAsync(message, CancellationToken.None);
 
-        channel.Verify(item => item.QueueDeclare(
+        broker.Connection.Verify(item => item.CreateChannelAsync(
+            It.Is<CreateChannelOptions>(options =>
+                options.PublisherConfirmationsEnabled && options.PublisherConfirmationTrackingEnabled),
+            It.IsAny<CancellationToken>()), Times.Once);
+        broker.Channel.Verify(item => item.QueueDeclareAsync(
             message.Destination,
             true,
             false,
             false,
-            It.IsAny<IDictionary<string, object>>()), Times.Once);
-        channel.Verify(item => item.ConfirmSelect(), Times.Once);
-        channel.Verify(item => item.WaitForConfirmsOrDie(options.ConfirmationTimeout), Times.Once);
-        channel.Verify(item => item.BasicPublish(
+            It.IsAny<IDictionary<string, object?>>(),
+            It.IsAny<bool>(),
+            It.IsAny<bool>(),
+            It.IsAny<CancellationToken>()), Times.Once);
+        broker.Channel.Verify(item => item.BasicPublishAsync(
             string.Empty,
             message.Destination,
             true,
-            properties.Object,
-            It.IsAny<ReadOnlyMemory<byte>>()), Times.Once);
-        properties.VerifySet(item => item.MessageId = message.Id.ToString("D"), Times.Once);
+            It.IsAny<BasicProperties>(),
+            It.IsAny<ReadOnlyMemory<byte>>(),
+            It.IsAny<CancellationToken>()), Times.Once);
+        Assert.NotNull(broker.Published);
+        Assert.True(broker.Published.Persistent);
+        Assert.Equal(message.Id.ToString("D"), broker.Published.MessageId);
+        // The wait for the confirmation has a deadline.
+        Assert.True(broker.PublishToken.CanBeCanceled);
     }
 
     [Fact]
@@ -65,57 +52,34 @@ public sealed class RabbitMqOutboxTransportTests
         using var request = new Activity("request").SetIdFormat(ActivityIdFormat.W3C).Start();
         Assert.NotNull(request);
         request.TraceStateString = "vendor=value";
-        var message = new OutboxMessage
-        {
-            AggregateType = "motorcycle",
-            AggregateId = "motorcycle-1",
-            AggregateSequence = 0,
-            EventType = "motorcycle.updated.v1",
-            Destination = "motorcycle-events",
-            Payload = "{}"
-        };
+        var message = Message();
         var requestTraceId = request.TraceId;
         var requestSpanId = request.SpanId;
         Assert.Equal(request.Id, message.TraceParent);
         Assert.Equal(request.TraceStateString, message.TraceState);
         request.Stop();
 
-        var channel = new Mock<IModel>();
-        var properties = new Mock<IBasicProperties>();
-        properties.SetupAllProperties();
-        channel.Setup(item => item.CreateBasicProperties()).Returns(properties.Object);
-        var connection = new Mock<IConnection>();
-        connection.Setup(item => item.CreateModel()).Returns(channel.Object);
-        var connectionProvider = new Mock<IRabbitMqConnectionProvider>();
-        connectionProvider.Setup(item => item.Create()).Returns(connection.Object);
-        var transport = new RabbitMqOutboxTransport(
-            new OutboxRelayOptions
-            {
-                ServiceName = "test",
-                HostName = "rabbitmq",
-                VirtualHost = "test",
-                UserName = "test",
-                Password = "test"
-            },
-            connectionProvider.Object);
+        var broker = new FakeBroker();
+        var transport = new RabbitMqOutboxTransport(Options(), broker.Provider);
 
         await transport.PublishAsync(message, CancellationToken.None);
 
-        Assert.NotNull(properties.Object.Headers);
+        var headers = broker.Published?.Headers;
+        Assert.NotNull(headers);
         var publishedTraceParent = Encoding.UTF8.GetString(
-            Assert.IsType<byte[]>(properties.Object.Headers[MessagingTraceContext.TraceParentHeader]));
+            Assert.IsType<byte[]>(headers[MessagingTraceContext.TraceParentHeader]));
         Assert.True(ActivityContext.TryParse(publishedTraceParent, null, true, out var publishedContext));
         Assert.Equal(requestTraceId, publishedContext.TraceId);
         Assert.NotEqual(requestSpanId, publishedContext.SpanId);
         Assert.Equal(
             "vendor=value",
             Encoding.UTF8.GetString(
-                Assert.IsType<byte[]>(properties.Object.Headers[MessagingTraceContext.TraceStateHeader])));
+                Assert.IsType<byte[]>(headers[MessagingTraceContext.TraceStateHeader])));
 
         using var consumer = MessagingTraceContext.StartConsumerActivity(
             "rabbitmq",
             message.Destination,
-            properties.Object.Headers,
+            headers,
             message.Id.ToString("D"));
         Assert.NotNull(consumer);
         Assert.Equal(requestTraceId, consumer.TraceId);
@@ -123,6 +87,25 @@ public sealed class RabbitMqOutboxTransportTests
         Assert.Equal("vendor=value", consumer.TraceStateString);
         Assert.Equal(ActivityKind.Consumer, consumer.Kind);
     }
+
+    private static OutboxRelayOptions Options() => new()
+    {
+        ServiceName = "test",
+        HostName = "rabbitmq",
+        VirtualHost = "test",
+        UserName = "test",
+        Password = "test"
+    };
+
+    private static OutboxMessage Message() => new()
+    {
+        AggregateType = "motorcycle",
+        AggregateId = "motorcycle-1",
+        AggregateSequence = 0,
+        EventType = "motorcycle.updated.v1",
+        Destination = "motorcycle-events",
+        Payload = "{}"
+    };
 
     private static ActivityListener ListenToProjectYMessaging()
     {
@@ -134,5 +117,40 @@ public sealed class RabbitMqOutboxTransportTests
         };
         ActivitySource.AddActivityListener(listener);
         return listener;
+    }
+
+    private sealed class FakeBroker
+    {
+        public Mock<IChannel> Channel { get; } = new();
+        public Mock<IConnection> Connection { get; } = new();
+        public IRabbitMqConnectionProvider Provider { get; }
+        public BasicProperties? Published { get; private set; }
+        public CancellationToken PublishToken { get; private set; }
+
+        public FakeBroker()
+        {
+            Channel
+                .Setup(item => item.BasicPublishAsync(
+                    It.IsAny<string>(),
+                    It.IsAny<string>(),
+                    It.IsAny<bool>(),
+                    It.IsAny<BasicProperties>(),
+                    It.IsAny<ReadOnlyMemory<byte>>(),
+                    It.IsAny<CancellationToken>()))
+                .Callback((string _, string _, bool _, BasicProperties properties, ReadOnlyMemory<byte> _, CancellationToken token) =>
+                {
+                    Published = properties;
+                    PublishToken = token;
+                })
+                .Returns(ValueTask.CompletedTask);
+            Connection
+                .Setup(item => item.CreateChannelAsync(It.IsAny<CreateChannelOptions?>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(Channel.Object);
+            var provider = new Mock<IRabbitMqConnectionProvider>();
+            provider
+                .Setup(item => item.CreateAsync(It.IsAny<CancellationToken>()))
+                .ReturnsAsync(Connection.Object);
+            Provider = provider.Object;
+        }
     }
 }

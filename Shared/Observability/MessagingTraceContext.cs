@@ -31,7 +31,7 @@ public static class MessagingTraceContext
     public static Activity? StartConsumerActivity(
         string messagingSystem,
         string destination,
-        IDictionary<string, object>? headers,
+        IDictionary<string, object?>? headers,
         string? messageId = null)
     {
         var activity = StartActivity(
@@ -47,7 +47,7 @@ public static class MessagingTraceContext
     }
 
     public static void InjectCurrent(
-        IDictionary<string, object> headers,
+        IDictionary<string, object?> headers,
         string? fallbackTraceParent = null,
         string? fallbackTraceState = null)
     {
@@ -94,7 +94,7 @@ public static class MessagingTraceContext
         out ActivityContext parent)
         => ActivityContext.TryParse(traceParent, traceState, isRemote: true, out parent);
 
-    private static string? ReadHeader(IDictionary<string, object>? headers, string name)
+    private static string? ReadHeader(IDictionary<string, object?>? headers, string name)
     {
         if (headers is null || !headers.TryGetValue(name, out var value))
         {
@@ -111,7 +111,7 @@ public static class MessagingTraceContext
     }
 
     private static void SetHeader(
-        IDictionary<string, object> headers,
+        IDictionary<string, object?> headers,
         string name,
         string? value)
     {
