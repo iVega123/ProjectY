@@ -115,8 +115,8 @@
     "kind": "container",
     "requires": "full",
     "service": "risk-pricing",
-    "expectation": "Demand-based pricing stops; rentals are priced on the last published table, and unscored riders pay the base rate.",
-    "observe": "dependency_degradations_total{dependency=\"risk-pricing\"} and projecty_risk_projection_oldest_score_age_seconds."
+    "expectation": "Rentals are still created and priced on the last projected score and table; the rescore each rental.started causes waits in Kafka and happens when the service returns.",
+    "observe": "risk.scored stops advancing while rental.started does; projecty_risk_projection_oldest_score_age_seconds; dependency_degradations_total{dependency=\"risk-pricing\"} for riders never scored."
   },
   {
     "id": "billing-stopped",

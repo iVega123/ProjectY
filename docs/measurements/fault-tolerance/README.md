@@ -45,9 +45,9 @@ each drill through `Invoke-ChaosDrill.ps1` and clears it in a `finally`
 
 | Drill | Observed |
 |---|---|
-| service-killed (telemetry stopped) | Rental creation 200 in 453 ms; rental listing 200 |
-| risk-pricing-stopped | Rental creation 200 in 117 ms; `dependency_degradations_total{dependency="risk-pricing"}` 0 → 1 |
-| billing-stopped | Listing 200 with both rows; `missing` includes `invoices`. `rider` also appears: the fixture's token comes from a test issuer, not identity, and the drill asserts only on invoices |
+| service-killed (telemetry stopped) | Rental creation 200 in 316 ms; rental listing 200 |
+| risk-pricing-stopped | Control with the service up: a rental moved `risk.scored` 1 → 2 (creation 118 ms). Stopped: creation 200 in 107 ms, `rental.started` published, `risk.scored` unchanged at 2 after 30 s; 3 after the service returned. The fallback counter is not used as evidence: the fixture rider is unscored until risk-pricing scores it, so it counts with the service up too |
+| billing-stopped | Listing 200 with all 3 rows; `missing` includes `invoices`. `rider` also appears: the fixture's token comes from a test issuer, not identity, and the drill asserts only on invoices |
 | cassandra-down | A live position was accepted and broadcast; `cassandra.position` error calls 0 → 1 |
 
 The two database runs are the second measurement of this build. The first, before #71's

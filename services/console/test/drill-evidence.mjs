@@ -42,6 +42,14 @@ async function metric(query) {
   return body.data.result.reduce((sum, series) => sum + Number(series.value[1]), 0);
 }
 
+// Messages ever written to a topic: the sum of its partitions' end offsets.
+function topicSize(topic) {
+  return docker([...compose, 'exec', '-T', 'kafka', '/opt/kafka/bin/kafka-get-offsets.sh',
+    '--bootstrap-server', 'kafka:9092', '--topic', topic])
+    .split(/\r?\n/).filter(line => /:\d+:\d+$/.test(line))
+    .reduce((sum, line) => sum + Number(line.split(':').at(-1)), 0);
+}
+
 // Counters reach Prometheus through the OTel export interval and a scrape, so
 // "it increased" is polled rather than read once.
 async function increased(query, before, timeoutMs = 120000) {
@@ -137,18 +145,57 @@ try {
   report.drills['service-killed'] = {rentalStatus: rental.rentalStatus, rentalDurationMs: rental.durationMs, listingStatus: listing.status};
 } finally { drill('service-killed', true); await healthy('telemetry'); }
 
-// Risk-pricing stopped: the rental is priced anyway, and the fallback is counted.
+// Risk-pricing stopped: rentals are still priced, and the rescore they should cause waits.
+//
+// rental-core never calls risk-pricing; it prices from the scores and table it
+// last projected. So a fallback counter is not evidence of this outage -- the
+// fixture rider has no score until risk-pricing publishes one, and is counted as
+// unscored whether the service is up or not. What the outage does change is that
+// rental.started stops producing risk.scored. The drill shows that against a
+// control taken while the service runs, then shows the backlog scored on return.
 {
-  const query = 'sum(dependency_degradations_total{dependency="risk-pricing"})';
-  const before = await metric(query);
+  async function grows(topic, before, timeoutMs = 120000) {
+    const until = Date.now() + timeoutMs;
+    let size = before;
+    while (Date.now() < until) {
+      size = topicSize(topic);
+      if (size > before) return size;
+      await sleep(2000);
+    }
+    return size;
+  }
+
+  const control = {started: topicSize('rental.started'), scored: topicSize('risk.scored')};
+  const running = await createRental();
+  assert.equal(running.rentalStatus, 200, running.action.detail);
+  assert.ok(await grows('rental.started', control.started) > control.started, 'rental.started was not published');
+  const scoredWhileRunning = await grows('risk.scored', control.scored);
+  assert.ok(scoredWhileRunning > control.scored, 'risk-pricing did not rescore the rider while running');
+
+  let outage;
   try {
     drill('risk-pricing-stopped');
+    const started = topicSize('rental.started');
+    const scored = topicSize('risk.scored');
     const rental = await createRental();
     assert.equal(rental.rentalStatus, 200, rental.action.detail);
-    const after = await increased(query, before);
-    assert.ok(after > before, 'risk-pricing fallback was not counted');
-    report.drills['risk-pricing-stopped'] = {rentalStatus: rental.rentalStatus, rentalDurationMs: rental.durationMs, fallbacksBefore: before, fallbacksAfter: after};
+    assert.ok(await grows('rental.started', started) > started, 'rental.started was not published');
+    // The control rescored within this window; nothing may while the service is down.
+    await sleep(30000);
+    const scoredDuringOutage = topicSize('risk.scored');
+    assert.equal(scoredDuringOutage, scored, 'risk.scored advanced with risk-pricing stopped');
+    const {rental: listed} = await findRental(rental.plate);
+    outage = {rental, listed, scored, scoredDuringOutage};
   } finally { drill('risk-pricing-stopped', true); await healthy('risk-pricing'); }
+
+  const scoredAfterRecovery = await grows('risk.scored', outage.scoredDuringOutage);
+  assert.ok(scoredAfterRecovery > outage.scoredDuringOutage, 'the rental started during the outage was never scored');
+  report.drills['risk-pricing-stopped'] = {
+    rentalStatus: outage.rental.rentalStatus, rentalDurationMs: outage.rental.durationMs,
+    runningRentalDurationMs: running.durationMs, totalCost: outage.listed.originalTotalCost,
+    riskScoredWhileRunning: {before: control.scored, after: scoredWhileRunning},
+    riskScoredDuringOutage: {before: outage.scored, after30s: outage.scoredDuringOutage},
+    riskScoredAfterRecovery: scoredAfterRecovery};
 }
 
 // Billing stopped: the page renders every row and says invoices are missing.
