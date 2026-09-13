@@ -42,7 +42,7 @@ dependencies {
     implementation("org.apache.kafka:kafka-clients:3.9.1")
     implementation("com.google.protobuf:protobuf-java:4.29.3")
     implementation("org.postgresql:postgresql:42.7.5")
-    implementation("com.zaxxer:HikariCP:6.2.1")
+    implementation("com.zaxxer:HikariCP:7.1.0")
     implementation("com.fasterxml.jackson.core:jackson-databind:2.18.2")
     implementation("org.slf4j:slf4j-api:2.0.16")
     runtimeOnly("ch.qos.logback:logback-classic:1.5.16")

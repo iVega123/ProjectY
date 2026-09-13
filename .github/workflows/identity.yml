@@ -32,7 +32,7 @@ jobs:
       - run: go vet ./...
       # golangci-lint's default set (errcheck, staticcheck, unused, ...) found
       # nothing when this was added, so it starts blocking rather than advisory.
-      - uses: golangci/golangci-lint-action@v8
+      - uses: golangci/golangci-lint-action@v9
         with:
           version: v2.13.2
           working-directory: services/identity

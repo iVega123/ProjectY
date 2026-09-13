@@ -8,7 +8,7 @@ defmodule ProjectYTelemetry.MixProject do
       {:phoenix, "~> 1.8.0"},
       {:bandit, "~> 1.10"},
       {:jason, "~> 1.4"},
-      {:xandra, "~> 0.19.4"},
+      {:xandra, "~> 0.20.0"},
       {:decimal, "~> 3.1", override: true},
       {:redix, "~> 1.5"},
       {:brod, "~> 4.5"},

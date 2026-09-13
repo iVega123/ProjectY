@@ -1,0 +1,7 @@
+is_global = true
+
+# CA1716 flags names that are keywords in another .NET language. Every namespace
+# under Shared/ starts with ProjectY.Shared, and Shared is a Visual Basic keyword.
+# No Visual Basic code consumes these assemblies, so namespaces are left out;
+# types, members and parameters are still checked.
+dotnet_code_quality.CA1716.analyzed_symbol_kinds = NamedType, Method, Property, Event, Parameter

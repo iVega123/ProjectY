@@ -5,7 +5,7 @@ using System.Text.Json;
 namespace ProjectY.Shared.Messaging;
 
 /// <summary>Resolve once per topic. Kafka payloads remain locally decodable Protobuf.</summary>
-public sealed class RegisteredEventSchema(HttpClient client, string registryUrl, string contractsDirectory)
+public sealed class RegisteredEventSchema(HttpClient client, string registryUrl, string contractsDirectory) : IDisposable
 {
     private readonly ConcurrentDictionary<string, int> _ids = new();
     private readonly SemaphoreSlim _resolve = new(1, 1);
@@ -39,4 +39,7 @@ public sealed class RegisteredEventSchema(HttpClient client, string registryUrl,
         if (string.IsNullOrWhiteSpace(eventKey) || !string.Equals(key, eventKey, StringComparison.Ordinal))
             throw new InvalidDataException("Kafka key does not match the immutable event identifier.");
     }
+
+    // The HttpClient belongs to whoever passed it in; only the lock is ours.
+    public void Dispose() => _resolve.Dispose();
 }

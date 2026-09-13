@@ -439,7 +439,7 @@ namespace MotoHubTests.Integration
             client.DefaultRequestHeaders.Add("x-identity-roles", "Admin");
             client.DefaultRequestHeaders.Add(
                 "x-identity-issued-at",
-                DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString());
+                DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString(System.Globalization.CultureInfo.InvariantCulture));
             client.DefaultRequestHeaders.Add("x-identity-signature", "v1=forged");
 
             var response = await client.GetAsync("/api/motorcycles");
@@ -450,9 +450,9 @@ namespace MotoHubTests.Integration
         private static string NextPlate() =>
             $"TST{Interlocked.Increment(ref _plateSequence) % 10000:D4}";
 
-        private string GenerateInvalidIdentityMarker() => "invalid";
+        private static string GenerateInvalidIdentityMarker() => "invalid";
 
 
-        private string GenerateGatewayIdentityMarker() => "valid-admin";
+        private static string GenerateGatewayIdentityMarker() => "valid-admin";
     }
 }

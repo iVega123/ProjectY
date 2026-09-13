@@ -33,7 +33,7 @@ public sealed class DependencyFailureTests
         });
         listener.Start();
         Exception failure = new NpgsqlException("database unavailable");
-        if (wrapped) failure = new PreWriteDependencyException(new Exception("wrapper", failure));
+        if (wrapped) failure = new PreWriteDependencyException(new InvalidOperationException("wrapper", failure));
         DependencyFailure.Record(failure);
         Assert.Equal("database", measuredDependency);
         Assert.Equal("database", activity.GetTagItem("projecty.degradation"));
@@ -97,7 +97,7 @@ public sealed class DependencyFailureTests
     [Fact]
     public async Task WrappedUpstreamFailure_RefusesWith503()
     {
-        var (context, _) = await Handle(new Exception("wrapper", new HttpRequestException(
+        var (context, _) = await Handle(new InvalidOperationException("wrapper", new HttpRequestException(
             "upstream", null, HttpStatusCode.ServiceUnavailable)));
 
         Assert.Equal(503, context.Response.StatusCode);
