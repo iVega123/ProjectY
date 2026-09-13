@@ -51,6 +51,7 @@ All runtime configuration comes from environment variables.
 | `GATEWAY_RATE_LIMIT_AUTH_CAPACITY` | No (`10`) | Stricter burst capacity for `/api/auth/**` |
 | `GATEWAY_RATE_LIMIT_AUTH_REFILL_PER_MINUTE` | No (`5`) | Stricter sustained refill for `/api/auth/**` |
 | `GATEWAY_UPSTREAM_<UPSTREAM>_TIMEOUT_MS` | No (`2000`-`2500`) | Per-attempt timeout; upstream is `IDENTITY`, `MOTO_HUB`, `RENTAL_OPERATIONS`, or `BILLING` |
+| `GATEWAY_UPSTREAM_<UPSTREAM>_DEADLINE_MS` | No (the timeout) | Deadline for the whole client request, retries included; a retry that cannot finish in what is left is not attempted |
 | `GATEWAY_UPSTREAM_<UPSTREAM>_MAX_CONCURRENCY` | No (`64`) | Bulkhead permits; excess requests are refused without queueing |
 | `GATEWAY_UPSTREAM_<UPSTREAM>_BREAKER_FAILURE_THRESHOLD` | No (`5`) | Consecutive final failures before opening the circuit |
 | `GATEWAY_UPSTREAM_<UPSTREAM>_BREAKER_OPEN_MS` | No (`30000`) | Delay before admitting one half-open probe |
