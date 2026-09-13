@@ -1,6 +1,6 @@
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.OpenApi.Models;
+using Microsoft.OpenApi;
 using MotoHub.Data;
 using MotoHub.Repositories;
 using MotoHub.Services.RabbitMQ;
