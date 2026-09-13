@@ -30,25 +30,17 @@ export const options = {
   discardResponseBodies: true,
 };
 
-function identityHeaders(method, path) {
+// As duas assinaturas, como o portão manda (ADR 0008): a `v1` e a `v2`, que
+// cobre o corpo. O ensaio continua valendo quando o rental-core deixar de
+// aceitar `v1`.
+function identityHeaders(method, path, body) {
   const issuedAt = Math.floor(Date.now() / 1000).toString();
   const roles = "Rider";
-  const canonical = [
-    "v1",
-    KEY_ID,
-    SUBJECT,
-    roles,
-    issuedAt,
-    method,
-    path,
-    AUDIENCE,
-  ].join("\n");
-  const signature = crypto.hmac(
-    "sha256",
-    SIGNING_KEY,
-    canonical,
-    "base64rawurl",
+  const bound = [KEY_ID, SUBJECT, roles, issuedAt, method, path, AUDIENCE].join(
+    "\n",
   );
+  const sign = (canonical) =>
+    crypto.hmac("sha256", SIGNING_KEY, canonical, "base64rawurl");
 
   return {
     "Content-Type": "application/json",
@@ -56,7 +48,8 @@ function identityHeaders(method, path) {
     "x-identity-subject": SUBJECT,
     "x-identity-roles": roles,
     "x-identity-issued-at": issuedAt,
-    "x-identity-signature": `v1=${signature}`,
+    "x-identity-signature": `v1=${sign(`v1\n${bound}`)}`,
+    "x-identity-signature-v2": `v2=${sign(`v2\n${bound}\n${crypto.sha256(body, "hex")}`)}`,
   };
 }
 
@@ -72,7 +65,7 @@ export default function () {
   });
 
   const response = http.post(`${BASE_URL}${PATH}`, payload, {
-    headers: identityHeaders("POST", PATH),
+    headers: identityHeaders("POST", PATH, payload),
     tags: { name: "POST /api/Rental/create", drill: "availability-burn" },
   });
 

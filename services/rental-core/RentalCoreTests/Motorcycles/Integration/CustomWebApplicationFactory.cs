@@ -84,7 +84,7 @@ namespace MotoHubTests.Integration
 
         private sealed class TestGatewayIdentityMarkerHandler : DelegatingHandler
         {
-            protected override Task<HttpResponseMessage> SendAsync(
+            protected override async Task<HttpResponseMessage> SendAsync(
                 HttpRequestMessage request,
                 CancellationToken cancellationToken)
             {
@@ -105,12 +105,12 @@ namespace MotoHubTests.Integration
                         new Claim(ClaimTypes.NameIdentifier, "test-user"),
                         new Claim(ClaimTypes.Role, role)
                     ], "TestGatewayIdentity"));
-                    new GatewayIdentitySigner(GatewayIdentityKey, "test-v1")
-                        .Sign(request, principal, GatewayIdentityAudience);
+                    await new GatewayIdentitySigner(GatewayIdentityKey, "test-v1")
+                        .SignAsync(request, principal, GatewayIdentityAudience, cancellationToken);
                 }
 
                 request.Headers.Authorization = null;
-                return base.SendAsync(request, cancellationToken);
+                return await base.SendAsync(request, cancellationToken);
             }
         }
     }

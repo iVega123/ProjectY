@@ -179,7 +179,11 @@ All four require the gateway identity envelope of ADR 0008, verified here in Go
 — the third implementation of that check, after C# and Kotlin. The canonical
 string is pinned on both sides: `signs_rider_reads_for_the_identity_audience` in
 the gateway, `TestAcceptsAnEnvelopeTheGatewaySigned` in identity, against an
-envelope the gateway actually produced.
+envelope the gateway actually produced. The `v2` string, which covers the body,
+is pinned by `signs_the_v2_envelopes_the_verifiers_pin` and
+`TestAcceptsAV2EnvelopeTheGatewaySigned`, and
+`TestACapturedUploadEnvelopeDoesNotCarryAnotherPhoto` replays a captured
+`PUT /update-image` envelope with another photo and gets 401.
 
 Someone else's record answers 404, not 403. The difference between those two
 responses tells a scanner which identifiers exist. The single-rider GET is
@@ -273,7 +277,9 @@ billing verifies the gateway identity envelope of ADR 0008 the same way the .NET
 services do — it is a second implementation of that check, in Kotlin, and the
 canonical string is pinned on both sides: a test in the gateway asserts what it
 signs for an invoice route, and `GatewayIdentityTest` in billing asserts what it
-accepts, against an envelope the gateway actually produced. Its audience must
+accepts, against an envelope the gateway actually produced. That holds for `v1`
+and for `v2`, which also covers the body. An invoice read is a `GET`, so billing's
+`v2` vector is the empty-body case. Its audience must
 equal `GATEWAY_JWT_AUDIENCE_BILLING`; today both are `projecty.rental-core`, and
 `docker-compose.yml` says why.
 

@@ -5,7 +5,7 @@ namespace RentalOperationsTests.Integration;
 
 internal sealed class TestGatewayIdentityHandler(string role, string userId) : DelegatingHandler
 {
-    protected override Task<HttpResponseMessage> SendAsync(
+    protected override async Task<HttpResponseMessage> SendAsync(
         HttpRequestMessage request,
         CancellationToken cancellationToken)
     {
@@ -14,8 +14,8 @@ internal sealed class TestGatewayIdentityHandler(string role, string userId) : D
             new Claim(ClaimTypes.NameIdentifier, userId),
             new Claim(ClaimTypes.Role, role)
         ], "TestGatewayIdentity"));
-        new GatewayIdentitySigner(CustomWebApplicationFactory.GatewayIdentityKey, "test-v1")
-            .Sign(request, principal, CustomWebApplicationFactory.GatewayIdentityAudience);
-        return base.SendAsync(request, cancellationToken);
+        await new GatewayIdentitySigner(CustomWebApplicationFactory.GatewayIdentityKey, "test-v1")
+            .SignAsync(request, principal, CustomWebApplicationFactory.GatewayIdentityAudience, cancellationToken);
+        return await base.SendAsync(request, cancellationToken);
     }
 }

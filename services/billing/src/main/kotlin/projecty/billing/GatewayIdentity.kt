@@ -5,6 +5,7 @@ import java.security.MessageDigest
 import java.time.Clock
 import java.time.Duration
 import java.util.Base64
+import java.util.HexFormat
 import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
 
@@ -59,15 +60,27 @@ class GatewayIdentity(
     /**
      * O chamador, ou null quando o envelope não vale. Nunca uma exceção com a
      * razão: quem não passou não precisa saber por qual dos sete motivos.
+     *
+     * `body` são os bytes do corpo como chegaram. A assinatura `v2` os cobre, e
+     * é o que impede um envelope capturado de servir, na mesma rota e dentro da
+     * janela, para outro corpo (#191). Presente, só ela decide; ausente, ainda
+     * vale a `v1`, porque recusá-la antes de o portão assinar `v2` trancaria o
+     * billing para fora, como no #136.
      */
     fun verify(
         header: (String) -> List<String>,
         method: String,
         pathAndQuery: String,
+        body: ByteArray,
     ): Caller? {
         val values = HEADERS.map { header(it) }
         if (values.any { it.size != 1 }) return null
-        val (keyId, subject, roles, issuedAtValue, signature) = values.map { it[0] }
+        val (keyId, subject, roles, issuedAtValue) = values.map { it[0] }
+
+        // Cada assinatura no máximo uma vez, e ao menos uma das duas.
+        val v1 = header(SIGNATURE_HEADER)
+        val v2 = header(SIGNATURE_V2_HEADER)
+        if (v1.size > 1 || v2.size > 1 || v1.size + v2.size == 0) return null
 
         if (keyId != signingKeyId) return null
         if (!isSafeComponent(keyId, 128)) return null
@@ -83,9 +96,8 @@ class GatewayIdentity(
 
         val parsedRoles = parseRoles(roles) ?: return null
 
-        val canonical =
+        val bound =
             listOf(
-                "v1",
                 keyId,
                 subject,
                 roles,
@@ -94,7 +106,15 @@ class GatewayIdentity(
                 pathAndQuery,
                 audience,
             ).joinToString("\n")
-        if (!verifySignature(canonical, signature)) return null
+        val signed =
+            if (v2.size == 1) {
+                // Cair para a `v1` quando a `v2` falha seria aceitar exatamente o
+                // corpo trocado que a `v2` acabou de recusar.
+                verifySignature("v2\n$bound\n${bodyDigest(body)}", v2[0], "v2=")
+            } else {
+                verifySignature("v1\n$bound", v1[0], "v1=")
+            }
+        if (!signed) return null
 
         return Caller(subject, parsedRoles)
     }
@@ -102,13 +122,14 @@ class GatewayIdentity(
     private fun verifySignature(
         canonical: String,
         signature: String,
+        version: String,
     ): Boolean {
-        if (!signature.startsWith("v1=")) return false
+        if (!signature.startsWith(version)) return false
         val supplied =
             try {
                 // O portão remove o preenchimento; o decodificador de URL do Java
                 // aceita a entrada sem ele e recusa comprimentos impossíveis.
-                Base64.getUrlDecoder().decode(signature.substring(3))
+                Base64.getUrlDecoder().decode(signature.substring(version.length))
             } catch (_: IllegalArgumentException) {
                 return false
             }
@@ -135,13 +156,31 @@ class GatewayIdentity(
         const val ROLES_HEADER = "x-identity-roles"
         const val ISSUED_AT_HEADER = "x-identity-issued-at"
         const val SIGNATURE_HEADER = "x-identity-signature"
+        const val SIGNATURE_V2_HEADER = "x-identity-signature-v2"
         const val ADMIN_ROLE = "Admin"
 
-        /** A ordem é a do envelope, e é ela que o `destructuring` acima assume. */
+        /**
+         * O maior corpo que o portão assina. Um corpo maior não saiu dele, e ler
+         * além disso seria memória de graça para quem alcança a porta.
+         */
+        const val MAX_SIGNED_BODY_BYTES = 32 * 1024 * 1024
+
+        /**
+         * Os cabeçalhos que todo envelope traz exatamente uma vez, na ordem da
+         * string canônica -- que é a que o `destructuring` acima assume. As
+         * assinaturas ficam de fora porque podem vir uma ou as duas.
+         */
         val HEADERS =
-            listOf(KEY_ID_HEADER, SUBJECT_HEADER, ROLES_HEADER, ISSUED_AT_HEADER, SIGNATURE_HEADER)
+            listOf(KEY_ID_HEADER, SUBJECT_HEADER, ROLES_HEADER, ISSUED_AT_HEADER)
 
         private val DIGITS = Regex("^[0-9]+$")
+
+        /**
+         * A última linha da `v2`: SHA-256 do corpo, em hex minúsculo. Sem corpo e
+         * corpo vazio são o mesmo digest, o de zero bytes.
+         */
+        fun bodyDigest(body: ByteArray): String =
+            HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(body))
 
         /**
          * ASCII imprimível menos o espaço e menos a vírgula.

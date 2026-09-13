@@ -13,7 +13,7 @@ use jsonwebtoken::{
     jwk::{AlgorithmParameters, EllipticCurve, JwkSet, KeyAlgorithm, KeyOperations, PublicKeyUse},
 };
 use serde::Deserialize;
-use sha2::Sha256;
+use sha2::{Digest, Sha256};
 use tokio::sync::{Mutex, RwLock};
 
 use crate::config::AuthConfig;
@@ -279,30 +279,54 @@ impl IdentitySigner {
         }
     }
 
+    /// O envelope de uma requisição, assinado agora.
+    ///
+    /// `body` são os bytes exatos que o upstream vai receber. O `v2` os liga à
+    /// assinatura; sem isso um envelope capturado serviria, na mesma rota e
+    /// dentro da janela, para qualquer outro corpo (#191).
     pub fn headers(
         &self,
         identity: &Identity,
         method: &Method,
         uri: &Uri,
         audience: &str,
+        body: &[u8],
     ) -> Result<HeaderMap, AuthError> {
-        let roles = identity.roles.join(",");
         let issued_at = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map_err(|_| AuthError::InvalidToken)?
-            .as_secs()
-            .to_string();
+            .as_secs();
+        self.headers_at(identity, method, uri, audience, body, issued_at)
+    }
+
+    fn headers_at(
+        &self,
+        identity: &Identity,
+        method: &Method,
+        uri: &Uri,
+        audience: &str,
+        body: &[u8],
+        issued_at: u64,
+    ) -> Result<HeaderMap, AuthError> {
+        let roles = identity.roles.join(",");
+        let issued_at = issued_at.to_string();
         let path = uri
             .path_and_query()
             .map_or(uri.path(), |value| value.as_str());
-        let canonical = format!(
-            "v1\n{}\n{}\n{}\n{}\n{}\n{}\n{}",
+        let bound = format!(
+            "{}\n{}\n{}\n{}\n{}\n{}\n{}",
             self.key_id, identity.subject, roles, issued_at, method, path, audience
         );
-        let mut mac = Hmac::<Sha256>::new_from_slice(&self.key)
-            .expect("gateway identity signing key accepts arbitrary length");
-        mac.update(canonical.as_bytes());
-        let signature = format!("v1={}", URL_SAFE_NO_PAD.encode(mac.finalize().into_bytes()));
+        // As duas versões, lado a lado, enquanto houver verificador em `v1`: um
+        // verificador que só conhece `v1` ignora o cabeçalho que não conhece, e
+        // um que conhece `v2` confere `v2` sempre que ele vier. Mandar só `v2`
+        // antes de todos saberem lê-lo trancaria os serviços para fora, que é a
+        // falha do #136.
+        let v1 = format!("v1={}", self.sign(&format!("v1\n{bound}")));
+        let v2 = format!(
+            "v2={}",
+            self.sign(&format!("v2\n{bound}\n{}", body_digest(body)))
+        );
 
         let mut headers = HeaderMap::new();
         headers.insert(
@@ -323,10 +347,36 @@ impl IdentitySigner {
         );
         headers.insert(
             "x-identity-signature",
-            HeaderValue::from_str(&signature).expect("base64url signature is a valid header"),
+            HeaderValue::from_str(&v1).expect("base64url signature is a valid header"),
+        );
+        headers.insert(
+            "x-identity-signature-v2",
+            HeaderValue::from_str(&v2).expect("base64url signature is a valid header"),
         );
         Ok(headers)
     }
+
+    fn sign(&self, canonical: &str) -> String {
+        let mut mac = Hmac::<Sha256>::new_from_slice(&self.key)
+            .expect("gateway identity signing key accepts arbitrary length");
+        mac.update(canonical.as_bytes());
+        URL_SAFE_NO_PAD.encode(mac.finalize().into_bytes())
+    }
+}
+
+/// A última linha do `v2`: SHA-256 dos bytes do corpo, em hex minúsculo.
+///
+/// Sem corpo e corpo vazio são a mesma coisa, o digest de zero bytes. A regra é
+/// escrita aqui, e repetida em cada verificador, para que nenhum deles precise
+/// adivinhar se um GET assina uma linha vazia, um traço ou nada.
+pub fn body_digest(body: &[u8]) -> String {
+    use std::fmt::Write as _;
+
+    let mut hex = String::with_capacity(64);
+    for byte in Sha256::digest(body) {
+        write!(hex, "{byte:02x}").expect("writing to a String cannot fail");
+    }
+    hex
 }
 
 fn bearer_token(headers: &HeaderMap) -> Result<&str, AuthError> {
@@ -460,6 +510,158 @@ mod tests {
         validation.validate_exp = false;
 
         assert!(decode::<Claims>(&tampered, &key, &validation).is_err());
+    }
+
+    /// Os envelopes que os três verificadores prendem nos testes deles.
+    ///
+    /// Os valores abaixo não saíram deste arquivo: foram calculados à parte, com
+    /// `openssl dgst -sha256 -mac HMAC`, a partir da string canônica escrita no
+    /// ADR 0008. Este teste prova que o portão produz exatamente esses bytes; o
+    /// `TestAcceptsAV2EnvelopeTheGatewaySigned` (identity, Go), o
+    /// `o envelope v2 que o portao assinou e aceito` (billing, Kotlin) e o
+    /// `GatewayIdentityEnvelopeTests` (rental-core, C#) provam que cada
+    /// verificador aceita os mesmos. Uma divergência em qualquer ponta falha
+    /// de um lado em vez de virar porta aberta ou serviço trancado.
+    struct Golden {
+        method: Method,
+        uri: &'static str,
+        audience: &'static str,
+        body: &'static [u8],
+        v1: &'static str,
+        v2: &'static str,
+    }
+
+    const GOLDEN_ISSUED_AT: u64 = 1_789_300_000;
+    const EMPTY_BODY_DIGEST: &str =
+        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+
+    fn goldens() -> [Golden; 3] {
+        [
+            // O corpo que o #191 nomeia: a CNH de um piloto.
+            Golden {
+                method: Method::PUT,
+                uri: "/update-image",
+                audience: "projecty.identity",
+                body: b"cnh-image:original",
+                v1: "v1=WfqfOycgzRAvAjHP2W7VvzA6AJCQVrxU1GEY4KvWQJM",
+                v2: "v2=V6Nzvgn7pJMZjCeBhFND7JmHakPWzdkexDLY8Xk89u8",
+            },
+            // Sem corpo: a regra do digest vazio, e a query dentro do caminho.
+            Golden {
+                method: Method::GET,
+                uri: "/api/invoices?rentalIds=a,b",
+                audience: "projecty.billing",
+                body: b"",
+                v1: "v1=jPNeT5mDVdMdyKNT5UXQYPfhI8Z-Hh9geXNfdYWKzl4",
+                v2: "v2=w5r-_x9wbmOcOjdb-icslt_9rsL7Llm5Uy3FVQwVRzE",
+            },
+            Golden {
+                method: Method::POST,
+                uri: "/api/rental",
+                audience: "projecty.rental-core",
+                body: br#"{"motorcycleId":"00000000-0000-0000-0000-000000000001","plan":7}"#,
+                v1: "v1=3vAv26TC3UzJTX5cWizLQx42_D7y7a4m9ZBX3r29gWY",
+                v2: "v2=idQJwvMxcuM0EEsGGXa8tvOm32Dwcya9HJGh0vz8QwE",
+            },
+        ]
+    }
+
+    fn golden_signer() -> IdentitySigner {
+        IdentitySigner {
+            key: Arc::from(&[b'x'; 32][..]),
+            key_id: "local-v1".to_owned(),
+        }
+    }
+
+    fn golden_rider() -> Identity {
+        Identity {
+            subject: "rider-123".to_owned(),
+            roles: vec!["Rider".to_owned()],
+            token_id: "token-1".to_owned(),
+        }
+    }
+
+    fn signed(golden: &Golden, body: &[u8]) -> HeaderMap {
+        golden_signer()
+            .headers_at(
+                &golden_rider(),
+                &golden.method,
+                &golden.uri.parse().unwrap(),
+                golden.audience,
+                body,
+                GOLDEN_ISSUED_AT,
+            )
+            .unwrap()
+    }
+
+    fn header<'a>(headers: &'a HeaderMap, name: &str) -> &'a str {
+        headers.get(name).unwrap().to_str().unwrap()
+    }
+
+    #[test]
+    fn signs_the_v2_envelopes_the_verifiers_pin() {
+        for golden in goldens() {
+            let headers = signed(&golden, golden.body);
+            assert_eq!(
+                header(&headers, "x-identity-signature-v2"),
+                golden.v2,
+                "{}",
+                golden.uri
+            );
+        }
+    }
+
+    /// O portão em `v2` diante de um verificador ainda em `v1`.
+    ///
+    /// O verificador antigo lê cinco cabeçalhos e ignora o resto. O que ele
+    /// precisa, então, é que `x-identity-signature` continue sendo o `v1` de
+    /// sempre, byte a byte, e que nenhum dos cinco apareça duas vezes -- ele
+    /// recusa cabeçalho repetido.
+    #[test]
+    fn still_signs_v1_unchanged_for_verifiers_that_have_not_rolled() {
+        for golden in goldens() {
+            let headers = signed(&golden, golden.body);
+            assert_eq!(header(&headers, "x-identity-signature"), golden.v1);
+            for name in [
+                "x-identity-key-id",
+                "x-identity-subject",
+                "x-identity-roles",
+                "x-identity-issued-at",
+                "x-identity-signature",
+            ] {
+                assert_eq!(headers.get_all(name).iter().count(), 1, "{name}");
+            }
+        }
+    }
+
+    /// A troca de corpo muda o `v2` e não muda o `v1`.
+    ///
+    /// A primeira metade é o #191 fechado. A segunda é por que ele só fecha de
+    /// vez quando os verificadores deixarem de aceitar `v1`: a assinatura antiga
+    /// continua valendo para qualquer corpo.
+    #[test]
+    fn a_substituted_body_changes_the_v2_signature_and_not_the_v1() {
+        let golden = &goldens()[0];
+        let original = signed(golden, golden.body);
+        let substituted = signed(golden, b"cnh-image:attacker");
+
+        assert_ne!(
+            header(&original, "x-identity-signature-v2"),
+            header(&substituted, "x-identity-signature-v2")
+        );
+        assert_eq!(
+            header(&original, "x-identity-signature"),
+            header(&substituted, "x-identity-signature")
+        );
+    }
+
+    #[test]
+    fn no_body_is_the_digest_of_zero_bytes() {
+        assert_eq!(body_digest(b""), EMPTY_BODY_DIGEST);
+        assert_eq!(
+            body_digest(b"cnh-image:original"),
+            "5039a57d34197a36dd750d0174078d45d0ee5a06f719aca106c178c4f1fba47a"
+        );
     }
 
     #[test]

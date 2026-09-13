@@ -9,6 +9,7 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -349,26 +350,43 @@ func (f *fixture) register(t *testing.T, expected int) string {
 	return f.lastEmail
 }
 
-// envelope assina como o portão assinaria, para o caminho e o método dados.
+// envelope assina como o portão assinaria, para o caminho e o método dados, uma
+// requisição sem corpo.
 func (f *fixture) envelope(
 	t *testing.T,
 	method, pathAndQuery, subject, roles string,
 ) *http.Request {
 	t.Helper()
-	stamp := strconv.FormatInt(time.Now().Unix(), 10)
-	canonical := strings.Join([]string{
-		"v1", "local-v1", subject, roles, stamp, method, pathAndQuery, "projecty.identity",
-	}, "\n")
-	mac := hmac.New(sha256.New, envelopeKey)
-	mac.Write([]byte(canonical))
+	return f.envelopeWith(t, method, pathAndQuery, subject, roles, nil)
+}
 
-	request := httptest.NewRequest(method, pathAndQuery, nil)
+// envelopeWith manda `body` com as duas assinaturas, como o portão manda: a
+// `v1`, que não cobre o corpo, e a `v2`, que cobre.
+func (f *fixture) envelopeWith(
+	t *testing.T,
+	method, pathAndQuery, subject, roles string,
+	body []byte,
+) *http.Request {
+	t.Helper()
+	stamp := strconv.FormatInt(time.Now().Unix(), 10)
+	bound := strings.Join([]string{
+		"local-v1", subject, roles, stamp, method, pathAndQuery, "projecty.identity",
+	}, "\n")
+	digest := sha256.Sum256(body)
+	sign := func(canonical string) string {
+		mac := hmac.New(sha256.New, envelopeKey)
+		mac.Write([]byte(canonical))
+		return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
+	}
+
+	request := httptest.NewRequest(method, pathAndQuery, bytes.NewReader(body))
 	request.Header.Set(gateway.KeyIDHeader, "local-v1")
 	request.Header.Set(gateway.SubjectHeader, subject)
 	request.Header.Set(gateway.RolesHeader, roles)
 	request.Header.Set(gateway.IssuedAtHeader, stamp)
-	request.Header.Set(gateway.SignatureHeader,
-		"v1="+base64.RawURLEncoding.EncodeToString(mac.Sum(nil)))
+	request.Header.Set(gateway.SignatureHeader, "v1="+sign("v1\n"+bound))
+	request.Header.Set(gateway.SignatureV2Header,
+		"v2="+sign("v2\n"+bound+"\n"+hex.EncodeToString(digest[:])))
 	return request
 }
 

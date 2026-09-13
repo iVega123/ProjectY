@@ -322,8 +322,8 @@ async fn proxy_inner(state: Arc<AppState>, request: Request) -> Response {
 
     let audience = state.config.auth.audiences.for_upstream(upstream_name);
     let access = access_for(request.method(), &path, upstream_name);
-    let (identity_headers, identity_subject) = match access {
-        Access::Public => (None, None),
+    let identity = match access {
+        Access::Public => None,
         Access::Authenticated | Access::Admin => {
             let identity = match state
                 .authenticator
@@ -353,21 +353,15 @@ async fn proxy_inner(state: Arc<AppState>, request: Request) -> Response {
                     }
                 }
             }
-            let identity_headers = match state.identity_signer.headers(
-                &identity,
-                request.method(),
-                request.uri(),
-                audience,
-            ) {
-                Ok(headers) => headers,
-                Err(error) => return authentication_problem(error, request.uri()),
-            };
-            (Some(identity_headers), Some(identity.subject))
+            Some(identity)
         }
     };
 
     let (bucket_name, bucket) = rate_limit_bucket(&state.config, &path);
-    let principal = rate_limit_principal(&request, identity_subject);
+    let principal = rate_limit_principal(
+        &request,
+        identity.as_ref().map(|identity| identity.subject.clone()),
+    );
     let rate_limit_key = rate_limit_key(bucket_name, &principal);
     let remaining = match state.rate_limiter.check(&rate_limit_key, bucket).await {
         Ok(RateLimitDecision {
@@ -386,13 +380,46 @@ async fn proxy_inner(state: Arc<AppState>, request: Request) -> Response {
         }
     };
 
+    // Depois do limitador, e não antes: ler até 32 MiB de quem já estourou a
+    // cota seria fazer o trabalho que a cota existe para recusar. E o carimbo do
+    // envelope sai depois do corpo inteiro, não antes de um upload lento.
+    let (request, signed) = match identity {
+        None => (request, None),
+        Some(identity) => {
+            let (parts, body) = request.into_parts();
+            let Ok(body) = to_bytes(body, MAX_SIGNED_BODY_BYTES).await else {
+                return problem(
+                    StatusCode::PAYLOAD_TOO_LARGE,
+                    "urn:projecty:problem:signed-body-too-large",
+                    "Request body too large",
+                    "An authenticated request body cannot exceed 32 MiB.",
+                    parts.uri.to_string(),
+                );
+            };
+            let headers = match state.identity_signer.headers(
+                &identity,
+                &parts.method,
+                &parts.uri,
+                audience,
+                &body,
+            ) {
+                Ok(headers) => headers,
+                Err(error) => return authentication_problem(error, &parts.uri),
+            };
+            (
+                Request::from_parts(parts, Body::empty()),
+                Some(Signed { headers, body }),
+            )
+        }
+    };
+
     let mut response = match forward(
         &state.client,
         state.resilience.policy(upstream_name),
         upstream_name,
         base_url,
         request,
-        identity_headers,
+        signed,
     )
     .await
     {
@@ -468,17 +495,37 @@ fn rate_limit_principal(request: &Request, identity_subject: Option<String>) -> 
     }
 }
 
+/// O maior corpo que o portão assina.
+///
+/// O envelope `v2` cobre o digest do corpo, e o digest só existe depois do
+/// último byte -- antes de o upstream receber o primeiro cabeçalho. Por isso uma
+/// requisição autenticada nunca é repassada em streaming: ela é lida inteira,
+/// assinada, e o upstream recebe exatamente os bytes assinados, com
+/// `Content-Length`. O teto é o mesmo das repetições, e fica muito acima do
+/// maior corpo legítimo de hoje, a CNH de 8 MiB.
+const MAX_SIGNED_BODY_BYTES: usize = 32 * 1024 * 1024;
+
+/// O envelope de uma requisição autenticada e o corpo que ele assina.
+struct Signed {
+    headers: HeaderMap,
+    body: axum::body::Bytes,
+}
+
 async fn forward(
     client: &reqwest::Client,
     policy: Arc<UpstreamPolicy>,
     upstream_name: UpstreamName,
     base_url: &Url,
     request: Request,
-    identity_headers: Option<HeaderMap>,
+    signed: Option<Signed>,
 ) -> Result<Response, ForwardError> {
     const MAX_RETRY_BODY_BYTES: usize = 32 * 1024 * 1024;
 
     let resilience = policy.config();
+    let (identity_headers, signed_body) = match signed {
+        Some(Signed { headers, body }) => (Some(headers), Some(body)),
+        None => (None, None),
+    };
     let (parts, body) = request.into_parts();
     let mut target = base_url
         .join(parts.uri.path().trim_start_matches('/'))
@@ -498,17 +545,18 @@ async fn forward(
         }
     }
     let retry_allowed = retry_allowed(&parts.method, &parts.headers);
-    let (buffered_body, mut streaming_body) = if retry_allowed {
-        (
+    let (buffered_body, mut streaming_body) = match signed_body {
+        // Um corpo assinado já está em memória, repetível ou não.
+        Some(signed_body) => (Some(signed_body), None),
+        None if retry_allowed => (
             Some(
                 to_bytes(body, MAX_RETRY_BODY_BYTES)
                     .await
                     .map_err(|_| ForwardError::RetryBodyTooLarge)?,
             ),
             None,
-        )
-    } else {
-        (None, Some(body))
+        ),
+        None => (None, Some(body)),
     };
     let max_retries = if retry_allowed {
         resilience.max_retries
@@ -1147,13 +1195,17 @@ mod tests {
             request: Request,
         ) -> Response {
             state.upstream_requests.fetch_add(1, Ordering::SeqCst);
+            let (parts, body) = request.into_parts();
             let value = |name: &'static str| {
-                request
-                    .headers()
+                parts
+                    .headers
                     .get(name)
                     .and_then(|header| header.to_str().ok())
                     .map(str::to_owned)
             };
+            // O digest do que CHEGOU, calculado aqui e não pelo portão: é o que
+            // um verificador faria do outro lado.
+            let body = to_bytes(body, 64 * 1024 * 1024).await.unwrap();
             Json(json!({
                 "authorization": value("authorization"),
                 "cookie": value("cookie"),
@@ -1162,6 +1214,9 @@ mod tests {
                 "issued_at": value("x-identity-issued-at"),
                 "key_id": value("x-identity-key-id"),
                 "signature": value("x-identity-signature"),
+                "signature_v2": value("x-identity-signature-v2"),
+                "content_length": value("content-length"),
+                "body_sha256": auth::body_digest(&body),
             }))
             .into_response()
         }
@@ -2035,7 +2090,120 @@ mod tests {
         mac.update(canonical.as_bytes());
         mac.verify_slice(&URL_SAFE_NO_PAD.decode(signature).unwrap())
             .unwrap();
+        assert_signed_v2(
+            &body,
+            &format!(
+                "v2\nlocal-v1\nrider-123\nRider\n{issued_at}\nPOST\n/api/rental/close?plan=weekly\nprojecty.rental-operations\n{EMPTY_BODY_SHA256}"
+            ),
+        );
         assert_eq!(state.jwks_requests.load(Ordering::SeqCst), 1);
+    }
+
+    const EMPTY_BODY_SHA256: &str =
+        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+
+    /// Confere o `v2` que o upstream recebeu contra a string canônica dada.
+    fn assert_signed_v2(upstream: &Value, canonical: &str) {
+        let signature = upstream["signature_v2"]
+            .as_str()
+            .expect("the upstream received no v2 signature")
+            .strip_prefix("v2=")
+            .expect("the v2 signature carries its version");
+        let mut mac = Hmac::<Sha256>::new_from_slice(&[b'x'; 32]).unwrap();
+        mac.update(canonical.as_bytes());
+        mac.verify_slice(&URL_SAFE_NO_PAD.decode(signature).unwrap())
+            .expect("the v2 signature does not cover this canonical string");
+    }
+
+    async fn post_as_rider(body: Body) -> (StatusCode, Value, Arc<SecurityUpstreamState>) {
+        let issuer = TestIssuer::new("body-key");
+        let (upstream, state) = spawn_security_upstream(Some(issuer.jwks())).await;
+        let mut config = test_config(upstream.clone());
+        config.auth.jwks_url = upstream.join(".well-known/jwks.json").unwrap();
+        let app = build_app(config).unwrap();
+        let token = issuer.token("projecty.rental-operations", &["Rider"]);
+        let response = app
+            .oneshot(
+                HttpRequest::post("/api/rental/close")
+                    .header(AUTHORIZATION, format!("Bearer {token}"))
+                    .body(body)
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let status = response.status();
+        let body = if status == StatusCode::OK {
+            response_json(response).await
+        } else {
+            Value::Null
+        };
+        (status, body, state)
+    }
+
+    /// O #191: o corpo entra na assinatura, e é o corpo que o upstream recebeu.
+    ///
+    /// POST sem `Idempotency-Key` não é repetível, e antes disto ia ao upstream
+    /// em streaming. O digest que o teste confere é o que o upstream calculou
+    /// sobre o que chegou, e não o que o portão diz ter enviado.
+    #[tokio::test]
+    async fn signs_the_body_it_forwards() {
+        let sent = br#"{"rentalId":"7f1c","returnedAt":"2026-09-13T10:00:00Z"}"#;
+        let (status, upstream, _) = post_as_rider(Body::from(&sent[..])).await;
+
+        assert_eq!(status, StatusCode::OK);
+        let digest = auth::body_digest(sent);
+        assert_eq!(upstream["body_sha256"], digest.as_str());
+        let issued_at = upstream["issued_at"].as_str().unwrap();
+        assert_signed_v2(
+            &upstream,
+            &format!(
+                "v2\nlocal-v1\nrider-123\nRider\n{issued_at}\nPOST\n/api/rental/close\nprojecty.rental-operations\n{digest}"
+            ),
+        );
+    }
+
+    /// Um corpo em streaming, sem `Content-Length`, é lido até o fim e assinado
+    /// sobre o que foi lido. O upstream o recebe com `Content-Length`: o portão
+    /// não repassa em streaming um corpo que ele assinou.
+    #[tokio::test]
+    async fn signs_a_streamed_body_over_the_bytes_it_forwards() {
+        let chunks: Vec<Result<axum::body::Bytes, std::io::Error>> = vec![
+            Ok(axum::body::Bytes::from_static(b"cnh-image:")),
+            Ok(axum::body::Bytes::from_static(b"in ")),
+            Ok(axum::body::Bytes::from_static(b"three chunks")),
+        ];
+        let (status, upstream, _) =
+            post_as_rider(Body::from_stream(futures_util::stream::iter(chunks))).await;
+
+        assert_eq!(status, StatusCode::OK);
+        let digest = auth::body_digest(b"cnh-image:in three chunks");
+        assert_eq!(upstream["body_sha256"], digest.as_str());
+        assert_eq!(upstream["content_length"], "25");
+        let issued_at = upstream["issued_at"].as_str().unwrap();
+        assert_signed_v2(
+            &upstream,
+            &format!(
+                "v2\nlocal-v1\nrider-123\nRider\n{issued_at}\nPOST\n/api/rental/close\nprojecty.rental-operations\n{digest}"
+            ),
+        );
+    }
+
+    /// Acima do teto o portão não assina nem repassa. Um corpo que ele não leu
+    /// inteiro é um corpo que ele não sabe assinar, e mandar metade assinada
+    /// seria pior que recusar.
+    #[tokio::test]
+    async fn refuses_an_authenticated_body_over_the_signing_cap_before_the_upstream() {
+        let half = axum::body::Bytes::from(vec![b'x'; MAX_SIGNED_BODY_BYTES / 2]);
+        let chunks: Vec<Result<axum::body::Bytes, std::io::Error>> = vec![
+            Ok(half.clone()),
+            Ok(half),
+            Ok(axum::body::Bytes::from_static(b"!")),
+        ];
+        let (status, _, state) =
+            post_as_rider(Body::from_stream(futures_util::stream::iter(chunks))).await;
+
+        assert_eq!(status, StatusCode::PAYLOAD_TOO_LARGE);
+        assert_eq!(state.upstream_requests.load(Ordering::SeqCst), 0);
     }
 
     /// A mesma prova, para o billing.
@@ -2085,6 +2253,13 @@ projecty.billing"
         mac.update(canonical.as_bytes());
         mac.verify_slice(&URL_SAFE_NO_PAD.decode(signature).unwrap())
             .unwrap();
+        assert_signed_v2(
+            &body,
+            &format!(
+                "{}\n{EMPTY_BODY_SHA256}",
+                canonical.replacen("v1\n", "v2\n", 1)
+            ),
+        );
     }
 
     /// O envelope que o identity confere do outro lado, em Go.
@@ -2135,6 +2310,13 @@ projecty.identity"
         mac.update(canonical.as_bytes());
         mac.verify_slice(&URL_SAFE_NO_PAD.decode(signature).unwrap())
             .unwrap();
+        assert_signed_v2(
+            &body,
+            &format!(
+                "{}\n{EMPTY_BODY_SHA256}",
+                canonical.replacen("v1\n", "v2\n", 1)
+            ),
+        );
     }
 
     /// O lote é de administrador, e um token de piloto para nele -- antes do

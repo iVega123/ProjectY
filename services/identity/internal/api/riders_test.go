@@ -286,6 +286,32 @@ func TestTheUploadBelongsToWhoeverTheEnvelopeNames(t *testing.T) {
 	}
 }
 
+// TestACapturedUploadEnvelopeDoesNotCarryAnotherPhoto é o #191 pela rota
+// inteira: o envelope da foto de um piloto, capturado entre o portão e o
+// identity, reapresentado dentro da janela com a foto de outra pessoa.
+//
+// Antes do `v2` isto gravava a foto trocada como a CNH do piloto.
+func TestACapturedUploadEnvelopeDoesNotCarryAnotherPhoto(t *testing.T) {
+	fixture := start(t)
+	fixture.register(t, http.StatusCreated)
+	id := fixture.lastID
+
+	captured := fixture.upload(t, id, "uma foto qualquer")
+	substituted, _ := cnhForm(t, "uma foto de outra pessoa")
+	replayed := httptest.NewRequest(http.MethodPut, "/update-image", bytes.NewReader(substituted))
+	replayed.Header = captured.Header.Clone()
+
+	if got := fixture.send(replayed).Code; got != http.StatusUnauthorized {
+		t.Fatalf("o envelope capturado serviu para outra foto: %d", got)
+	}
+	if len(fixture.objects.stored) != 0 {
+		t.Fatal("a foto trocada chegou ao armazenamento")
+	}
+	if fixture.pending(t, id, facts.TopicDocument) != 0 {
+		t.Fatal("a foto trocada virou document.stored")
+	}
+}
+
 // TestDeletingARiderTwiceStaysDeleted: o portão reenvia DELETE por conta
 // própria quando o transporte falha. Se a segunda tentativa respondesse 404, uma
 // resposta perdida viraria erro para o cliente -- no caso exato que a repetição
@@ -381,8 +407,21 @@ func (f *fixture) pending(t *testing.T, riderID, topic string) int {
 
 func (f *fixture) upload(t *testing.T, subject, content string) *http.Request {
 	t.Helper()
+	body, contentType := cnhForm(t, content)
+	request := f.envelopeWith(t, http.MethodPut, "/update-image", subject, "Rider", body)
+	request.Header.Set("Content-Type", contentType)
+	return request
+}
+
+// cnhForm monta o multipart da CNH com uma fronteira fixa, para que duas fotos
+// diferentes difiram só no conteúdo da foto.
+func cnhForm(t *testing.T, content string) ([]byte, string) {
+	t.Helper()
 	body := &bytes.Buffer{}
 	form := multipart.NewWriter(body)
+	if err := form.SetBoundary("projecty-cnh"); err != nil {
+		t.Fatal(err)
+	}
 	part, err := form.CreateFormFile("cnhFile", "cnh.png")
 	if err != nil {
 		t.Fatal(err)
@@ -393,10 +432,5 @@ func (f *fixture) upload(t *testing.T, subject, content string) *http.Request {
 	if err := form.Close(); err != nil {
 		t.Fatal(err)
 	}
-
-	request := f.envelope(t, http.MethodPut, "/update-image", subject, "Rider")
-	replaced := httptest.NewRequest(http.MethodPut, "/update-image", body)
-	replaced.Header = request.Header
-	replaced.Header.Set("Content-Type", form.FormDataContentType())
-	return replaced
+	return body.Bytes(), form.FormDataContentType()
 }
