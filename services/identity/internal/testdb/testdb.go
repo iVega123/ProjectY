@@ -79,6 +79,7 @@ func prepare(endpoint string) (*sql.DB, error) {
 		"003_billing.sql",
 		"004_settlement_moves_to_billing.sql",
 		"005_identity.sql",
+		"006_outbox_claims.sql",
 	} {
 		if err := apply(application, file); err != nil {
 			_ = application.Close()

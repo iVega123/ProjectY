@@ -3,33 +3,36 @@ package projecty.billing
 import org.apache.kafka.clients.producer.KafkaProducer
 import org.apache.kafka.clients.producer.ProducerConfig
 import org.apache.kafka.clients.producer.ProducerRecord
+import org.apache.kafka.clients.producer.RecordMetadata
 import org.apache.kafka.common.header.internals.RecordHeader
 import org.apache.kafka.common.serialization.ByteArraySerializer
 import org.apache.kafka.common.serialization.StringSerializer
 import org.slf4j.LoggerFactory
 import java.util.Properties
-import java.util.UUID
+import java.util.concurrent.ExecutionException
+import java.util.concurrent.Future
 import java.util.concurrent.atomic.AtomicBoolean
 import javax.sql.DataSource
 
 /**
  * Publica no Kafka o que a transação da nota deixou no outbox.
  *
- * Mesma forma da relay do rental-core, e pelo mesmo motivo: marcar como
- * publicado é um UPDATE separado, DEPOIS do envio. Cair entre os dois republica
- * o mesmo evento com o mesmo `event_id`, que é o que o inbox de quem consumir
- * reconhece. Marcar antes perderia o evento em silêncio.
+ * Quem decide o que sai e quando é o [OutboxDispatcher]: reivindicar antes de
+ * enviar é o que deixa duas réplicas rodarem sem publicar tudo duas vezes. Esta
+ * classe é o laço e o produtor.
  *
  * O filtro por `aggregate_type = 'invoice'` é o que permite dividir a tabela
  * com o rental-core sem que uma relay publique os eventos da outra.
  */
 class InvoiceRelay(
-    private val dataSource: DataSource,
+    dataSource: DataSource,
     bootstrapServers: String,
     private val schemas: SchemaRegistry,
     private val stopping: AtomicBoolean,
 ) : Runnable {
     private val log = LoggerFactory.getLogger(InvoiceRelay::class.java)
+
+    private val dispatcher = OutboxDispatcher(dataSource, "invoice")
 
     private val producer =
         KafkaProducer<String, ByteArray>(
@@ -44,74 +47,56 @@ class InvoiceRelay(
             },
         )
 
-    private class Pending(
-        val id: UUID,
-        val key: String,
-        val topic: String,
-        val payload: ByteArray,
-        val traceParent: String?,
-    )
-
     override fun run() =
-        producer.use { client ->
+        producer.use {
             while (!stopping.get()) {
-                try {
-                    for (pending in pending()) {
-                        val headers =
-                            mutableListOf(
-                                RecordHeader("schema-id", schemas.resolve(pending.topic).toString().toByteArray()),
-                            )
-                        pending.traceParent?.let { headers.add(RecordHeader("traceparent", it.toByteArray())) }
-                        client.send(ProducerRecord(pending.topic, null, pending.key, pending.payload, headers)).get()
-                        markPublished(pending.id)
+                val pass =
+                    try {
+                        dispatcher.dispatchOnce(::send)
+                    } catch (error: Exception) {
+                        if (stopping.get()) break
+                        log.warn("Kafka relay delayed; invoice events retained", error)
+                        null
                     }
-                } catch (error: Exception) {
-                    if (stopping.get()) break
-                    log.warn("Kafka relay delayed; invoice events retained", error)
+                pass?.failure?.let { log.warn("Kafka relay delayed; invoice events retained", it) }
+                // Um lote cheio quer dizer que pode haver mais, e a próxima passada
+                // vem já. Esperar depois de toda passada limitava a relay a um lote
+                // por intervalo.
+                if (pass == null || pass.failure != null || pass.claimed < OutboxDispatcher.BATCH_SIZE) {
+                    Thread.sleep(2_000)
                 }
-                Thread.sleep(2_000)
             }
         }
 
-    private fun pending(): List<Pending> =
-        dataSource.connection.use { connection ->
-            connection
-                .prepareStatement(
-                    """
-                    SELECT id, aggregate_id, topic, payload, trace_parent
-                      FROM outbox
-                     WHERE published_at IS NULL
-                       AND aggregate_type = 'invoice'
-                     ORDER BY occurred_at
-                     LIMIT 100
-                    """.trimIndent(),
-                ).use { statement ->
-                    statement.executeQuery().use { rows ->
-                        buildList {
-                            while (rows.next()) {
-                                add(
-                                    Pending(
-                                        rows.getObject(1, UUID::class.java),
-                                        rows.getString(2),
-                                        rows.getString(3),
-                                        rows.getBytes(4),
-                                        rows.getString(5),
-                                    ),
-                                )
-                            }
-                        }
-                    }
+    /**
+     * O lote inteiro no produtor, e uma espera só.
+     *
+     * `send().get()` por registro esperava o broker cem vezes por lote e anulava
+     * o agrupamento do próprio produtor. Aqui os registros entram todos, `flush`
+     * espera uma vez, e cada future responde pela sua linha.
+     */
+    private fun send(batch: List<OutboxRow>): List<Throwable?> {
+        val sending =
+            batch.map { row ->
+                runCatching {
+                    val headers =
+                        mutableListOf(
+                            RecordHeader("schema-id", schemas.resolve(row.topic).toString().toByteArray()),
+                        )
+                    row.traceParent?.let { headers.add(RecordHeader("traceparent", it.toByteArray())) }
+                    producer.send(ProducerRecord(row.topic, null, row.key, row.payload, headers))
                 }
-        }
+            }
+        producer.flush()
+        return sending.map { attempt -> attempt.fold(onSuccess = this::refusal, onFailure = { it }) }
+    }
 
-    private fun markPublished(id: UUID) =
-        dataSource.connection.use { connection ->
-            connection
-                .prepareStatement(
-                    "UPDATE outbox SET published_at = now() WHERE id = ? AND published_at IS NULL",
-                ).use { statement ->
-                    statement.setObject(1, id)
-                    statement.executeUpdate()
-                }
+    /** null quando o broker confirmou; a causa da recusa quando não. */
+    private fun refusal(acknowledgement: Future<RecordMetadata>): Throwable? =
+        try {
+            acknowledgement.get()
+            null
+        } catch (error: ExecutionException) {
+            error.cause ?: error
         }
 }

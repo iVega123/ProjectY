@@ -38,7 +38,11 @@ Latency contains only successful creations. The former filtered error threshold
 could exclude the very failures it was meant to detect; the gate no longer
 filters by `expected_response:true`.
 
-Results and environment metadata are written to `load/results/`. The GitHub
+Results and environment metadata are written to `load/results/`. Every run also
+writes `<mode>-outbox-lag.json`: for each producer (`rental`, `rider`, `invoice`),
+how many events were published and how long they waited in the outbox (p50, p99
+and maximum, in seconds). Depth alone once hid a relay draining seven times
+slower than rentals were written (#192). The GitHub
 `Rental load gate` workflow builds the ephemeral stack, runs the same command,
 and uploads JSON artifacts even when thresholds fail. Ordinary runs remove only
 the generated benchmark containers and volumes. `-KeepStack` retains them for

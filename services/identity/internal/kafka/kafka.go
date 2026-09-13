@@ -10,7 +10,6 @@ package kafka
 import (
 	"bytes"
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -19,7 +18,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"strconv"
 	"sync"
 	"time"
 
@@ -121,133 +119,6 @@ func (r *Registry) Resolve(ctx context.Context, topic string) (int, error) {
 	}
 	r.resolved.Store(topic, answer.ID)
 	return answer.ID, nil
-}
-
-// --------------------------------------------------------------------- relay
-
-// Relay envia ao Kafka o que as transações deixaram no outbox.
-type Relay struct {
-	db       *sql.DB
-	client   *kgo.Client
-	registry *Registry
-	log      *slog.Logger
-	interval time.Duration
-}
-
-// NewRelay abre o produtor.
-func NewRelay(
-	db *sql.DB,
-	brokers []string,
-	registry *Registry,
-	logger *slog.Logger,
-) (*Relay, error) {
-	client, err := kgo.NewClient(
-		kgo.SeedBrokers(brokers...),
-		// Idempotência ligada: uma reentrega da própria biblioteca não pode
-		// virar dois eventos com o mesmo `event_id` na fita.
-		kgo.RequiredAcks(kgo.AllISRAcks()),
-		kgo.ProducerLinger(10*time.Millisecond),
-	)
-	if err != nil {
-		return nil, err
-	}
-	return &Relay{
-		db:       db,
-		client:   client,
-		registry: registry,
-		log:      logger,
-		interval: 2 * time.Second,
-	}, nil
-}
-
-// Close fecha o produtor.
-func (r *Relay) Close() { r.client.Close() }
-
-type pending struct {
-	id          string
-	key         string
-	topic       string
-	payload     []byte
-	traceParent *string
-}
-
-// Run esvazia o outbox até o contexto acabar.
-//
-// Marcar como publicado é um UPDATE separado, DEPOIS do envio. Cair entre os
-// dois republica o mesmo evento com o mesmo `event_id`, que é o que o inbox de
-// quem consome reconhece. Marcar antes perderia o evento em silêncio, e essa é
-// a única das duas falhas que ninguém percebe.
-func (r *Relay) Run(ctx context.Context) {
-	for {
-		if err := r.drain(ctx); err != nil {
-			if ctx.Err() != nil {
-				return
-			}
-			r.log.Warn("relay adiada; os fatos do piloto ficam retidos", slog.Any("error", err))
-		}
-		select {
-		case <-ctx.Done():
-			return
-		case <-time.After(r.interval):
-		}
-	}
-}
-
-func (r *Relay) drain(ctx context.Context) error {
-	rows, err := r.db.QueryContext(ctx,
-		// O filtro por aggregate_type é o que permite dividir a tabela com o
-		// rental-core e o billing sem que uma relay publique os fatos da outra.
-		`SELECT id, aggregate_id, topic, payload, trace_parent
-		   FROM outbox
-		  WHERE published_at IS NULL AND aggregate_type = 'rider'
-		  ORDER BY occurred_at
-		  LIMIT 100`)
-	if err != nil {
-		return err
-	}
-	var batch []pending
-	for rows.Next() {
-		var row pending
-		if err := rows.Scan(&row.id, &row.key, &row.topic, &row.payload, &row.traceParent); err != nil {
-			_ = rows.Close()
-			return err
-		}
-		batch = append(batch, row)
-	}
-	if err := rows.Err(); err != nil {
-		_ = rows.Close()
-		return err
-	}
-	_ = rows.Close()
-
-	for _, row := range batch {
-		schemaID, err := r.registry.Resolve(ctx, row.topic)
-		if err != nil {
-			return err
-		}
-		record := &kgo.Record{
-			Topic: row.topic,
-			Key:   []byte(row.key),
-			Value: row.payload,
-			Headers: []kgo.RecordHeader{
-				{Key: "schema-id", Value: []byte(strconv.Itoa(schemaID))},
-			},
-		}
-		if row.traceParent != nil && *row.traceParent != "" {
-			record.Headers = append(record.Headers,
-				kgo.RecordHeader{Key: "traceparent", Value: []byte(*row.traceParent)})
-		}
-		if err := r.client.ProduceSync(ctx, record).FirstErr(); err != nil {
-			return err
-		}
-		if _, err := r.db.ExecContext(ctx,
-			`UPDATE outbox SET published_at = now() WHERE id = $1 AND published_at IS NULL`,
-			row.id,
-		); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 // ----------------------------------------------------------------- consumer

@@ -262,16 +262,20 @@ It is not visible in normal use, which is what makes it worth writing down:
 | Component | At one replica | At two |
 |---|---|---|
 | `api-gateway` | fine | fine — stateless, the one piece already ready |
-| outbox relays | 1 to 50 events/s ([#192](https://github.com/iVega123/ProjectY/issues/192)) | **publish every fact twice** — two of the three claim no row |
+| outbox relays | drain until empty, a batch of 100 per round trip; at least 500 events/s asserted for two relays ([#192](https://github.com/iVega123/ProjectY/issues/192)) | fine — each row once, in order per aggregate, and a dead replica's rows retaken after a 30-second lease |
 | Kafka consumers | fine | **impossible** — consumer state is in process memory ([#70](https://github.com/iVega123/ProjectY/issues/70)) |
 | `telemetry` | fine | a broadcast on one pod never reaches clients on another — the PubSub adapter is node-local |
 | CockroachDB | one node, `--insecure` | connection budget per pod becomes a real limit |
 | Redis | a shared instance at `appendfsync everysec`, and the rate limiter in one of its own without persistence ([#193](https://github.com/iVega123/ProjectY/issues/193), ADR 0026) | fine — every gateway replica shares the one bucket store |
 
-The relay line is the sharpest: the benchmark creates ~7.3 rentals/s against a
-`rental-core` relay that publishes **1/s**. The outbox already grows seven times
-faster than it drains for the length of every load run, and empties afterwards.
-Nothing asserts on drain latency, only on depth, so it has never been seen.
+The relay line was the sharpest: the benchmark created ~7.3 rentals/s against a
+`rental-core` relay that published **1/s**, so the outbox grew seven times faster
+than it drained for the length of every load run, and nothing asserted on drain
+latency, only on depth. All three relays now claim before sending, send a batch
+at once and drain until empty ([#70](https://github.com/iVega123/ProjectY/issues/70),
+[#192](https://github.com/iVega123/ProjectY/issues/192)). Each suite asserts a
+drain rate, and every load run records how long published events waited, per
+producer, in `load/results/<mode>-outbox-lag.json`.
 
 The load floor had the same shape on the read side: an idle console tab polled
 six times a minute, and each poll fetched a page of a hundred rentals to

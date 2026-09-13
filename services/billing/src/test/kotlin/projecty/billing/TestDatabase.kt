@@ -57,6 +57,7 @@ object TestDatabase {
             "002_rental_core.sql",
             "003_billing.sql",
             "004_settlement_moves_to_billing.sql",
+            "006_outbox_claims.sql",
         )
 
     private fun startCockroach(): String {

@@ -131,10 +131,12 @@ TTL. Query the actual rider/day after the probe to verify stored rows and TTL.
 
 ## Failure expectations
 
-The rental Kafka relay drains the `outbox` table in batches of 100, oldest
-first. A row is written in the same transaction as the rental, so an event
+The rental Kafka relay drains the `outbox` table in claimed batches of up to 100,
+oldest first, sent together and marked in one statement; identity and billing
+relay their own rows the same way (ADR 0009). A row is written in the same
+transaction as the rental, so an event
 without a rental cannot exist and a rental without its event cannot either. The
-row is marked published only after `ProduceAsync` returns: a crash between the
+row is marked published only after the broker acknowledges it: a crash between the
 two republishes the same event, and its id -- derived from the rental and the
 subject -- is what lets the consumer recognise it. The partition key is the
 motorcycle id, which does not change when a licence plate is corrected.
