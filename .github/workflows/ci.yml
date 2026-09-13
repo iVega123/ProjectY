@@ -65,6 +65,7 @@ jobs:
         run: |
           docker compose --file docker-compose.yml config --quiet --no-interpolate
           docker compose --file docker-compose.yml --file docker-compose.polyglot.yml config --quiet --no-interpolate
+          docker compose --file docker-compose.yml --file docker-compose.chaos.yml --file docker-compose.polyglot.yml --file docker-compose.chaos-polyglot.yml config --quiet --no-interpolate
           docker compose --file deploy/overlays/selfhost/compose.yaml config --quiet --no-interpolate
 
       # O billing não versiona um gradle-wrapper.jar: a versão do Gradle está

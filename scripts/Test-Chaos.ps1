@@ -6,9 +6,34 @@ Push-Location $root
 $fixture = Join-Path $root '.env.chaos-validation.json'
 $project = 'projecty-chaos-validation'
 try {
-    $json = docker compose -f docker-compose.yml -f docker-compose.chaos.yml config --format json
+    # The complete development topology: the polyglot services are where Kafka,
+    # Cassandra and the second Redis client live, and #67 is about all of them.
+    $json = docker compose -f docker-compose.yml -f docker-compose.chaos.yml -f docker-compose.polyglot.yml -f docker-compose.chaos-polyglot.yml config --format json
     if ($LASTEXITCODE) { throw 'Compose configuration failed.' }
     $model = $json | ConvertFrom-Json
+    $proxies = Get-Content 'deploy/chaos/toxiproxy-active.json' -Raw | ConvertFrom-Json
+    function Assert-Proxied([string]$Service, [string]$Key, [string]$Pattern) {
+        $value = $model.services.$Service.environment.$Key
+        if ($value -notmatch $Pattern) { throw "$Service bypasses proxy: $Key=$value" }
+    }
+    function Assert-Gated([string]$Service) {
+        if ($model.services.$Service.depends_on.toxiproxy.condition -ne 'service_healthy') { throw "$Service is not health-gated." }
+    }
+    # Kafka hands clients the address to reconnect to. If that address is not the
+    # proxy, a drill injects into the bootstrap call and nothing else.
+    if ($model.services.kafka.environment.KAFKA_ADVERTISED_LISTENERS -notmatch 'CHAOS://toxiproxy:9094') { throw 'Kafka does not advertise its proxied listener.' }
+    if (-not ($proxies | Where-Object { $_.name -eq 'kafka' -and $_.listen -like '*:9094' -and $_.upstream -eq 'kafka:9094' })) { throw 'Kafka proxy does not target the advertised listener.' }
+    foreach ($service in @('rental-core', 'identity', 'billing', 'risk-pricing')) {
+        $key = if ($service -eq 'rental-core') { 'Kafka__BootstrapServers' } else { 'KAFKA_BOOTSTRAP_SERVERS' }
+        Assert-Proxied $service $key '^toxiproxy:9094$'
+    }
+    Assert-Proxied billing BILLING_DATABASE_URL '//toxiproxy:26257/'
+    Assert-Proxied risk-pricing S3_ENDPOINT '^http://toxiproxy:9000$'
+    Assert-Proxied telemetry REDIS_URL '^redis://toxiproxy:6379'
+    Assert-Proxied telemetry CASSANDRA_HOST '^toxiproxy$'
+    Assert-Proxied telemetry KAFKA_HOST '^toxiproxy$'
+    Assert-Proxied telemetry KAFKA_PORT '^9094$'
+    foreach ($service in @('billing', 'risk-pricing', 'telemetry')) { Assert-Gated $service }
     foreach ($service in @('rental-core')) {
         $environment = $model.services.$service.environment
         foreach ($key in @('Redis__ConnectionString','RabbitMQ__HostName')) {

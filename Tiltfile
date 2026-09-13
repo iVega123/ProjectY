@@ -171,7 +171,7 @@ if orchestrator == 'kubernetes':
 if orchestrator == 'compose':
     compose_files = ['docker-compose.yml', 'docker-compose.chaos.yml']
     if full:
-        compose_files.append('docker-compose.polyglot.yml')
+        compose_files += ['docker-compose.polyglot.yml', 'docker-compose.chaos-polyglot.yml']
     docker_compose(compose_files, env_file = '.env', project_name = 'projecty')
 
     def configure_live_update(image, context, manifests, install_command, build_command = ''):
