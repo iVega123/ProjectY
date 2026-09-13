@@ -11,7 +11,7 @@ Generate local secrets with `scripts/New-LocalSecrets.ps1` on first use. Keep
 existing credentials when reusing volumes. Run `tilt up -- --full`, or:
 
 ```powershell
-docker compose -f docker-compose.yml -f docker-compose.chaos.yml -f docker-compose.polyglot.yml up -d --build
+docker compose -f docker-compose.yml -f docker-compose.chaos.yml -f docker-compose.polyglot.yml -f docker-compose.chaos-polyglot.yml up -d --build
 ```
 
 Console: http://localhost:3001. Tracking: localhost:4000. The BFF accepts an

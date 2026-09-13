@@ -59,6 +59,8 @@ builder.Services.AddSingleton(rabbit);
 // instrução em vez de um protocolo entre dois bancos.
 var connectionString = builder.Configuration.GetConnectionString("Postgresql")
     ?? throw new InvalidOperationException("ConnectionStrings:Postgresql is not configured.");
+// Bounded before anything opens a connection: see DatabaseDeadlines.
+connectionString = DatabaseDeadlines.Apply(connectionString);
 var database = new NpgsqlConnectionStringBuilder(connectionString);
 builder.Services
     .AddProjectYHealthChecks()
@@ -127,6 +129,7 @@ builder.Services.AddSingleton<IRabbitMqConnectionProvider, RabbitMqConnectionPro
 builder.Services.AddHostedService<OutboxRelay<ApplicationDbContext>>();
 
 // The rental half
+builder.Services.AddSingleton<RentalOutboxDispatcher>();
 builder.Services.AddHostedService<RentalKafkaRelay>();
 builder.Services.AddHostedService<PricingProjection>();
 builder.Services.AddHostedService<RiderProjection>();

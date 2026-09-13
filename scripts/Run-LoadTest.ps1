@@ -1,7 +1,7 @@
 #requires -Version 5.1
 [CmdletBinding()]
 param(
-    [ValidateSet('baseline','slow-db','db-down','rabbit-down')][string]$Mode = 'baseline',
+    [ValidateSet('baseline','slow-db','db-down','rabbit-down','redis-down','kafka-down','bad-network')][string]$Mode = 'baseline',
     [ValidateRange(1, 20)][int]$Vus = 5,
     [string]$Duration = '30s',
     [switch]$KeepStack,
@@ -23,13 +23,16 @@ function Compose {
     if ($LASTEXITCODE) { throw "Benchmark Compose command failed ($LASTEXITCODE)." }
 }
 try {
+    # Kafka exists only in the polyglot topology. Without it the drill would
+    # inject into a proxy nobody uses and report an outage that never happened.
+    if ($Mode -eq 'kafka-down' -and -not $Polyglot) { throw 'kafka-down requires -Polyglot.' }
     if (-not (Test-Path '.env.load')) {
         & "$PSScriptRoot/New-LocalSecrets.ps1" -OutputPath (Join-Path $root '.env.load') -RabbitMqDefinitionsPath (Join-Path $root '.env.load-rabbitmq.json')
     }
     & "$PSScriptRoot/Update-CommandQueueNames.ps1" -DefinitionsPath (Join-Path $root '.env.load-rabbitmq.json')
     New-Item -ItemType Directory -Force load/results | Out-Null
     $composeFiles = @('-f', 'docker-compose.yml', '-f', 'docker-compose.chaos.yml')
-    if ($Polyglot) { $composeFiles += @('-f', 'docker-compose.polyglot.yml') }
+    if ($Polyglot) { $composeFiles += @('-f', 'docker-compose.polyglot.yml', '-f', 'docker-compose.chaos-polyglot.yml') }
     $json = docker compose --env-file .env.load @composeFiles config --format json
     if ($LASTEXITCODE) { throw 'Benchmark model generation failed.' }
     $model = $json | ConvertFrom-Json
@@ -89,7 +92,7 @@ try {
     Compose exec -T rabbitmq rabbitmqctl import_definitions /etc/rabbitmq/definitions.json
     [string[]]$build = if ($NoBuild) { @() } else { @('--build') }
     $startServices = @('api-gateway', 'grafana', 'minio')
-    if ($Polyglot) { $startServices += @('console', 'telemetry', 'risk-pricing') }
+    if ($Polyglot) { $startServices += @('console', 'telemetry', 'risk-pricing', 'billing') }
     Compose up @build -d --wait --wait-timeout 300 @startServices
     # Only this generated project and its fresh, separately named volumes are touched.
     #
@@ -110,6 +113,23 @@ try {
     $metadata | ConvertTo-Json | Set-Content "load/results/$Mode-environment.json" -Encoding utf8
     docker compose -p $project -f $fixture run --rm k6-load
     $exitCode = $LASTEXITCODE
+    if ($Mode -eq 'kafka-down') {
+        # k6 has already removed the toxic. What remains to prove is the second
+        # half of the contract: the backlog left by the outage drains by itself.
+        $pendingSql = "SELECT count(*) FROM outbox WHERE published_at IS NULL AND aggregate_type = 'rental'"
+        $readPending = { [int](Compose exec -T cockroachdb cockroach sql --insecure --database=projecty --format=csv -e $pendingSql | Select-Object -Last 1) }
+        $drain = [Diagnostics.Stopwatch]::StartNew()
+        $atRecovery = & $readPending
+        $pending = $atRecovery
+        while ($pending -gt 0 -and $drain.Elapsed.TotalSeconds -lt 180) {
+            Start-Sleep -Seconds 1
+            $pending = & $readPending
+        }
+        $published = [int](Compose exec -T cockroachdb cockroach sql --insecure --database=projecty --format=csv -e "SELECT count(*) FROM outbox WHERE aggregate_type = 'rental'" | Select-Object -Last 1)
+        @{ pendingAtRecovery=$atRecovery; pendingAfterDrain=$pending; rentalEvents=$published; drainSeconds=[Math]::Round($drain.Elapsed.TotalSeconds, 1) } |
+            ConvertTo-Json | Set-Content "load/results/kafka-down-drain.json" -Encoding utf8
+        if ($pending -gt 0) { Write-Warning "Outbox did not drain within 180 s: $pending rental events pending."; if ($exitCode -eq 0) { $exitCode = 1 } }
+    }
 } finally {
     if (Test-Path -LiteralPath $fixture) {
         if ($KeepStack -or $PrepareOnly) { Write-Host "Benchmark stack retained: $fixture (Grafana http://localhost:13000)." }

@@ -65,6 +65,7 @@ jobs:
         run: |
           docker compose --file docker-compose.yml config --quiet --no-interpolate
           docker compose --file docker-compose.yml --file docker-compose.polyglot.yml config --quiet --no-interpolate
+          docker compose --file docker-compose.yml --file docker-compose.chaos.yml --file docker-compose.polyglot.yml --file docker-compose.chaos-polyglot.yml config --quiet --no-interpolate
           docker compose --file deploy/overlays/selfhost/compose.yaml config --quiet --no-interpolate
 
       # O billing não versiona um gradle-wrapper.jar: a versão do Gradle está
@@ -346,18 +347,30 @@ jobs:
           grafana_user=$(awk -F= '$1 == "GRAFANA_USER" { print $2 }' .env)
           grafana_password=$(awk -F= '$1 == "GRAFANA_PASSWORD" { print $2 }' .env)
 
-          for uid in prometheus tempo loki; do
+          provisioned() {
+            for uid in prometheus tempo loki; do
+              curl --fail --silent --show-error \
+                --user "$grafana_user:$grafana_password" \
+                "http://localhost:3000/api/datasources/uid/$uid/health" \
+                | jq --exit-status '.status == "OK"' >/dev/null || return 1
+            done
+
             curl --fail --silent --show-error \
               --user "$grafana_user:$grafana_password" \
-              "http://localhost:3000/api/datasources/uid/$uid/health" \
-              | jq --exit-status '.status == "OK"' >/dev/null
-          done
+              'http://localhost:3000/api/search?type=dash-db' \
+              | jq --exit-status \
+                '[.[] | select(.folderTitle == "ProjectY")] | length == 3' >/dev/null
+          }
 
-          curl --fail --silent --show-error \
-            --user "$grafana_user:$grafana_password" \
-            'http://localhost:3000/api/search?type=dash-db' \
-            | jq --exit-status \
-              '[.[] | select(.folderTitle == "ProjectY")] | length == 3' >/dev/null
+          # The container is healthy as soon as Grafana answers HTTP, which can be
+          # before it has provisioned datasources and dashboards; a datasource
+          # asked for in that window is a 404. Wait for provisioning, then check
+          # once more outside the loop so a real failure still fails the step.
+          for attempt in $(seq 1 30); do
+            if provisioned; then break; fi
+            sleep 2
+          done
+          provisioned
 
       - name: Print observability logs on failure
         if: failure()

@@ -1,0 +1,53 @@
+# Development-only: the chaos overlay for the polyglot services.
+#
+# Loaded after docker-compose.polyglot.yml, never on its own, and never by the
+# Kubernetes path. It exists as a separate file because it rewires services the
+# base chaos overlay cannot name: Compose refuses a partial service definition
+# for kafka or telemetry when the polyglot file is absent.
+services:
+  # Kafka advertises the address a client must reconnect to, so a plain TCP
+  # proxy in front of :9092 would be bypassed after the first metadata call.
+  # A third listener advertises the proxy itself. Applications bootstrap through
+  # it; the broker's own tooling (topic creation, the schema registry's
+  # storage) keeps the direct PLAINTEXT listener, as the other admin paths do.
+  kafka:
+    environment:
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093,CHAOS://:9094
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,CHAOS://toxiproxy:9094
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,CHAOS:PLAINTEXT
+
+  rental-core:
+    environment:
+      Kafka__BootstrapServers: toxiproxy:9094
+
+  identity:
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: toxiproxy:9094
+
+  billing:
+    environment:
+      BILLING_DATABASE_URL: jdbc:postgresql://toxiproxy:26257/projecty?sslmode=disable&user=root
+      KAFKA_BOOTSTRAP_SERVERS: toxiproxy:9094
+    depends_on:
+      toxiproxy:
+        condition: service_healthy
+
+  risk-pricing:
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: toxiproxy:9094
+      S3_ENDPOINT: http://toxiproxy:9000
+    depends_on:
+      toxiproxy:
+        condition: service_healthy
+
+  # Redis holds the live position and Cassandra the trip history. Both cross the
+  # proxy so "Cassandra down" can be shown to leave the live map untouched.
+  telemetry:
+    environment:
+      REDIS_URL: redis://toxiproxy:6379
+      CASSANDRA_HOST: toxiproxy
+      KAFKA_HOST: toxiproxy
+      KAFKA_PORT: "9094"
+    depends_on:
+      toxiproxy:
+        condition: service_healthy

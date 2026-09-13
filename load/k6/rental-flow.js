@@ -22,6 +22,20 @@ export const options = {
   summaryTrendStats: ["avg", "min", "med", "max", "p(95)", "p(99)"],
 };
 
+// The same injections as deploy/chaos/drills.json, applied for the length of the run.
+const drills = {
+  baseline: [],
+  "slow-db": [{ proxy: "cockroachdb", type: "latency", attributes: { latency: 500, jitter: 0 } }],
+  "db-down": [{ proxy: "cockroachdb", type: "timeout", attributes: { timeout: 0 } }],
+  "rabbit-down": [{ proxy: "rabbitmq", type: "timeout", attributes: { timeout: 0 } }],
+  "redis-down": [{ proxy: "redis", type: "timeout", attributes: { timeout: 0 } }],
+  "kafka-down": [{ proxy: "kafka", type: "timeout", attributes: { timeout: 0 } }],
+  "bad-network": [
+    { proxy: "cockroachdb", type: "slicer", attributes: { average_size: 64, size_variation: 16, delay: 100 } },
+    { proxy: "cockroachdb", type: "limit_data", attributes: { bytes: 60000 } },
+  ],
+};
+
 // A fixture semeia a moto n com um id determinístico (load/fixtures/seed-rental-core.sql).
 // O benchmark o calcula em vez de perguntar: um GET a mais por iteração mediria
 // a busca da moto junto com a criação do aluguel, que não é o que este teste afirma.
@@ -63,15 +77,14 @@ export function setup() {
   } while (Date.now() < readyUntil);
   if (warmup.status !== 200 && warmup.status !== 201) fail("Rental warmup failed: " + warmup.status + " " + warmup.body);
   const mode = __ENV.MODE || "baseline";
-  if (mode !== "baseline") {
-    const proxy = mode === "rabbit-down" ? "rabbitmq" : "cockroachdb";
-    const attributes = mode === "slow-db" ? { latency: 500, jitter: 0 } : { timeout: 0 };
-    const injection = http.post("http://toxiproxy:8474/proxies/" + proxy + "/toxics",
-      JSON.stringify({ name: "load-drill", type: mode === "slow-db" ? "latency" : "timeout",
-        stream: "downstream", toxicity: 1, attributes }),
+  if (!(mode in drills)) fail("Unknown load mode: " + mode);
+  drills[mode].forEach((toxic, index) => {
+    const injection = http.post("http://toxiproxy:8474/proxies/" + toxic.proxy + "/toxics",
+      JSON.stringify({ name: "load-drill-" + index, type: toxic.type,
+        stream: "downstream", toxicity: 1, attributes: toxic.attributes }),
       { headers: { "Content-Type": "application/json" }, tags: { name: "chaos-injection" } });
     if (injection.status !== 200) fail("Could not inject benchmark fault: " + injection.status);
-  }
+  });
   return { credentials, run };
 }
 
@@ -103,10 +116,9 @@ export function handleSummary(data) {
 }
 
 export function teardown() {
-  if ((__ENV.MODE || "baseline") !== "baseline") {
-    const proxy = __ENV.MODE === "rabbit-down" ? "rabbitmq" : "cockroachdb";
-    const response = http.del("http://toxiproxy:8474/proxies/" + proxy + "/toxics/load-drill",
+  (drills[__ENV.MODE || "baseline"] || []).forEach((toxic, index) => {
+    const response = http.del("http://toxiproxy:8474/proxies/" + toxic.proxy + "/toxics/load-drill-" + index,
       null, { tags: { name: "chaos-clear" } });
     check(response, { "benchmark toxic cleared": r => r.status === 204 });
-  }
+  });
 }

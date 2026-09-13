@@ -290,6 +290,7 @@ mod tests {
     fn config() -> UpstreamResilienceConfig {
         UpstreamResilienceConfig {
             timeout: Duration::from_millis(50),
+            deadline: Duration::from_millis(1_000),
             max_concurrency: 1,
             breaker_failure_threshold: 2,
             breaker_open_duration: Duration::from_millis(100),
