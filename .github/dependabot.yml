@@ -1,39 +1,114 @@
 version: 2
 
+# One schedule for every ecosystem, so updates land together on Monday morning
+# and one person reviews them in one sitting.
+#
+# Minor and patch bumps travel together per ecosystem; majors arrive as
+# individual PRs so each one can be reviewed and smoke-tested on its own. A
+# bundle of sixteen updates where one breaks the stack is not reviewable.
+
 updates:
   - package-ecosystem: docker-compose
     directories:
       - "/"
       - "/deploy/base"
-    schedule:
+    schedule: &weekly
       interval: weekly
       day: monday
       time: "09:00"
       timezone: America/Manaus
     groups:
-      # Minor and patch bumps travel together; majors arrive as individual PRs
-      # so each one can be reviewed and smoke-tested on its own. A bundle of
-      # sixteen updates where one breaks the stack is not reviewable.
       container-images:
-        patterns:
-          - "*"
-        update-types:
-          - "minor"
-          - "patch"
+        patterns: ["*"]
+        update-types: &minor-and-patch ["minor", "patch"]
 
+  # These paths used to be /MotoHub/MotoHub and /RentalOperations/RentalOperations,
+  # which stopped existing when the services moved under services/. Dependabot
+  # skipped them without saying so, and no Dockerfile base image was updated.
   - package-ecosystem: docker
     directories:
-      - "/MotoHub/MotoHub"
-      - "/RentalOperations/RentalOperations"
-    schedule:
-      interval: weekly
-      day: monday
-      time: "09:00"
-      timezone: America/Manaus
+      - "/contracts"
+      - "/deploy/db"
+      - "/deploy/db/cassandra"
+      - "/deploy/kafka"
+      - "/services/api-gateway"
+      - "/services/billing"
+      - "/services/console"
+      - "/services/identity"
+      - "/services/media-guard"
+      - "/services/rental-core/RentalCore"
+      - "/services/risk-pricing"
+      - "/services/telemetry"
+    schedule: *weekly
     groups:
-      dotnet-base-images:
-        patterns:
-          - "mcr.microsoft.com/dotnet/*"
-        update-types:
-          - "minor"
-          - "patch"
+      base-images:
+        patterns: ["*"]
+        update-types: *minor-and-patch
+
+  - package-ecosystem: nuget
+    directory: "/services/rental-core"
+    schedule: *weekly
+    groups:
+      nuget:
+        patterns: ["*"]
+        update-types: *minor-and-patch
+
+  - package-ecosystem: cargo
+    directories:
+      - "/services/api-gateway"
+      - "/services/media-guard"
+    schedule: *weekly
+    groups:
+      cargo:
+        patterns: ["*"]
+        update-types: *minor-and-patch
+
+  - package-ecosystem: npm
+    directory: "/services/console"
+    schedule: *weekly
+    groups:
+      npm:
+        patterns: ["*"]
+        update-types: *minor-and-patch
+
+  - package-ecosystem: gomod
+    directory: "/services/identity"
+    schedule: *weekly
+    groups:
+      gomod:
+        patterns: ["*"]
+        update-types: *minor-and-patch
+
+  - package-ecosystem: gradle
+    directory: "/services/billing"
+    schedule: *weekly
+    groups:
+      gradle:
+        patterns: ["*"]
+        update-types: *minor-and-patch
+
+  # requirements.txt holds the ranges; requirements.lock, which the image
+  # installs, is not a file Dependabot reads and still has to be regenerated.
+  - package-ecosystem: pip
+    directory: "/services/risk-pricing"
+    schedule: *weekly
+    groups:
+      pip:
+        patterns: ["*"]
+        update-types: *minor-and-patch
+
+  - package-ecosystem: mix
+    directory: "/services/telemetry"
+    schedule: *weekly
+    groups:
+      mix:
+        patterns: ["*"]
+        update-types: *minor-and-patch
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule: *weekly
+    groups:
+      github-actions:
+        patterns: ["*"]
+        update-types: *minor-and-patch
