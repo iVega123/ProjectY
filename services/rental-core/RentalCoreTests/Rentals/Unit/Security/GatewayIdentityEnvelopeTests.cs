@@ -128,6 +128,26 @@ public sealed class GatewayIdentityEnvelopeTests
     }
 
     /// <summary>
+    /// A request that already carries a v1 signature, from reuse or a caller's own headers, leaves
+    /// the signer without it: nothing signed here travels with a signature that ignores the body.
+    /// </summary>
+    [Fact]
+    public async Task TheServiceSigner_StripsALegacySignatureTheRequestAlreadyCarried()
+    {
+        var signer = new GatewayIdentitySigner(Key, KeyId, new FixedClock(IssuedAt));
+        using var request = new HttpRequestMessage(HttpMethod.Post, "http://rental-core" + RentalPath)
+        {
+            Content = new StringContent(Body, Encoding.UTF8, "application/json")
+        };
+        request.Headers.TryAddWithoutValidation(LegacySignatureHeader, PreviousV1);
+
+        await signer.SignAsync(request, Rider(), Audience);
+
+        Assert.False(request.Headers.Contains(LegacySignatureHeader));
+        Assert.Equal(GoldenV2, Single(request, GatewayIdentityDefaults.SignatureV2Header));
+    }
+
+    /// <summary>
     /// A slow upload must not spend the envelope's window before it is sent: the timestamp is
     /// taken after the body is read. The clock here reads a minute earlier until the content has
     /// been read, so stamping first would produce a different signature than the golden one.

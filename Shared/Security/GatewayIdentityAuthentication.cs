@@ -275,6 +275,9 @@ public sealed class GatewayIdentityAuthenticationHandler(
 
 public sealed class GatewayIdentitySigner
 {
+    /// <summary>The header the v1 signature travelled in before issue #274.</summary>
+    private const string LegacySignatureHeader = "x-identity-signature";
+
     private readonly byte[] _signingKey;
     private readonly string _signingKeyId;
     private readonly TimeProvider _clock;
@@ -339,6 +342,9 @@ public sealed class GatewayIdentitySigner
         {
             request.Headers.Remove(header);
         }
+        // No longer produced or accepted (issue #274), but a reused request could still carry one,
+        // and nothing signed here should leave with a signature that does not cover the body.
+        request.Headers.Remove(LegacySignatureHeader);
         request.Headers.TryAddWithoutValidation(GatewayIdentityDefaults.KeyIdHeader, _signingKeyId);
         request.Headers.TryAddWithoutValidation(GatewayIdentityDefaults.SubjectHeader, subject);
         request.Headers.TryAddWithoutValidation(GatewayIdentityDefaults.RolesHeader, rolesValue);
