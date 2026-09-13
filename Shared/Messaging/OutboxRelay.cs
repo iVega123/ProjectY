@@ -6,7 +6,7 @@ using Microsoft.Extensions.Logging;
 
 namespace ProjectY.Shared.Messaging;
 
-public sealed class OutboxRelay<TContext> : BackgroundService
+public sealed partial class OutboxRelay<TContext> : BackgroundService
     where TContext : DbContext
 {
     private readonly IServiceScopeFactory _scopeFactory;
@@ -40,11 +40,7 @@ public sealed class OutboxRelay<TContext> : BackgroundService
             }
             catch (Exception exception)
             {
-                _logger.LogError(
-                    exception,
-                    "Outbox relay infrastructure failure in {ServiceName}; retrying in {RetryDelay}.",
-                    _options.ServiceName,
-                    _options.PollInterval);
+                LogRelayFailed(_logger, exception, _options.ServiceName, _options.PollInterval);
             }
 
             try
@@ -93,11 +89,7 @@ public sealed class OutboxRelay<TContext> : BackgroundService
             }
             else
             {
-                _logger.LogWarning(
-                    "Outbox claim {ClaimToken} for message {MessageId} expired before completion in {ServiceName}.",
-                    claimToken,
-                    message.Id,
-                    _options.ServiceName);
+                LogClaimExpired(_logger, claimToken, message.Id, _options.ServiceName);
             }
         }
 
@@ -199,7 +191,7 @@ public sealed class OutboxRelay<TContext> : BackgroundService
         return claimedMessage;
     }
 
-    private async Task<bool> MarkPublishedAsync(
+    private static async Task<bool> MarkPublishedAsync(
         TContext context,
         OutboxMessage message,
         Guid claimToken,
@@ -282,22 +274,25 @@ public sealed class OutboxRelay<TContext> : BackgroundService
 
         if (released)
         {
-            _logger.LogWarning(
-                exception,
-                "Outbox publish failed for {MessageId} from {ServiceName}; the committed event remains pending.",
-                message.Id,
-                _options.ServiceName);
+            LogPublishFailed(_logger, exception, message.Id, _options.ServiceName);
         }
         else
         {
-            _logger.LogWarning(
-                exception,
-                "Outbox publish failed after claim {ClaimToken} for {MessageId} was lost in {ServiceName}.",
-                claimToken,
-                message.Id,
-                _options.ServiceName);
+            LogPublishFailedAfterClaimLost(_logger, exception, claimToken, message.Id, _options.ServiceName);
         }
     }
+
+    [LoggerMessage(Level = LogLevel.Error, Message = "Outbox relay infrastructure failure in {ServiceName}; retrying in {RetryDelay}.")]
+    private static partial void LogRelayFailed(ILogger logger, Exception exception, string serviceName, TimeSpan retryDelay);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Outbox claim {ClaimToken} for message {MessageId} expired before completion in {ServiceName}.")]
+    private static partial void LogClaimExpired(ILogger logger, Guid claimToken, Guid messageId, string serviceName);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Outbox publish failed for {MessageId} from {ServiceName}; the committed event remains pending.")]
+    private static partial void LogPublishFailed(ILogger logger, Exception exception, Guid messageId, string serviceName);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Outbox publish failed after claim {ClaimToken} for {MessageId} was lost in {ServiceName}.")]
+    private static partial void LogPublishFailedAfterClaimLost(ILogger logger, Exception exception, Guid claimToken, Guid messageId, string serviceName);
 
     private static TimeSpan RetryDelay(int attempts) =>
         TimeSpan.FromSeconds(Math.Min(30, Math.Pow(2, Math.Min(attempts, 5))));
