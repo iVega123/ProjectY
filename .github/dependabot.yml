@@ -6,13 +6,16 @@ version: 2
 # Minor and patch bumps travel together per ecosystem; majors arrive as
 # individual PRs so each one can be reviewed and smoke-tested on its own. A
 # bundle of sixteen updates where one breaks the stack is not reviewable.
+#
+# The schedule is repeated in every entry on purpose: Dependabot rejects YAML
+# anchors and aliases ("YAML aliases are not supported") and then runs nothing.
 
 updates:
   - package-ecosystem: docker-compose
     directories:
       - "/"
       - "/deploy/base"
-    schedule: &weekly
+    schedule:
       interval: weekly
       day: monday
       time: "09:00"
@@ -20,7 +23,7 @@ updates:
     groups:
       container-images:
         patterns: ["*"]
-        update-types: &minor-and-patch ["minor", "patch"]
+        update-types: ["minor", "patch"]
 
   # These paths used to be /MotoHub/MotoHub and /RentalOperations/RentalOperations,
   # which stopped existing when the services moved under services/. Dependabot
@@ -39,76 +42,112 @@ updates:
       - "/services/rental-core/RentalCore"
       - "/services/risk-pricing"
       - "/services/telemetry"
-    schedule: *weekly
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: America/Manaus
     groups:
       base-images:
         patterns: ["*"]
-        update-types: *minor-and-patch
+        update-types: ["minor", "patch"]
 
   - package-ecosystem: nuget
     directory: "/services/rental-core"
-    schedule: *weekly
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: America/Manaus
     groups:
       nuget:
         patterns: ["*"]
-        update-types: *minor-and-patch
+        update-types: ["minor", "patch"]
 
   - package-ecosystem: cargo
     directories:
       - "/services/api-gateway"
       - "/services/media-guard"
-    schedule: *weekly
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: America/Manaus
     groups:
       cargo:
         patterns: ["*"]
-        update-types: *minor-and-patch
+        update-types: ["minor", "patch"]
 
   - package-ecosystem: npm
     directory: "/services/console"
-    schedule: *weekly
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: America/Manaus
     groups:
       npm:
         patterns: ["*"]
-        update-types: *minor-and-patch
+        update-types: ["minor", "patch"]
 
   - package-ecosystem: gomod
     directory: "/services/identity"
-    schedule: *weekly
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: America/Manaus
     groups:
       gomod:
         patterns: ["*"]
-        update-types: *minor-and-patch
+        update-types: ["minor", "patch"]
 
   - package-ecosystem: gradle
     directory: "/services/billing"
-    schedule: *weekly
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: America/Manaus
     groups:
       gradle:
         patterns: ["*"]
-        update-types: *minor-and-patch
+        update-types: ["minor", "patch"]
 
   # requirements.txt holds the ranges; requirements.lock, which the image
   # installs, is not a file Dependabot reads and still has to be regenerated.
   - package-ecosystem: pip
     directory: "/services/risk-pricing"
-    schedule: *weekly
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: America/Manaus
     groups:
       pip:
         patterns: ["*"]
-        update-types: *minor-and-patch
+        update-types: ["minor", "patch"]
 
   - package-ecosystem: mix
     directory: "/services/telemetry"
-    schedule: *weekly
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: America/Manaus
     groups:
       mix:
         patterns: ["*"]
-        update-types: *minor-and-patch
+        update-types: ["minor", "patch"]
 
   - package-ecosystem: github-actions
     directory: "/"
-    schedule: *weekly
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: America/Manaus
     groups:
       github-actions:
         patterns: ["*"]
-        update-types: *minor-and-patch
+        update-types: ["minor", "patch"]
