@@ -94,6 +94,20 @@ crash leaves the claim until its lease expires. A confirm followed by a crash
 before `PublishedAtUtc` is stored causes a later republish; consumer inboxes are
 what make that duplicate harmless.
 
+**The rental Kafka relay meets the same guarantees on the shared `outbox` table
+(#70).** `RentalOutboxDispatcher` claims a batch of up to 100 rows in one
+`UPDATE … FROM (SELECT … FOR UPDATE SKIP LOCKED)` statement, recording
+`claim_token` and a 30-second `claimed_until` lease, and sends outside the
+transaction. A row is eligible only when no earlier row of the same
+`aggregate_id` (the motorcycle) is still pending, claimed or not, so one
+aggregate's events leave in `occurred_at` order even with two replicas. Two rows
+of one aggregate with an identical `occurred_at` are not ordered. A transport
+failure marks what was sent, releases the rest and counts a Kafka degradation; a
+crash leaves the claim until the lease expires. `OutboxDispatcherTests` runs two
+dispatchers against one table, kills one mid-send, and checks per-aggregate
+order. identity and billing relay from the same table without a claim yet; that
+is #192.
+
 <a id="transactional-inbox"></a>
 ## PostgreSQL transactional inbox
 

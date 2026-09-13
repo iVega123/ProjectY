@@ -1,0 +1,23 @@
+{
+  "measuredAt": "2026-09-13T01:09:10.1989660Z",
+  "commit": "7cb83ff5c35bf18bd73963d012014ec4a7041bf9",
+  "vus": 5,
+  "duration": "30s",
+  "k6Exit": 0,
+  "rentalEventsWritten": 180,
+  "backlogAtRecovery": 109,
+  "publishedByReplicas": 180,
+  "replicas": [
+    {
+      "container": "projecty-load-rental-core-2",
+      "published": 100
+    },
+    {
+      "container": "projecty-load-rental-core-1",
+      "published": 80
+    }
+  ],
+  "topicGrowth": 180,
+  "pendingAfterDrain": 0,
+  "drainSeconds": 1.6
+}
