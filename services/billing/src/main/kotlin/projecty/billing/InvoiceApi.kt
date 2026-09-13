@@ -48,11 +48,19 @@ class InvoiceApi(
             return
         }
 
+        // Um GET não costuma trazer corpo, mas o envelope `v2` assina o que vier,
+        // e conferir sem ler seria assinar "nada" por conta própria.
+        val body = exchange.requestBody.readNBytes(GatewayIdentity.MAX_SIGNED_BODY_BYTES + 1)
+        if (body.size > GatewayIdentity.MAX_SIGNED_BODY_BYTES) {
+            write(exchange, 413, mapOf("detail" to "The request body is larger than the gateway signs."))
+            return
+        }
         val caller =
             identity.verify(
                 { exchange.requestHeaders[it] ?: emptyList() },
                 "GET",
                 pathAndQuery(exchange.requestURI),
+                body,
             )
         if (caller == null) {
             write(exchange, 401, mapOf("detail" to "A valid gateway identity envelope is required."))

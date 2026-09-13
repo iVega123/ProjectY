@@ -110,8 +110,9 @@ unready, and `/metrics` publishes
 The gateway rejects every client-supplied `x-identity-*` header and never sends
 the caller's `Authorization` or `Cookie` headers upstream. After verification it
 adds `x-identity-subject`, sorted `x-identity-roles`, `x-identity-issued-at`,
-`x-identity-key-id`, and `x-identity-signature`. The signature is base64url
-HMAC-SHA256 over this newline-delimited canonical value:
+`x-identity-key-id`, `x-identity-signature` and `x-identity-signature-v2`. Each
+signature is base64url HMAC-SHA256 over a newline-delimited canonical value.
+`x-identity-signature` carries `v1=` over:
 
 ```text
 v1
@@ -123,6 +124,24 @@ HTTP-METHOD
 path-and-query
 audience
 ```
+
+`x-identity-signature-v2` carries `v2=` over the same lines with `v2` as the
+version, plus one final line: the lowercase hex SHA-256 of the body. A request
+with no body uses the digest of zero bytes. Both are sent until every verifier
+has stopped accepting `v1`; [ADR 0008](../../docs/adr/0008-single-trust-boundary.md)
+has the rules and the rollout.
+
+Signing the body means the gateway reads it first. An authenticated request is
+never streamed upstream, retryable or not:
+
+- the gateway buffers the body, up to 32 MiB, and signs it;
+- the upstream receives exactly those bytes, with a `Content-Length`;
+- a larger body is answered with `413 urn:projecty:problem:signed-body-too-large`
+  before anything is sent.
+
+This happens after the rate limiter, so a caller over quota does not get
+32 MiB read. Public routes (login, registration, refresh, logout) carry no
+envelope and still stream.
 
 Tokens come from the Go `identity` service, which signs with Ed25519 and
 publishes its public keys at `/.well-known/jwks.json`. An unresolvable JWKS

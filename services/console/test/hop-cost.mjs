@@ -14,7 +14,7 @@
 // O caminho direto assina o envelope do ADR 0008 à mão, porque é o que o portão
 // faria. Sem isso a comparação mediria "com autenticação" contra "sem", que é
 // outra pergunta.
-import {createHmac} from 'node:crypto';
+import {createHash, createHmac} from 'node:crypto';
 import {writeFileSync} from 'node:fs';
 
 const gateway = process.env.GATEWAY_URL ?? 'http://api-gateway:8090';
@@ -35,16 +35,20 @@ if (!key || !token) throw new Error('GATEWAY_IDENTITY_SIGNING_KEY and ACCESS_TOK
 // id que não existe responde `[]` -- o assunto aqui é o caminho, não a linha.
 const path = '/api/motorcycles/batch?ids=00000000-0000-0000-0000-000000000000';
 
+// As duas assinaturas, como o portão manda. A leitura não tem corpo, e o `v2`
+// assina o digest de zero bytes.
 function envelope(method, pathAndQuery, roles = 'Rider') {
   const issuedAt = String(Math.floor(Date.now() / 1000));
-  const canonical = ['v1', keyId, subject, roles, issuedAt, method, pathAndQuery, audience].join('\n');
-  const signature = createHmac('sha256', key).update(canonical).digest('base64url');
+  const bound = [keyId, subject, roles, issuedAt, method, pathAndQuery, audience].join('\n');
+  const sign = (canonical) => createHmac('sha256', key).update(canonical).digest('base64url');
+  const emptyBody = createHash('sha256').update('').digest('hex');
   return {
     'x-identity-key-id': keyId,
     'x-identity-subject': subject,
     'x-identity-roles': roles,
     'x-identity-issued-at': issuedAt,
-    'x-identity-signature': 'v1=' + signature,
+    'x-identity-signature': 'v1=' + sign('v1\n' + bound),
+    'x-identity-signature-v2': 'v2=' + sign('v2\n' + bound + '\n' + emptyBody),
   };
 }
 

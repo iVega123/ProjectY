@@ -250,10 +250,11 @@ class InvoiceApiTest {
         method: String = "GET",
     ): HttpRequest.Builder {
         val issuedAt = Instant.now().epochSecond.toString()
-        val canonical =
-            listOf("v1", "local-v1", subject, roles, issuedAt, method, pathAndQuery, audience)
+        val bound =
+            listOf("local-v1", subject, roles, issuedAt, method, pathAndQuery, audience)
                 .joinToString("\n")
-        val signature =
+
+        fun sign(canonical: String): String =
             Mac.getInstance("HmacSHA256").run {
                 init(SecretKeySpec(key, "HmacSHA256"))
                 Base64
@@ -261,12 +262,16 @@ class InvoiceApiTest {
                     .withoutPadding()
                     .encodeToString(doFinal(canonical.toByteArray(StandardCharsets.UTF_8)))
             }
+        // As duas assinaturas, como o portão manda; a `v2` sobre o corpo vazio de
+        // um GET.
+        val emptyBody = GatewayIdentity.bodyDigest(ByteArray(0))
         return builder
             .header(GatewayIdentity.KEY_ID_HEADER, "local-v1")
             .header(GatewayIdentity.SUBJECT_HEADER, subject)
             .header(GatewayIdentity.ROLES_HEADER, roles)
             .header(GatewayIdentity.ISSUED_AT_HEADER, issuedAt)
-            .header(GatewayIdentity.SIGNATURE_HEADER, "v1=$signature")
+            .header(GatewayIdentity.SIGNATURE_HEADER, "v1=${sign("v1\n$bound")}")
+            .header(GatewayIdentity.SIGNATURE_V2_HEADER, "v2=${sign("v2\n$bound\n$emptyBody")}")
     }
 
     private fun seed(riderId: String): ClosedRental {

@@ -51,44 +51,60 @@ The honest reason is not that mTLS is wrong. It is that **this system already
 authenticates every internal hop, and does it above the transport layer.**
 
 ADR 0008 gives every service-to-service call a signed identity envelope: an
-HMAC over method, path, subject, roles, audience and issue time, with a 30
-second maximum age. A service that receives a request without a valid envelope
-refuses it. mTLS would answer "is this peer who it says it is"; the envelope
-already answers a stronger question — "did the gateway authorise *this
-request*, for *this subject*, *now*".
+HMAC over method, path, subject, roles, audience, issue time and, since `v2`,
+the body, with a 30 second maximum age. A service that receives a request
+without a valid envelope refuses it. mTLS would answer "is this peer who it says
+it is"; the envelope already answers a stronger question — "did the gateway
+authorise *this request*, for *this subject*, *now*".
 
-**What the envelope does not do is protect the body.** The canonical string has
-no digest of the payload and no nonce, so an attacker who can read *and inject*
-cluster traffic can capture an envelope and reuse it, **on the same method and
-path, within the 30 second window, with a different body**. Concretely: a
-captured `PUT /update-image` can be replayed with a different CNH image and it
-authenticates as the victim. Replay to another route, another verb or another
-audience still fails — the canonical string binds those — and after 30 seconds
-the envelope is dead. But same-route body substitution is a real integrity gap,
-and it is the one place where the argument above is weaker than it sounds.
+**The body, and how the gap in it was closed.** When this record was first
+written, the canonical string had no digest of the payload, and it said so here.
 
-What mTLS would add on top is therefore two things, not one: confidentiality on
-the wire inside the cluster, and integrity of the body between hops. Against an
-attacker who can already read and inject pod-to-pod traffic, a service mesh is
-one control; a default-deny network policy plus a single ingress is another. The
-mesh also brings a sidecar per pod, certificate rotation to operate, and a
-second identity system whose relationship to the envelope would have to be
-explained — in a system that runs seven languages, each new cross-cutting
-concern is paid seven times (the argument of ADR 0014 against GraphQL, applied
-to the transport).
+- **The gap.** An attacker who can read *and inject* cluster traffic could
+  capture an envelope and reuse it **on the same method and path, within the 30
+  second window, with a different body**. A captured `PUT /update-image` could be
+  replayed with a different CNH image, and it authenticated as the victim.
+- **The fix.** [#191](https://github.com/iVega123/ProjectY/issues/191) added a
+  `v2` canonical string whose last line is the SHA-256 of the body. The gateway
+  now buffers and signs every authenticated body, and identity, billing and
+  rental-core refuse a `v2` envelope whose body does not match. identity tests
+  the exact case above through the whole route: a substituted CNH image is
+  refused and nothing is stored.
+- **Before and after.** Replay to another route, another verb or another
+  audience failed before, and fails now. Same-route body substitution fails too.
+
+**What remains accepted, now that the body is bound:**
+
+- **Confidentiality on the wire inside the cluster.** An attacker with packet
+  capture reads the envelope and the payload, the CNH image included. The
+  envelope authenticates and binds; it does not encrypt.
+- **Replay of the identical request.** There is still no nonce, so the same
+  method, path and body can be sent again within 30 seconds. The replay repeats
+  what the victim already asked for; it cannot change it. `PUT` and `DELETE` are
+  idempotent, and a rental created with an `Idempotency-Key` returns the first
+  result. The header is optional, so a create sent without one can be repeated.
+- **The rollout downgrade, until `v1` is removed.** The gateway sends both
+  signatures, and a verifier still accepts `v1` when `v2` is absent, so neither
+  side can be deployed first and lock the other out. The same rule lets an
+  attacker strip `x-identity-signature-v2` from a captured envelope and fall back
+  to the signature that does not cover the body. Removing `v1` acceptance from
+  the three verifiers closes it; that is
+  [#274](https://github.com/iVega123/ProjectY/issues/274).
+
+What mTLS would add on top is therefore confidentiality, and with it the end of
+identical-request replay, since an attacker could no longer inject into the
+session. Against an attacker who can already read and inject pod-to-pod traffic,
+a service mesh is one control; a default-deny network policy plus a single
+ingress is another. The mesh also brings a sidecar per pod, certificate rotation
+to operate, and a second identity system whose relationship to the envelope
+would have to be explained. In a system that runs seven languages, each new
+cross-cutting concern is paid seven times (the argument of ADR 0014 against
+GraphQL, applied to the transport).
 
 **The cost accepted:** an attacker with packet capture inside the cluster reads
-the envelope and the payload, and — for 30 seconds, on the same route — can
-substitute the payload. The CNH image in a `PUT /update-image` body is both
-readable and replaceable under that attacker. That is the trade, stated.
-
-**What would close it without a mesh:** a digest of the body in the canonical
-string, as a `v2` envelope. That is a change in four implementations — the Rust
-gateway that signs, and the C#, Kotlin and Go verifiers — with a rollout in
-which both versions are accepted, so it belongs in its own change and not in a
-documentation one. It is cheaper than a mesh and closes the integrity half
-without the confidentiality half. Tracked as
-[#191](https://github.com/iVega123/ProjectY/issues/191).
+the envelope and the payload, and can repeat the identical request for 30
+seconds. Once `v1` acceptance is removed, that attacker can no longer substitute
+the payload. That is the trade, stated.
 
 **The trigger to revisit:** a second tenant in the same cluster, a compliance
 requirement that names encryption in transit between workloads, or the first
@@ -115,8 +131,10 @@ service that is not ours running beside these.
   louder failure than the silent one it had.
 - The identity envelope carries the weight of internal authentication. If it
   were ever weakened, this decision would have to be reopened with it — the two
-  are load-bearing together. It does not carry integrity of the body, and this
-  record says so where the decision rests on it, rather than in a footnote.
+  are load-bearing together. Since #191 it carries integrity of the body as
+  well. It does not carry confidentiality, and the `v1` fallback keeps the body
+  unbound until the verifiers drop it. This record says both where the decision
+  rests on them, rather than in a footnote.
 
 ## What implemented it
 

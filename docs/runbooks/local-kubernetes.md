@@ -82,11 +82,14 @@ already trusts and answers exit 60 for a certificate from an authority that is
 deliberately in no trust store.
 
 Between services the traffic is plain HTTP. That is a decision, not an
-omission: every internal hop is authenticated above the transport by the signed
-identity envelope, and the integrity gap that leaves — same-route body
-substitution inside the 30 second window — is stated in
-[ADR 0025](../adr/0025-tls-terminates-at-the-ingress.md) and tracked as
-[#191](https://github.com/iVega123/ProjectY/issues/191). No service redirects to
+omission. The signed identity envelope authenticates every internal hop above
+the transport, and since [#191](https://github.com/iVega123/ProjectY/issues/191)
+it binds the body too. What that still leaves is stated in
+[ADR 0025](../adr/0025-tls-terminates-at-the-ingress.md):
+
+- confidentiality on the wire;
+- identical-request replay inside the 30 second window;
+- the `v1` fallback, until the verifiers drop it. No service redirects to
 HTTPS; `rental-core` reads `X-Forwarded-Proto` through `UseForwardedHeaders`
 with a forward limit of two, because the ingress and the gateway are two hops.
 

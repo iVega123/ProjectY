@@ -15,13 +15,24 @@
 //
 // Não reimplementa a assinatura, só a verificação. O identity não chama
 // ninguém para trás dele, e uma chave que só confere é uma chave que não emite.
+//
+// Duas versões da string canônica convivem até o #191 terminar. A `v1` liga o
+// envelope a quem, quando, método, caminho e audiência; a `v2` acrescenta o
+// SHA-256 do corpo, e é o que impede um envelope capturado de servir, na mesma
+// rota e dentro da janela, para outro corpo -- outra foto de CNH, por exemplo.
+// Quando `X-Identity-Signature-V2` vem, só ela decide. Sem ela, ainda vale a
+// `v1`, porque recusá-la antes de o portão assinar `v2` trancaria o serviço
+// para fora, como no #136.
 package gateway
 
 import (
+	"bytes"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"errors"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -35,15 +46,22 @@ const (
 	RolesHeader     = "X-Identity-Roles"
 	IssuedAtHeader  = "X-Identity-Issued-At"
 	SignatureHeader = "X-Identity-Signature"
+	// SignatureV2Header é a assinatura que cobre o corpo.
+	SignatureV2Header = "X-Identity-Signature-V2"
 
 	// AdminRole é comparado sem diferenciar maiúsculas, porque é o que o
 	// `ClaimsPrincipal.IsInRole` do lado .NET faz. As camadas discordarem sobre
 	// quem é administrador seria pior que qualquer das duas regras isolada.
 	AdminRole = "Admin"
+
+	// MaxSignedBodyBytes é o maior corpo que o portão assina. Um corpo maior
+	// não saiu dele, e ler além disso seria dar a quem alcança esta porta um
+	// jeito de encher a memória antes de qualquer assinatura conferir.
+	MaxSignedBodyBytes = 32 << 20
 )
 
 var headerOrder = []string{
-	KeyIDHeader, SubjectHeader, RolesHeader, IssuedAtHeader, SignatureHeader,
+	KeyIDHeader, SubjectHeader, RolesHeader, IssuedAtHeader,
 }
 
 // Caller é quem está chamando, segundo o portão.
@@ -96,6 +114,9 @@ func New(signingKey []byte, signingKeyID, audience string) (*Verifier, error) {
 //
 // Nunca um erro com a razão: quem não passou não precisa saber por qual dos
 // sete motivos, e a resposta que descreve a falha é a que ensina a contorná-la.
+//
+// Com a assinatura `v2`, Verify lê o corpo inteiro para conferi-lo e o devolve
+// a `request.Body` intacto, para o handler ler depois como leria sem isto.
 func (v *Verifier) Verify(request *http.Request) *Caller {
 	values := make([]string, len(headerOrder))
 	for index, name := range headerOrder {
@@ -107,7 +128,14 @@ func (v *Verifier) Verify(request *http.Request) *Caller {
 		}
 		values[index] = present[0]
 	}
-	keyID, subject, roles, issuedAtValue, signature := values[0], values[1], values[2], values[3], values[4]
+	keyID, subject, roles, issuedAtValue := values[0], values[1], values[2], values[3]
+
+	// Cada assinatura no máximo uma vez, e ao menos uma das duas.
+	v1 := request.Header.Values(SignatureHeader)
+	v2 := request.Header.Values(SignatureV2Header)
+	if len(v1) > 1 || len(v2) > 1 || len(v1)+len(v2) == 0 {
+		return nil
+	}
 
 	if keyID != v.signingKeyID {
 		return nil
@@ -138,8 +166,7 @@ func (v *Verifier) Verify(request *http.Request) *Caller {
 		return nil
 	}
 
-	canonical := strings.Join([]string{
-		"v1",
+	bound := strings.Join([]string{
 		keyID,
 		subject,
 		roles,
@@ -152,14 +179,38 @@ func (v *Verifier) Verify(request *http.Request) *Caller {
 		v.audience,
 	}, "\n")
 
-	if !v.validSignature(canonical, signature) {
+	if len(v2) == 1 {
+		// Presente, a `v2` decide sozinha. Cair para a `v1` quando ela falha
+		// seria aceitar exatamente o corpo trocado que ela acabou de recusar.
+		digest, ok := digestBody(request)
+		if !ok || !v.validSignature("v2\n"+bound+"\n"+digest, v2[0], "v2=") {
+			return nil
+		}
+	} else if !v.validSignature("v1\n"+bound, v1[0], "v1=") {
 		return nil
 	}
 	return &Caller{Subject: subject, Roles: parsedRoles}
 }
 
-func (v *Verifier) validSignature(canonical, signature string) bool {
-	encoded, found := strings.CutPrefix(signature, "v1=")
+// digestBody é a última linha da `v2`: o SHA-256 dos bytes do corpo, em hex
+// minúsculo, lido até o fim, com ou sem `Content-Length`. Sem corpo e corpo
+// vazio são o mesmo digest, o de zero bytes.
+func digestBody(request *http.Request) (string, bool) {
+	var raw []byte
+	if request.Body != nil && request.Body != http.NoBody {
+		read, err := io.ReadAll(io.LimitReader(request.Body, MaxSignedBodyBytes+1))
+		if err != nil || len(read) > MaxSignedBodyBytes {
+			return "", false
+		}
+		raw = read
+		request.Body = io.NopCloser(bytes.NewReader(raw))
+	}
+	sum := sha256.Sum256(raw)
+	return hex.EncodeToString(sum[:]), true
+}
+
+func (v *Verifier) validSignature(canonical, signature, version string) bool {
+	encoded, found := strings.CutPrefix(signature, version)
 	if !found {
 		return false
 	}
