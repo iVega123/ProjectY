@@ -6,13 +6,11 @@ using RentalCore.Errors;
 
 namespace RentalOperations.Services;
 
-/// <summary>What rental-core needs to decide, held locally so the decision costs no call.</summary>
+/// <summary>
+/// What rental-core needs to decide, held locally so the decision costs no call.
+/// Rental creation reads it with the rest of its preconditions, in one statement.
+/// </summary>
 public sealed record RiderView(string RiderId, bool Verified, long VerifiedAtMs, string? Name);
-
-public interface IRiderProjectionStore
-{
-    Task<RiderView?> GetAsync(string riderId, CancellationToken token);
-}
 
 /// <summary>
 /// Raised when a rider has not reached the projection yet. This fails closed and
@@ -24,29 +22,6 @@ public sealed class RiderProjectionPendingException(string riderId)
     : NotYetAvailableException(
         ProblemTypes.RiderProjectionPending,
         $"Rider {riderId} is awaiting processing. Retry shortly.");
-
-public sealed class SqlRiderProjectionStore(NpgsqlDataSource database) : IRiderProjectionStore
-{
-    public async Task<RiderView?> GetAsync(string riderId, CancellationToken token)
-    {
-        await using var connection = await database.OpenConnectionAsync(token);
-        await using var command = new NpgsqlCommand(
-            "SELECT rider_id, verified, verified_at_ms, rider_name FROM rider_projection WHERE rider_id = @id",
-            connection);
-        command.Parameters.AddWithValue("id", riderId);
-        await using var reader = await command.ExecuteReaderAsync(token);
-        if (!await reader.ReadAsync(token))
-        {
-            return null;
-        }
-
-        return new RiderView(
-            reader.GetString(0),
-            reader.GetBoolean(1),
-            reader.GetInt64(2),
-            reader.IsDBNull(3) ? null : reader.GetString(3));
-    }
-}
 
 /// <summary>
 /// Feeds the rider projection from Kafka. The projection is what lets a rental be

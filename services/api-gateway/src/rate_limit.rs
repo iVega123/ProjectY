@@ -1,6 +1,6 @@
-use std::{future::Future, pin::Pin, time::Duration};
+use std::{future::Future, pin::Pin, sync::LazyLock, time::Duration};
 
-use redis::{Client, aio::ConnectionManager};
+use redis::{Client, Script, aio::ConnectionManager};
 use tokio::{sync::OnceCell, time::timeout};
 
 use crate::config::TokenBucketConfig;
@@ -30,6 +30,12 @@ local ttl_ms = math.max(1000, math.ceil((capacity * 60 / refill_per_minute) * 2)
 redis.call('PEXPIRE', KEYS[1], ttl_ms)
 return { allowed, math.floor(tokens / 1000), retry_ms }
 "#;
+
+// Sent as EVALSHA; the redis crate loads the script and retries on NOSCRIPT, so a
+// Redis restart or SCRIPT FLUSH costs one extra round trip, not an error. This is
+// not a throughput change -- measured in #193, the Lua and its two writes cost the
+// time, not the 933 bytes of script -- it just stops resending the body per request.
+static TOKEN_BUCKET: LazyLock<Script> = LazyLock::new(|| Script::new(TOKEN_BUCKET_SCRIPT));
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct RateLimitDecision {
@@ -82,13 +88,11 @@ impl RedisRateLimiter {
         let mut connection = connection.clone();
         let result = timeout(
             self.operation_timeout,
-            redis::cmd("EVAL")
-                .arg(TOKEN_BUCKET_SCRIPT)
-                .arg(1)
-                .arg(key)
+            TOKEN_BUCKET
+                .key(key)
                 .arg(bucket.capacity)
                 .arg(bucket.refill_per_minute)
-                .query_async::<(u64, u64, u64)>(&mut connection),
+                .invoke_async::<(u64, u64, u64)>(&mut connection),
         )
         .await
         .map_err(|_| RateLimitError::Unavailable)?
@@ -143,5 +147,40 @@ mod tests {
         assert!(!refused.allowed);
         assert_eq!(refused.remaining, 0);
         assert!(refused.retry_after_seconds > 0);
+    }
+
+    #[tokio::test]
+    async fn a_flushed_script_cache_is_reloaded_instead_of_failing_open() {
+        let Ok(redis_url) = std::env::var("TEST_REDIS_URL") else {
+            return;
+        };
+        let limiter = RedisRateLimiter::new(&redis_url, Duration::from_secs(2)).unwrap();
+        let suffix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let key = format!("projecty:test:ratelimit:flush:{suffix}");
+        let bucket = TokenBucketConfig {
+            capacity: 2,
+            refill_per_minute: 1,
+        };
+
+        assert!(limiter.check(&key, bucket).await.unwrap().allowed);
+
+        // A Redis restart forgets every loaded script, and EVALSHA then answers
+        // NOSCRIPT. Surfacing that as an error would read as Unavailable: the
+        // limiter failing open until the gateway restarted.
+        let mut admin = ConnectionManager::new(Client::open(redis_url.as_str()).unwrap())
+            .await
+            .unwrap();
+        redis::cmd("SCRIPT")
+            .arg("FLUSH")
+            .query_async::<()>(&mut admin)
+            .await
+            .unwrap();
+
+        let after_flush = limiter.check(&key, bucket).await.unwrap();
+        assert!(after_flush.allowed);
+        assert_eq!(after_flush.remaining, 0);
     }
 }
