@@ -11,8 +11,10 @@ namespace RentalOperations.Services;
 ///
 /// O que mudou no #70 é quem pode enviar: a linha é reivindicada antes, por
 /// <see cref="RentalOutboxDispatcher"/>, e é isso que deixa duas réplicas rodarem
-/// sem publicar tudo duas vezes. O laço drena enquanto houver lote cheio e só
-/// espera quando esvazia ou quando o broker falha.
+/// sem publicar tudo duas vezes. O laço segue enquanto a passada reivindicar alguma
+/// linha e só espera quando esvazia ou quando o broker falha: publicar o evento de
+/// uma moto é o que libera o seguinte dela, então uma passada parcial também deixa
+/// trabalho.
 /// </summary>
 public sealed partial class RentalKafkaRelay(
     RentalOutboxDispatcher dispatcher,
@@ -41,7 +43,7 @@ public sealed partial class RentalKafkaRelay(
                 // Per replica, so a two-replica run can show that both drained and neither repeated.
                 if (pass.Published > 0)
                     LogPublished(log, pass.Published);
-                drained = pass.Failure is not null || pass.Claimed < RentalOutboxDispatcher.BatchSize;
+                drained = pass.Failure is not null || pass.Claimed == 0;
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { break; }
             catch (Exception error) { LogRelayDelayed(log, error); }

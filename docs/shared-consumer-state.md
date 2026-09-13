@@ -44,7 +44,8 @@ The rental Kafka relay arrived after this document was first written, and it was
 the part that could not run twice: it selected pending outbox rows without claiming
 them, so two replicas would both send every event. `RentalOutboxDispatcher` now
 claims before sending, with a lease and per-motorcycle ordering; ADR 0009 states the
-guarantee.
+guarantee. The identity and billing relays had the same flaw and claim the same way
+since #192.
 
 `scripts/Test-RentalCoreReplicas.ps1` is the acceptance. It scales rental-core to two
 replicas on the polyglot load stack, cuts Kafka while k6 creates rentals, restores

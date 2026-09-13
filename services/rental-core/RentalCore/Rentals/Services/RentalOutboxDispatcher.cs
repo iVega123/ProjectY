@@ -34,8 +34,14 @@ public readonly record struct RelayPass(int Claimed, int Published, Exception? F
 /// - A dispatcher that dies mid-send does not strand its rows. The claim is a
 ///   lease; when it expires, the next pass takes the rows.
 ///
-/// A transport failure stops the pass, releases what was not sent and counts a
-/// degradation. The rental that wrote the row has already committed: Kafka
+/// Because a batch holds at most the head of each motorcycle, no two of its rows
+/// share a partition, and the whole batch goes to the producer together and is
+/// marked in one statement (#192). Nothing in a batch waits behind another send,
+/// so no row outlives its lease: the lease is longer than the producer's message
+/// timeout plus a registry lookup.
+///
+/// A transport failure marks what was acknowledged, releases the rest and counts
+/// a degradation. The rental that wrote the row has already committed: Kafka
 /// being down delays the event, it does not refuse the write.
 /// </summary>
 public sealed class RentalOutboxDispatcher(NpgsqlDataSource database)
@@ -57,44 +63,46 @@ public sealed class RentalOutboxDispatcher(NpgsqlDataSource database)
         TimeSpan? lease = null)
     {
         var claimToken = Guid.NewGuid();
-        var leaseFor = lease ?? ClaimLease;
-        var claimed = await ClaimAsync(claimToken, leaseFor, token);
-        var published = 0;
-        var lostLease = false;
-        Exception? failure = null;
-        foreach (var pending in claimed)
+        var claimed = await ClaimAsync(claimToken, lease ?? ClaimLease, token);
+
+        // Sent together and awaited once. Awaiting each send before starting the next
+        // paid a broker round trip per row and defeated the producer's own batching.
+        var outcomes = await Task.WhenAll(claimed.Select(pending => SendAsync(transport, pending, token)));
+        var sent = claimed.Where((_, index) => outcomes[index] is null).Select(pending => pending.Id).ToList();
+
+        // Not cancellable: an event already on the topic but left unmarked is published
+        // again after the lease, a duplicate a shutdown during the batch need not cost.
+        await MarkPublishedAsync(sent, claimToken, CancellationToken.None);
+
+        // Stopped mid-send: what the broker did not acknowledge waits for the lease,
+        // as it would had the process died.
+        token.ThrowIfCancellationRequested();
+
+        var failure = outcomes.FirstOrDefault(outcome => outcome is not null);
+        if (failure is not null)
         {
-            // A batch can take longer than one lease, so each row's lease is renewed
-            // just before its send. A row whose lease lapsed may already belong to
-            // another dispatcher; finding that ends the pass instead of sending it twice.
-            if (!await RenewAsync(pending.Id, claimToken, leaseFor, token))
-            {
-                lostLease = true;
-                break;
-            }
-
-            try
-            {
-                await transport.PublishAsync(pending, token);
-            }
-            catch (Exception error) when (!token.IsCancellationRequested)
-            {
-                failure = error;
-                break;
-            }
-
-            // Marked row by row and not cancellable: an event already on the topic
-            // but left unmarked is published again after the lease, which is a
-            // duplicate a shutdown later in the batch could have avoided.
-            await MarkPublishedAsync(pending.Id, claimToken, CancellationToken.None);
-            published++;
+            await ReleaseAsync(claimToken, CancellationToken.None);
+            Degradation.Record("kafka", "event-propagation");
         }
 
-        if (failure is not null || lostLease) await ReleaseAsync(claimToken, CancellationToken.None);
-        if (failure is not null) Degradation.Record("kafka", "event-propagation");
-
         await MeasureBacklogAsync(CancellationToken.None);
-        return new RelayPass(claimed.Count, published, failure);
+        return new RelayPass(claimed.Count, sent.Count, failure);
+    }
+
+    private static async Task<Exception?> SendAsync(
+        IRentalEventTransport transport,
+        PendingRentalEvent pending,
+        CancellationToken token)
+    {
+        try
+        {
+            await transport.PublishAsync(pending, token);
+            return null;
+        }
+        catch (Exception error)
+        {
+            return error;
+        }
     }
 
     private async Task<List<PendingRentalEvent>> ClaimAsync(Guid claimToken, TimeSpan lease, CancellationToken token)
@@ -146,29 +154,20 @@ public sealed class RentalOutboxDispatcher(NpgsqlDataSource database)
         return claimed;
     }
 
-    private async Task<bool> RenewAsync(Guid id, Guid claimToken, TimeSpan lease, CancellationToken token)
+    /// <summary>
+    /// The batch in one statement. The condition on <c>claim_token</c> is what stops a
+    /// dispatcher that lost its lease from marking a row another one took.
+    /// </summary>
+    private async Task MarkPublishedAsync(List<Guid> ids, Guid claimToken, CancellationToken token)
     {
-        await using var connection = await database.OpenConnectionAsync(token);
-        await using var command = new NpgsqlCommand("""
-            UPDATE outbox
-               SET claimed_until = now() + @lease
-             WHERE id = @id AND claim_token = @claim AND published_at IS NULL
-            """, connection);
-        command.Parameters.AddWithValue("id", id);
-        command.Parameters.AddWithValue("claim", claimToken);
-        command.Parameters.Add(new NpgsqlParameter("lease", NpgsqlDbType.Interval) { Value = lease });
-        return await command.ExecuteNonQueryAsync(token) == 1;
-    }
-
-    private async Task MarkPublishedAsync(Guid id, Guid claimToken, CancellationToken token)
-    {
+        if (ids.Count == 0) return;
         await using var connection = await database.OpenConnectionAsync(token);
         await using var command = new NpgsqlCommand("""
             UPDATE outbox
                SET published_at = now(), claim_token = NULL, claimed_until = NULL
-             WHERE id = @id AND claim_token = @claim AND published_at IS NULL
+             WHERE claim_token = @claim AND published_at IS NULL AND id = ANY(@ids)
             """, connection);
-        command.Parameters.AddWithValue("id", id);
+        command.Parameters.AddWithValue("ids", ids.ToArray());
         command.Parameters.AddWithValue("claim", claimToken);
         await command.ExecuteNonQueryAsync(token);
     }

@@ -132,6 +132,20 @@ try {
             ConvertTo-Json | Set-Content "load/results/kafka-down-drain.json" -Encoding utf8
         if ($pending -gt 0) { Write-Warning "Outbox did not drain within 180 s: $pending rental events pending."; if ($exitCode -eq 0) { $exitCode = 1 } }
     }
+    # How long each published event waited in the outbox, per producer (#192).
+    # Depth alone hid a relay that drained 7x slower than rentals were written;
+    # the seed truncates the outbox, so this covers exactly this run. It is an
+    # observation: failing to read it must not fail the gate.
+    try {
+        $lagSql = "SELECT aggregate_type, count(*), percentile_disc(0.50) WITHIN GROUP (ORDER BY lag), percentile_disc(0.99) WITHIN GROUP (ORDER BY lag), max(lag) FROM (SELECT aggregate_type, EXTRACT(EPOCH FROM published_at - occurred_at)::FLOAT8 AS lag FROM outbox WHERE published_at IS NOT NULL) AS published GROUP BY aggregate_type ORDER BY aggregate_type"
+        $lag = @(Compose exec -T cockroachdb cockroach sql --insecure --database=projecty --format=csv -e $lagSql | Select-Object -Skip 1 | ForEach-Object {
+            $columns = $_ -split ','
+            [ordered]@{ producer=$columns[0]; published=[int]$columns[1]; p50Seconds=[Math]::Round([double]$columns[2], 3); p99Seconds=[Math]::Round([double]$columns[3], 3); maxSeconds=[Math]::Round([double]$columns[4], 3) }
+        })
+        ConvertTo-Json -InputObject $lag | Set-Content "load/results/$Mode-outbox-lag.json" -Encoding utf8
+    } catch {
+        Write-Warning "Outbox publish lag not recorded: $_"
+    }
 } finally {
     if (Test-Path -LiteralPath $fixture) {
         if ($KeepStack -or $PrepareOnly) { Write-Host "Benchmark stack retained: $fixture (Grafana http://localhost:13000)." }

@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Diagnostics.Metrics;
 using Npgsql;
 using RentalCoreTests.Integration;
@@ -128,51 +129,89 @@ public sealed class OutboxDispatcherTests(RentalCoreDatabase database)
     }
 
     /// <summary>
-    /// A batch that outlives its lease. While the first row is being sent, the
-    /// other rows' leases lapse and a second dispatcher takes and publishes them.
-    /// Without renewing each row before its send, the first dispatcher would send
-    /// them again when it got there.
+    /// The batch is sent together. A stalled send does not hold the other rows
+    /// behind it, which is why no row's lease needs renewing mid-batch: nothing
+    /// in a batch waits longer than its own send. Sent one after another, the
+    /// first row would wait out the deadline and leave first.
     /// </summary>
     [Fact]
     [Trait("Category", "Integration")]
-    [Trait("Guarantee", "ADR-0009#transactional-outbox")]
-    public async Task ABatchThatOutlivesItsLease_DoesNotSendRowsAnotherDispatcherTook()
+    [Trait("Guarantee", "ADR-0009#leased-outbox-relay")]
+    public async Task AStalledSend_DoesNotHoldBackTheRestOfTheBatch()
     {
         await database.ResetAsync();
         await using var dataSource = NpgsqlDataSource.Create(database.ConnectionString);
         var start = DateTime.UtcNow.AddMinutes(-5);
         for (var index = 0; index < 3; index++)
         {
-            await InsertAsync(dataSource, "slow-batch-" + index, "rental.started", start.AddMilliseconds(index));
+            await InsertAsync(dataSource, "stalled-" + index, "rental.started", start.AddMilliseconds(index));
         }
 
-        var other = new FakeTransport();
-        var lapsed = false;
-        var slow = new FakeTransport
+        FakeTransport transport = null!;
+        transport = new FakeTransport
         {
             BeforePublish = async sending =>
             {
-                if (lapsed) return;
-                lapsed = true;
-                await using (var expire = dataSource.CreateCommand(
-                    "UPDATE outbox SET claimed_until = now() - INTERVAL '1 second' WHERE id <> @id AND published_at IS NULL"))
+                if (sending.PartitionKey != "stalled-0") return;
+                var waiting = Stopwatch.StartNew();
+                while (transport.Published.Count < 2 && waiting.Elapsed < TimeSpan.FromSeconds(5))
                 {
-                    expire.Parameters.AddWithValue("id", sending.Id);
-                    await expire.ExecuteNonQueryAsync();
+                    await Task.Delay(10);
                 }
-                var taken = await new RentalOutboxDispatcher(dataSource).DispatchOnceAsync(other, CancellationToken.None);
-                Assert.Equal(2, taken.Published);
             }
         };
 
-        var pass = await new RentalOutboxDispatcher(dataSource).DispatchOnceAsync(slow, CancellationToken.None);
+        var pass = await new RentalOutboxDispatcher(dataSource).DispatchOnceAsync(transport, CancellationToken.None);
 
-        Assert.Equal(1, pass.Published);
-        var sent = slow.Published.Concat(other.Published).Select(item => item.Id).ToList();
-        Assert.Equal(3, sent.Count);
-        Assert.Equal(3, sent.Distinct().Count());
+        Assert.Equal(3, pass.Published);
+        Assert.Equal("stalled-0", transport.Published[^1].PartitionKey);
         Assert.Equal(0, await CountAsync(dataSource, "SELECT count(*) FROM outbox WHERE published_at IS NULL"));
     }
+
+    /// <summary>
+    /// The drain-rate floor ADR 0009 states, as a test. The transport costs
+    /// nothing, so what is measured is the database: one claim and one mark per
+    /// batch, not a round trip per row.
+    /// </summary>
+    [Fact]
+    [Trait("Category", "Integration")]
+    [Trait("Guarantee", "ADR-0009#leased-outbox-relay")]
+    public async Task TwoDispatchers_DrainAtTheStatedRate()
+    {
+        await database.ResetAsync();
+        await using var dataSource = NpgsqlDataSource.Create(database.ConnectionString);
+        const int events = 5000;
+        await using (var insert = dataSource.CreateCommand("""
+            INSERT INTO outbox (aggregate_type, aggregate_id, event_type, topic, payload, occurred_at)
+            SELECT 'rental', gen_random_uuid()::TEXT, 'rental.started', 'rental.started', decode('01', 'hex'),
+                   now() - INTERVAL '5 minutes' + (n * INTERVAL '1 millisecond')
+              FROM generate_series(1, @events) AS n
+            """))
+        {
+            insert.Parameters.AddWithValue("events", events);
+            await insert.ExecuteNonQueryAsync();
+        }
+
+        // What autovacuum does to a table after a burst. Without statistics the planner
+        // expects an empty outbox and compares every pending row with every other one,
+        // which is a property of a table seconds old, not of the claim.
+        await using (var analyze = dataSource.CreateCommand("ANALYZE outbox"))
+        {
+            await analyze.ExecuteNonQueryAsync();
+        }
+
+        var transport = new FakeTransport();
+        var elapsed = Stopwatch.StartNew();
+        await Task.WhenAll(DrainAsync(dataSource, transport), DrainAsync(dataSource, transport));
+        elapsed.Stop();
+
+        Assert.Equal(events, transport.Published.Count);
+        var rate = events / elapsed.Elapsed.TotalSeconds;
+        Assert.True(rate >= MinimumDrainRate, $"Drained at {rate:F0} events/s, below the floor of {MinimumDrainRate}.");
+    }
+
+    /// <summary>The floor ADR 0009 states for two relays against a single database node.</summary>
+    private const int MinimumDrainRate = 500;
 
     /// <summary>
     /// Shutdown in the middle of a batch. The sends Kafka already acknowledged are

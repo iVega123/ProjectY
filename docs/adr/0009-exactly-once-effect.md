@@ -94,19 +94,63 @@ crash leaves the claim until its lease expires. A confirm followed by a crash
 before `PublishedAtUtc` is stored causes a later republish; consumer inboxes are
 what make that duplicate harmless.
 
-**The rental Kafka relay meets the same guarantees on the shared `outbox` table
-(#70).** `RentalOutboxDispatcher` claims a batch of up to 100 rows in one
-`UPDATE … FROM (SELECT … FOR UPDATE SKIP LOCKED)` statement, recording
-`claim_token` and a 30-second `claimed_until` lease, and sends outside the
-transaction. A row is eligible only when no earlier row of the same
-`aggregate_id` (the motorcycle) is still pending, claimed or not, so one
-aggregate's events leave in `occurred_at` order even with two replicas. Two rows
-of one aggregate with an identical `occurred_at` are not ordered. A transport
-failure marks what was sent, releases the rest and counts a Kafka degradation; a
-crash leaves the claim until the lease expires. `OutboxDispatcherTests` runs two
-dispatchers against one table, kills one mid-send, and checks per-aggregate
-order. identity and billing relay from the same table without a claim yet; that
-is #192.
+**The three Kafka relays meet one guarantee on the shared `outbox` table (#70,
+#192).** rental-core (`RentalOutboxDispatcher`), identity
+(`internal/kafka/relay.go`) and billing (`OutboxDispatcher.kt`) are three
+languages and one contract:
+
+- **Claim before sending.** A pass claims up to 100 rows of its own
+  `aggregate_type` in one `UPDATE … FROM (SELECT … FOR UPDATE SKIP LOCKED)`
+  statement, recording `claim_token` and a 30-second `claimed_until`, and sends
+  outside that transaction. A second replica skips what the first holds instead
+  of waiting for it or sending it again.
+- **A lease, not a held lock.** A transaction-scoped lock would release on
+  disconnect, but it holds a database transaction open across a Kafka send, which
+  turns a broker outage into database contention, and a hung pod that keeps its
+  connection keeps its rows. The lease expires by itself. It is taken in database
+  time (`now()`), so application clock skew does not move it, and it is longer
+  than the longest send the producers allow (a 5-second delivery timeout plus a
+  schema-registry lookup), so a row still in flight is not handed to another
+  replica.
+- **Order per aggregate.** A row is eligible only when no earlier row of the same
+  `aggregate_id` is still pending, claimed or not. One motorcycle's rental
+  events, one rider's facts and one rental's invoice events leave in
+  `occurred_at` order with any number of replicas. Two rows of one aggregate with
+  the same `occurred_at` are not ordered: a registration writes
+  `rider.registered` and `rider.verified` in one transaction, and they go to
+  different topics, which Kafka never ordered relative to each other. Because
+  `occurred_at` is the transaction's start, overlapping transactions of one
+  aggregate are ordered by start, not by commit. No consumer depends on the order
+  today — the rider projection upserts newest-wins, billing deduplicates in its
+  inbox — and it is kept anyway because it costs nothing here: a batch holds at
+  most the head of each aggregate, so no two of its rows share a partition key.
+- **The batch is sent together and marked once.** Every claimed row goes to the
+  producer, which is awaited once. The acknowledged rows are marked in one
+  statement, guarded by `claim_token`; refused rows are released for the next
+  pass at once and count a Kafka degradation; a relay stopped mid-send leaves the
+  unacknowledged rows to the lease, as a crash would. Nothing in a batch waits
+  behind another send, so no row needs its lease renewed mid-batch.
+- **Drain until empty.** After any pass that claimed rows the next pass starts
+  immediately; a relay waits only when a pass finds nothing or the broker failed.
+  A partial batch is not a drained outbox: publishing an aggregate's head is what
+  makes its next row claimable, so waiting there would drain one aggregate's
+  history one event per polling interval.
+
+**Throughput floor: two relays against one database node drain at least 500
+events/s** with a transport that costs nothing, which isolates what the relay
+asks of the database. Each suite asserts it over 5,000 events. Measured on a 32-CPU development machine:
+identity 2,751 events/s and billing 7,629 on CockroachDB, rental-core above
+12,000 on PostgreSQL. Before #192 the ceilings were 1 event/s for rental-core
+(before #70) and 50 for identity and billing, with one replica each. The floor is
+set well below the measurements so that it guards against a round trip per row
+coming back, not against a slow CI runner.
+
+The claim reads only as far as the batch needs — about 600 index rows at a
+20,000-row backlog on CockroachDB (15 ms) — **once the table has statistics**.
+A table seconds old has none, and both engines then compare every pending row
+with every other: 200 ms per claim at 20,000 rows on CockroachDB, 4.4 s at 5,000
+on PostgreSQL. Automatic statistics refresh after a burst of that size; the drain
+tests run `ANALYZE` after their bulk insert for the same reason.
 
 <a id="transactional-inbox"></a>
 ## PostgreSQL transactional inbox
@@ -217,7 +261,9 @@ deduplication protects domain effects from duplicate delivery.
 
 ### Clock skew
 
-Outbox and rental inbox leases use application-node UTC timestamps. A fast owner
+The three Kafka relays take their leases in database time (`now()`), so this
+paragraph does not apply to them. The `OutboxMessages` relay and rental inbox
+leases use application-node UTC timestamps. A fast owner
 clock can hold a claim longer than intended; a fast contender can reclaim it
 early. Claim tokens prevent a former owner from marking a row complete after it
 loses ownership, but they cannot retract an external publish already made.
@@ -289,6 +335,10 @@ only where the test must deterministically stop or observe a publish.
 | [Transactional outbox](#transactional-outbox) | [`DomainMutationAndOutboxInsert_RollBackTogetherWhenSaveFails`](../../services/rental-core/RentalCoreTests/Motorcycles/Integration/PostgreSql/OutboxRelayTests.cs) | The outbox is no longer part of the aggregate save |
 | [Transactional outbox](#transactional-outbox) | [`CommittedSequencedMessages_SurviveRelayRestartAndDrainAfterBrokerRecovery`](../../services/rental-core/RentalCoreTests/Motorcycles/Integration/PostgreSql/OutboxRelayTests.cs) | The committed event row or retry behavior is removed |
 | [Leased relay](#leased-outbox-relay) | [`ConcurrentRelays_ClaimOnlyOneHeadMessagePerAggregate`](../../services/rental-core/RentalCoreTests/Motorcycles/Integration/PostgreSql/OutboxRelayTests.cs) | Atomic claims or aggregate-head ordering is removed |
+| [Leased relay](#leased-outbox-relay) | rental-core [`TwoDispatchers_AgainstOneTable_PublishEachRowOnce`](../../services/rental-core/RentalCoreTests/Rentals/Integration/Database/OutboxDispatcherTests.cs), identity [`TestTwoRelaysPublishEachRowOnce`](../../services/identity/internal/kafka/relay_test.go), billing [`duas relays publicam cada linha uma vez`](../../services/billing/src/test/kotlin/projecty/billing/OutboxRelayTest.kt) | A Kafka relay sends without claiming |
+| [Leased relay](#leased-outbox-relay) | rental-core [`EventsOfOneAggregate_LeaveInOrder_EvenWithTwoDispatchers`](../../services/rental-core/RentalCoreTests/Rentals/Integration/Database/OutboxDispatcherTests.cs), identity [`TestTheFactsOfOneRiderLeaveInOrderWithTwoRelays`](../../services/identity/internal/kafka/relay_test.go), billing [`os eventos de um agregado saem em ordem mesmo com duas relays`](../../services/billing/src/test/kotlin/projecty/billing/OutboxRelayTest.kt) | The aggregate-head condition is removed |
+| [Leased relay](#leased-outbox-relay) | rental-core [`ADispatcherKilledMidSend_DoesNotStrandItsRows`](../../services/rental-core/RentalCoreTests/Rentals/Integration/Database/OutboxDispatcherTests.cs), identity [`TestARelayKilledMidSendDoesNotStrandItsRows`](../../services/identity/internal/kafka/relay_test.go), billing [`uma relay morta no meio do envio nao prende as linhas`](../../services/billing/src/test/kotlin/projecty/billing/OutboxRelayTest.kt) | The lease is removed or a dead relay's claim never expires |
+| [Leased relay](#leased-outbox-relay) | rental-core [`TwoDispatchers_DrainAtTheStatedRate`](../../services/rental-core/RentalCoreTests/Rentals/Integration/Database/OutboxDispatcherTests.cs), identity [`TestTwoRelaysDrainAtTheStatedRate`](../../services/identity/internal/kafka/relay_test.go), billing [`duas relays drenam no piso declarado`](../../services/billing/src/test/kotlin/projecty/billing/OutboxRelayTest.kt) | Two relays drain fewer than 500 events/s |
 | [PostgreSQL inbox](#transactional-inbox) | [`SameMessageProcessedConcurrently_ProducesOneDatabaseEffect`](../../services/RiderManager/RiderManagerTests/Integration/PostgreSql/InboxProcessorTests.cs) | The inbox conflict gate or shared transaction is removed |
 | [PostgreSQL inbox](#transactional-inbox) | [`ImageRedelivery_UsesInboxAndCallsIdempotentUploadOnce`](../../services/RiderManager/RiderManagerTests/Integration/PostgreSql/InboxProcessorTests.cs) | Completed image messages are handled again |
 | [Rental inbox](#inbox-convergence) | [`SameMessageDeliveredTwice_ExecutesHandlerOnce`](../../services/rental-core/RentalCoreTests/Rentals/Integration/Database/InboxProcessorTests.cs) | Completed inbox rows are claimable |
@@ -311,6 +361,10 @@ Run the proof suite from the repository root:
 dotnet test services/rental-core/RentalCoreTests/RentalCoreTests.csproj --filter "Category=Integration&Guarantee~ADR-0009"
 dotnet test services/RiderManager/RiderManagerTests/RiderManagerTests.csproj --filter "Category=Integration&Guarantee~ADR-0009"
 ```
+
+The identity and billing relay proofs run in their own suites against
+CockroachDB (`IDENTITY_TEST_COCKROACH=127.0.0.1:26257 go test ./internal/kafka/`
+in `services/identity`, `gradle test` in `services/billing`).
 
 ## Alternatives considered
 
