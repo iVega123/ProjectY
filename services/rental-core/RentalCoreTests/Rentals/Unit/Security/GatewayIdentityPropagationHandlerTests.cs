@@ -42,7 +42,7 @@ public sealed class GatewayIdentityPropagationHandlerTests
         Assert.Equal("rider-123", Header(capture.Request, GatewayIdentityDefaults.SubjectHeader));
         Assert.Equal("Rider", Header(capture.Request, GatewayIdentityDefaults.RolesHeader));
         Assert.Equal("test-v1", Header(capture.Request, GatewayIdentityDefaults.KeyIdHeader));
-        Assert.StartsWith("v1=", Header(capture.Request, GatewayIdentityDefaults.SignatureHeader));
+        Assert.StartsWith("v2=", Header(capture.Request, GatewayIdentityDefaults.SignatureV2Header));
         Assert.False(capture.Request.Headers.Contains("X-API-Key"));
     }
 
@@ -91,7 +91,7 @@ public sealed class GatewayIdentityPropagationHandlerTests
             "service:rental-operations",
             Header(capture.Request, GatewayIdentityDefaults.SubjectHeader));
         Assert.Equal(string.Empty, Header(capture.Request, GatewayIdentityDefaults.RolesHeader));
-        Assert.StartsWith("v1=", Header(capture.Request, GatewayIdentityDefaults.SignatureHeader));
+        Assert.StartsWith("v2=", Header(capture.Request, GatewayIdentityDefaults.SignatureV2Header));
     }
 
     private static string Header(HttpRequestMessage request, string name) =>

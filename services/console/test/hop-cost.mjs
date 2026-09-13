@@ -35,8 +35,8 @@ if (!key || !token) throw new Error('GATEWAY_IDENTITY_SIGNING_KEY and ACCESS_TOK
 // id que não existe responde `[]` -- o assunto aqui é o caminho, não a linha.
 const path = '/api/motorcycles/batch?ids=00000000-0000-0000-0000-000000000000';
 
-// As duas assinaturas, como o portão manda. A leitura não tem corpo, e o `v2`
-// assina o digest de zero bytes.
+// A assinatura `v2`, como o portão manda. A leitura não tem corpo, e ela assina
+// o digest de zero bytes.
 function envelope(method, pathAndQuery, roles = 'Rider') {
   const issuedAt = String(Math.floor(Date.now() / 1000));
   const bound = [keyId, subject, roles, issuedAt, method, pathAndQuery, audience].join('\n');
@@ -47,7 +47,6 @@ function envelope(method, pathAndQuery, roles = 'Rider') {
     'x-identity-subject': subject,
     'x-identity-roles': roles,
     'x-identity-issued-at': issuedAt,
-    'x-identity-signature': 'v1=' + sign('v1\n' + bound),
     'x-identity-signature-v2': 'v2=' + sign('v2\n' + bound + '\n' + emptyBody),
   };
 }

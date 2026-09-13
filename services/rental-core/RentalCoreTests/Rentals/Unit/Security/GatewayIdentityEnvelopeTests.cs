@@ -29,8 +29,14 @@ public sealed class GatewayIdentityEnvelopeTests
     private const long IssuedAt = 1_789_300_000;
     private const string RentalPath = "/api/rental";
     private const string Body = """{"motorcycleId":"00000000-0000-0000-0000-000000000001","plan":7}""";
-    private const string GoldenV1 = "v1=3vAv26TC3UzJTX5cWizLQx42_D7y7a4m9ZBX3r29gWY";
     private const string GoldenV2 = "v2=idQJwvMxcuM0EEsGGXa8tvOm32Dwcya9HJGh0vz8QwE";
+
+    /// <summary>
+    /// The v1 signature a gateway from before issue #274 sent alongside this envelope, in the
+    /// header below. It covers no body.
+    /// </summary>
+    private const string PreviousV1 = "v1=3vAv26TC3UzJTX5cWizLQx42_D7y7a4m9ZBX3r29gWY";
+    private const string LegacySignatureHeader = "x-identity-signature";
 
     [Fact]
     public async Task AV2EnvelopeTheGatewaySigned_IsAccepted_AndTheBodyIsLeftForTheController()
@@ -45,11 +51,7 @@ public sealed class GatewayIdentityEnvelopeTests
         Assert.Equal(Body, await reader.ReadToEndAsync());
     }
 
-    /// <summary>
-    /// Issue #191: the same envelope, on the same route, inside its window, with another body.
-    /// The v1 signature the gateway sent alongside is still valid for that body — it covers no
-    /// body at all — which is why, once v2 is present, v2 alone decides.
-    /// </summary>
+    /// <summary>Issue #191: the same envelope, on the same route, inside its window, with another body.</summary>
     [Theory]
     [InlineData("""{"motorcycleId":"00000000-0000-0000-0000-000000000002","plan":7}""")]
     [InlineData(Body + " ")]
@@ -62,32 +64,50 @@ public sealed class GatewayIdentityEnvelopeTests
     }
 
     /// <summary>
-    /// A gateway not yet on v2 facing this verifier. It signed no body, so any body goes with
-    /// it. Refusing it before the new gateway is out would lock rental-core out, as in #136.
+    /// What a gateway from before issue #274 sent, minus the v2 signature: an envelope this
+    /// verifier accepted until then, with the very body it was signed for.
     /// </summary>
     [Fact]
-    public async Task AV1OnlyEnvelope_FromAGatewayNotYetOnV2_IsStillAccepted()
-    {
-        var context = Captured("whatever the old gateway forwarded");
-        context.Request.Headers.Remove(GatewayIdentityDefaults.SignatureV2Header);
-
-        Assert.True((await AuthenticateAsync(context)).Succeeded);
-    }
-
-    /// <summary>
-    /// The v2 gateway facing a verifier still on v1, which reads five headers and ignores the
-    /// rest: what it sees is the envelope without the v2 signature, and that must pass on v1.
-    ///
-    /// It is also the window still open until v1 acceptance is removed: stripping the v2 header
-    /// from a captured envelope falls back to the signature that does not cover the body.
-    /// </summary>
-    [Fact]
-    public async Task WhatTheV2GatewaySends_StillPassesAVerifierThatOnlyReadsV1()
+    public async Task AV1OnlyEnvelope_IsRefused()
     {
         var context = Captured(Body);
         context.Request.Headers.Remove(GatewayIdentityDefaults.SignatureV2Header);
+        context.Request.Headers[LegacySignatureHeader] = PreviousV1;
 
-        Assert.True((await AuthenticateAsync(context)).Succeeded);
+        Assert.False((await AuthenticateAsync(context)).Succeeded);
+    }
+
+    /// <summary>
+    /// The downgrade issue #274 closes: a captured envelope from the previous gateway, carrying
+    /// both signatures, with the v2 header stripped and the body substituted. The v1 left behind
+    /// is valid for that body, because it covers no body at all.
+    /// </summary>
+    [Theory]
+    [InlineData("""{"motorcycleId":"00000000-0000-0000-0000-000000000002","plan":7}""")]
+    [InlineData("")]
+    public async Task StrippingV2_FromACapturedEnvelope_DoesNotFallBackToV1(string substituted)
+    {
+        var context = Captured(substituted);
+        context.Request.Headers[LegacySignatureHeader] = PreviousV1;
+        context.Request.Headers.Remove(GatewayIdentityDefaults.SignatureV2Header);
+
+        Assert.False((await AuthenticateAsync(context)).Succeeded);
+    }
+
+    /// <summary>
+    /// During the rollout of issue #274 the previous gateway still sends both signatures to this
+    /// verifier. That passes on v2, and the v1 that came along does not rescue a substituted body.
+    /// </summary>
+    [Fact]
+    public async Task TheV1OfAPreviousGateway_IsIgnored()
+    {
+        var original = Captured(Body);
+        original.Request.Headers[LegacySignatureHeader] = PreviousV1;
+        var substituted = Captured("{}");
+        substituted.Request.Headers[LegacySignatureHeader] = PreviousV1;
+
+        Assert.True((await AuthenticateAsync(original)).Succeeded);
+        Assert.False((await AuthenticateAsync(substituted)).Succeeded);
     }
 
     [Fact]
@@ -101,10 +121,30 @@ public sealed class GatewayIdentityEnvelopeTests
 
         await signer.SignAsync(request, Rider(), Audience);
 
-        Assert.Equal(GoldenV1, Single(request, GatewayIdentityDefaults.SignatureHeader));
         Assert.Equal(GoldenV2, Single(request, GatewayIdentityDefaults.SignatureV2Header));
+        Assert.False(request.Headers.Contains(LegacySignatureHeader));
         // Reading the content to sign it must not consume what is about to be sent.
         Assert.Equal(Body, await request.Content.ReadAsStringAsync());
+    }
+
+    /// <summary>
+    /// A request that already carries a v1 signature, from reuse or a caller's own headers, leaves
+    /// the signer without it: nothing signed here travels with a signature that ignores the body.
+    /// </summary>
+    [Fact]
+    public async Task TheServiceSigner_StripsALegacySignatureTheRequestAlreadyCarried()
+    {
+        var signer = new GatewayIdentitySigner(Key, KeyId, new FixedClock(IssuedAt));
+        using var request = new HttpRequestMessage(HttpMethod.Post, "http://rental-core" + RentalPath)
+        {
+            Content = new StringContent(Body, Encoding.UTF8, "application/json")
+        };
+        request.Headers.TryAddWithoutValidation(LegacySignatureHeader, PreviousV1);
+
+        await signer.SignAsync(request, Rider(), Audience);
+
+        Assert.False(request.Headers.Contains(LegacySignatureHeader));
+        Assert.Equal(GoldenV2, Single(request, GatewayIdentityDefaults.SignatureV2Header));
     }
 
     /// <summary>
@@ -136,8 +176,8 @@ public sealed class GatewayIdentityEnvelopeTests
             "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
             GatewayIdentitySigner.BodyDigest([]));
 
-        Assert.True((await AuthenticateAsync(SignedV2("GET", "/api/rental/user", [], body: null))).Succeeded);
-        Assert.True((await AuthenticateAsync(SignedV2("GET", "/api/rental/user", [], new MemoryStream()))).Succeeded);
+        Assert.True((await AuthenticateAsync(Signed("GET", "/api/rental/user", [], body: null))).Succeeded);
+        Assert.True((await AuthenticateAsync(Signed("GET", "/api/rental/user", [], new MemoryStream()))).Succeeded);
     }
 
     /// <summary>
@@ -148,7 +188,7 @@ public sealed class GatewayIdentityEnvelopeTests
     public async Task AStreamedBody_IsHashedToItsEnd_AndLeftForTheController()
     {
         var bytes = Encoding.UTF8.GetBytes(Body);
-        var context = SignedV2("POST", RentalPath, bytes, new NonSeekableStream(bytes.Length, bytes));
+        var context = Signed("POST", RentalPath, bytes, new NonSeekableStream(bytes.Length, bytes));
 
         var result = await AuthenticateAsync(context);
 
@@ -162,35 +202,33 @@ public sealed class GatewayIdentityEnvelopeTests
     {
         var huge = new NonSeekableStream(GatewayIdentityDefaults.MaxSignedBodyBytes + 1L, content: null);
 
-        var result = await AuthenticateAsync(SignedV2("POST", RentalPath, [], huge));
+        var result = await AuthenticateAsync(Signed("POST", RentalPath, [], huge));
 
         Assert.False(result.Succeeded);
     }
 
     [Theory]
     [InlineData("none")]
-    [InlineData("v2 twice")]
-    [InlineData("v1 twice")]
-    [InlineData("v2 carrying the v1 prefix")]
-    public async Task EachSignature_ComesAtMostOnce_AndOneComes(string tampering)
+    [InlineData("twice")]
+    [InlineData("carrying the v1 prefix")]
+    [InlineData("the previous v1 in its place")]
+    public async Task TheSignature_ComesExactlyOnce(string tampering)
     {
         var context = Captured(Body);
         var headers = context.Request.Headers;
         switch (tampering)
         {
             case "none":
-                headers.Remove(GatewayIdentityDefaults.SignatureHeader);
                 headers.Remove(GatewayIdentityDefaults.SignatureV2Header);
                 break;
-            case "v2 twice":
+            case "twice":
                 headers[GatewayIdentityDefaults.SignatureV2Header] = new StringValues([GoldenV2, GoldenV2]);
                 break;
-            case "v1 twice":
-                headers.Remove(GatewayIdentityDefaults.SignatureV2Header);
-                headers[GatewayIdentityDefaults.SignatureHeader] = new StringValues([GoldenV1, GoldenV1]);
+            case "carrying the v1 prefix":
+                headers[GatewayIdentityDefaults.SignatureV2Header] = "v1=" + GoldenV2[3..];
                 break;
             default:
-                headers[GatewayIdentityDefaults.SignatureV2Header] = "v1=" + GoldenV2[3..];
+                headers[GatewayIdentityDefaults.SignatureV2Header] = PreviousV1;
                 break;
         }
 
@@ -199,17 +237,16 @@ public sealed class GatewayIdentityEnvelopeTests
 
     // ------------------------------------------------------------------ support
 
-    /// <summary>The golden envelope as the gateway sends it: both signatures, and the given body.</summary>
+    /// <summary>The golden envelope as the gateway sends it, with the given body.</summary>
     private static DefaultHttpContext Captured(string body)
     {
         var context = Request("POST", RentalPath, new MemoryStream(Encoding.UTF8.GetBytes(body)));
-        context.Request.Headers[GatewayIdentityDefaults.SignatureHeader] = GoldenV1;
         context.Request.Headers[GatewayIdentityDefaults.SignatureV2Header] = GoldenV2;
         return context;
     }
 
-    /// <summary>A v2-only envelope over <paramref name="signedBody"/>, signed here, sent with <paramref name="body"/>.</summary>
-    private static DefaultHttpContext SignedV2(string method, string path, byte[] signedBody, Stream? body)
+    /// <summary>An envelope over <paramref name="signedBody"/>, signed here, sent with <paramref name="body"/>.</summary>
+    private static DefaultHttpContext Signed(string method, string path, byte[] signedBody, Stream? body)
     {
         var bound = string.Join('\n',
             KeyId, "rider-123", "Rider", IssuedAt.ToString(CultureInfo.InvariantCulture), method, path, Audience);

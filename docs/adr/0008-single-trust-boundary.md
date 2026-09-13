@@ -58,23 +58,11 @@ sends the signature base64url-encoded without padding, next to
 received and refuses an envelope older than 30 seconds or more than 5 seconds
 ahead of its clock.
 
-Two versions exist. `v1` is sent as `x-identity-signature: v1=<signature>`:
-
-```text
-v1
-key-id
-subject
-comma-separated-roles
-issued-at
-HTTP-METHOD
-path-and-query
-audience
-```
-
-`v2` is sent as `x-identity-signature-v2: v2=<signature>`. It is `v1` with the
-version changed and one more line, the digest of the body. It was added in
-[#191](https://github.com/iVega123/ProjectY/issues/191), because `v1` let a
-captured envelope carry a different body on the same route inside its window:
+The canonical string is `v2`, sent as `x-identity-signature-v2: v2=<signature>`.
+Its last line, the digest of the body, was added in
+[#191](https://github.com/iVega123/ProjectY/issues/191): the earlier `v1` string
+stopped at the audience, and let a captured envelope carry a different body on
+the same route inside its window.
 
 ```text
 v2
@@ -101,24 +89,31 @@ sha256-of-body
   a body above the same limit, because no legitimate envelope covers one.
 - **Verifiers read the body to its end, with or without a `Content-Length`.**
   They then hand it back to the handler unread.
-- **Rollout.** The gateway sends both signatures. A verifier that finds `v2`
-  checks `v2` alone, and never falls back to `v1` when `v2` fails; that fallback
-  would accept exactly the substituted body `v2` refused. Without `v2`, a
-  verifier still accepts `v1`. That makes the rollout safe in both directions:
-  - a verifier deployed before the gateway still accepts the old gateway;
-  - a verifier not yet on `v2` reads the same five headers as before and ignores
-    the new one, so the gateway can be deployed first.
-- **The price of that is a downgrade.** Stripping `x-identity-signature-v2` from a
-  captured envelope falls back to the signature that does not cover the body.
-  It closes when the verifiers stop accepting `v1`, tracked as
-  [#274](https://github.com/iVega123/ProjectY/issues/274).
+- **`v1` is not accepted.** To roll #191 out safely in both directions, the
+  gateway sent `x-identity-signature: v1=<signature>` alongside `v2`, and a
+  verifier accepted `v1` when `v2` was absent. That was a downgrade: stripping
+  `x-identity-signature-v2` from a captured envelope fell back to the signature
+  that does not cover the body.
+  [#274](https://github.com/iVega123/ProjectY/issues/274) removed it:
+  - the gateway and rental-core's service signer send `v2` alone;
+  - a verifier refuses an envelope without exactly one `v2`;
+  - an `x-identity-signature` still sent by a gateway from before #274 is
+    ignored, so neither side has to be deployed first.
+
+  This relies on #191 being deployed everywhere. A verifier from before it knows
+  only `v1`, and would refuse the gateway.
   [ADR 0025](0025-tls-terminates-at-the-ingress.md) states what remains.
 
 Golden vectors pin the string on both sides. `signs_the_v2_envelopes_the_verifiers_pin`
 in the gateway asserts the exact signatures for three requests, one each for
 identity, billing and rental-core. The values were computed separately, with
-`openssl`, from the strings above. Each verifier accepts the one for its
-audience, refuses it with a substituted body, and accepts it with `v2` removed:
+`openssl`, from the string above. Each verifier:
+- accepts the one for its audience;
+- refuses it with a substituted body;
+- refuses it with `v2` stripped and the `v1` the previous gateway sent left in
+  its place.
+
+The tests are:
 - identity: `TestAcceptsAV2EnvelopeTheGatewaySigned`
 - billing: `GatewayIdentityTest`
 - rental-core: `GatewayIdentityEnvelopeTests`

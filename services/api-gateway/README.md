@@ -113,12 +113,11 @@ unready, and `/metrics` publishes
 The gateway rejects every client-supplied `x-identity-*` header and never sends
 the caller's `Authorization` or `Cookie` headers upstream. After verification it
 adds `x-identity-subject`, sorted `x-identity-roles`, `x-identity-issued-at`,
-`x-identity-key-id`, `x-identity-signature` and `x-identity-signature-v2`. Each
-signature is base64url HMAC-SHA256 over a newline-delimited canonical value.
-`x-identity-signature` carries `v1=` over:
+`x-identity-key-id` and `x-identity-signature-v2`. The signature is `v2=`
+followed by a base64url HMAC-SHA256 over a newline-delimited canonical value:
 
 ```text
-v1
+v2
 key-id
 subject
 comma-separated-roles
@@ -126,13 +125,14 @@ issued-at
 HTTP-METHOD
 path-and-query
 audience
+sha256-of-body
 ```
 
-`x-identity-signature-v2` carries `v2=` over the same lines with `v2` as the
-version, plus one final line: the lowercase hex SHA-256 of the body. A request
-with no body uses the digest of zero bytes. Both are sent until every verifier
-has stopped accepting `v1`; [ADR 0008](../../docs/adr/0008-single-trust-boundary.md)
-has the rules and the rollout.
+The last line is the lowercase hex SHA-256 of the body. A request with no body
+uses the digest of zero bytes. The `v1` signature, the same lines without the
+digest, is no longer sent or accepted, since
+[#274](https://github.com/iVega123/ProjectY/issues/274).
+[ADR 0008](../../docs/adr/0008-single-trust-boundary.md) has the rules.
 
 Signing the body means the gateway reads it first. An authenticated request is
 never streamed upstream, retryable or not:

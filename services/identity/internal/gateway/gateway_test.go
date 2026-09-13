@@ -15,30 +15,23 @@ import (
 	"time"
 )
 
-// O envelope abaixo saiu do portão, e não deste arquivo.
-//
-// Foi capturado do `signs_rider_reads_for_the_identity_audience`, em
-// services/api-gateway/src/lib.rs, que exercita o caminho de assinatura real
-// para uma rota de piloto. Um vetor que este pacote assinasse provaria só que o
-// verificador concorda consigo mesmo -- e concordar consigo mesmo não é o
-// risco. O risco é o portão assinar uma coisa e o identity conferir outra, e
-// isso não aparece como build quebrado: aparece como alguém entrando.
 const (
-	goldSubject   = "rider-123"
-	goldRoles     = "Admin"
-	goldKeyID     = "local-v1"
-	goldAudience  = "projecty.identity"
-	goldPath      = "/api/riders?ids=a,b"
-	goldIssuedAt  = int64(1_788_912_722)
-	goldSignature = "v1=j_vpKiE7WOKIHlf5rAOnbm1ScmDVJz-sVc4-8jEKYzg"
+	goldSubject  = "rider-123"
+	goldKeyID    = "local-v1"
+	goldAudience = "projecty.identity"
 )
 
 var goldKey = bytes.Repeat([]byte("x"), 32)
 
-// O envelope v2 abaixo é o que `signs_the_v2_envelopes_the_verifiers_pin`, em
+// O envelope abaixo é o que `signs_the_v2_envelopes_the_verifiers_pin`, em
 // services/api-gateway/src/auth.rs, prova que o portão produz. Os valores foram
 // calculados à parte, com openssl, a partir da string canônica do ADR 0008; o
 // portão os fixa do lado dele e este arquivo do lado do identity.
+//
+// Um vetor que este pacote assinasse provaria só que o verificador concorda
+// consigo mesmo -- e concordar consigo mesmo não é o risco. O risco é o portão
+// assinar uma coisa e o identity conferir outra, e isso não aparece como build
+// quebrado: aparece como alguém entrando.
 //
 // A rota é a do #191: a foto da CNH, o único corpo da plataforma que é ao mesmo
 // tempo sensível e útil a quem o trocasse.
@@ -48,26 +41,42 @@ const (
 	v2Body      = "cnh-image:original"
 	v2IssuedAt  = int64(1_789_300_000)
 	v2Signature = "v2=V6Nzvgn7pJMZjCeBhFND7JmHakPWzdkexDLY8Xk89u8"
-	// v2AlsoV1 é o `v1` que o mesmo portão manda junto, para quem ainda não
-	// lê o `v2`.
-	v2AlsoV1 = "v1=WfqfOycgzRAvAjHP2W7VvzA6AJCQVrxU1GEY4KvWQJM"
+
+	// previousV1 é o `v1` que o portão anterior ao #274 mandava junto com este
+	// envelope, em legacySignatureHeader. Não cobre corpo nenhum.
+	previousV1            = "v1=WfqfOycgzRAvAjHP2W7VvzA6AJCQVrxU1GEY4KvWQJM"
+	legacySignatureHeader = "X-Identity-Signature"
 )
 
-// captured é o envelope v2 como o portão o manda: as duas assinaturas.
-func captured(body io.Reader) *http.Request {
-	request := httptest.NewRequest(http.MethodPut, v2Path, body)
+// O envelope `v1` abaixo saiu de um portão anterior ao #274, capturado do
+// `signs_rider_reads_for_the_identity_audience` de então. Era aceito; é o que
+// este verificador não aceita mais.
+const (
+	v1Path      = "/api/riders?ids=a,b"
+	v1Roles     = "Admin"
+	v1IssuedAt  = int64(1_788_912_722)
+	v1Signature = "v1=j_vpKiE7WOKIHlf5rAOnbm1ScmDVJz-sVc4-8jEKYzg"
+)
+
+// captured é o envelope como o portão o manda, com o corpo dado.
+func captured(body string) *http.Request {
+	return capturedAs(http.MethodPut, v2Path, body)
+}
+
+// capturedAs é o mesmo envelope, reapresentado com outro método ou caminho.
+func capturedAs(method, pathAndQuery, body string) *http.Request {
+	request := httptest.NewRequest(method, pathAndQuery, strings.NewReader(body))
 	request.Header.Set(KeyIDHeader, goldKeyID)
 	request.Header.Set(SubjectHeader, goldSubject)
 	request.Header.Set(RolesHeader, v2Roles)
 	request.Header.Set(IssuedAtHeader, strconv.FormatInt(v2IssuedAt, 10))
-	request.Header.Set(SignatureHeader, v2AlsoV1)
 	request.Header.Set(SignatureV2Header, v2Signature)
 	return request
 }
 
 func TestAcceptsAV2EnvelopeTheGatewaySigned(t *testing.T) {
-	verifier := frozenAt(t, v2IssuedAt)
-	request := captured(strings.NewReader(v2Body))
+	verifier := frozen(t)
+	request := captured(v2Body)
 
 	caller := verifier.Verify(request)
 	if caller == nil {
@@ -85,11 +94,8 @@ func TestAcceptsAV2EnvelopeTheGatewaySigned(t *testing.T) {
 
 // TestACapturedEnvelopeIsRefusedWithAnotherBody é o #191: o mesmo envelope, na
 // mesma rota, dentro da janela, com outra foto.
-//
-// O `v1` que o portão mandou junto continua válido para esse corpo -- ele não
-// cobre corpo nenhum. É por isso que, presente o `v2`, só ele decide.
 func TestACapturedEnvelopeIsRefusedWithAnotherBody(t *testing.T) {
-	verifier := frozenAt(t, v2IssuedAt)
+	verifier := frozen(t)
 
 	for name, body := range map[string]string{
 		"outra foto":       "cnh-image:attacker",
@@ -98,49 +104,71 @@ func TestACapturedEnvelopeIsRefusedWithAnotherBody(t *testing.T) {
 		"prefixo do corpo": v2Body[:len(v2Body)-1],
 	} {
 		t.Run(name, func(t *testing.T) {
-			if verifier.Verify(captured(strings.NewReader(body))) != nil {
+			if verifier.Verify(captured(body)) != nil {
 				t.Fatal("um envelope capturado serviu para outro corpo")
 			}
 		})
 	}
 }
 
-// TestAV1EnvelopeFromAGatewayNotYetOnV2IsStillAccepted: o portão antigo e este
-// verificador. É o `TestAcceptsAnEnvelopeTheGatewaySigned` de antes, com o
-// corpo que ele não assinava; sem isto, publicar o identity antes do portão
-// trancaria as rotas de piloto, que foi a falha do #136.
-func TestAV1EnvelopeFromAGatewayNotYetOnV2IsStillAccepted(t *testing.T) {
-	verifier := frozen(t)
+// TestAV1OnlyEnvelopeIsRefused: um envelope que um portão anterior assinou, e
+// que este verificador aceitava até o #274. O relógio fica no instante da
+// assinatura, para que a recusa seja pela versão e não pela janela.
+func TestAV1OnlyEnvelopeIsRefused(t *testing.T) {
+	verifier := frozenAt(t, v1IssuedAt)
 
-	request := httptest.NewRequest(http.MethodGet, goldPath, strings.NewReader("qualquer"))
+	request := httptest.NewRequest(http.MethodGet, v1Path, nil)
 	request.Header.Set(KeyIDHeader, goldKeyID)
 	request.Header.Set(SubjectHeader, goldSubject)
-	request.Header.Set(RolesHeader, goldRoles)
-	request.Header.Set(IssuedAtHeader, strconv.FormatInt(goldIssuedAt, 10))
-	request.Header.Set(SignatureHeader, goldSignature)
+	request.Header.Set(RolesHeader, v1Roles)
+	request.Header.Set(IssuedAtHeader, strconv.FormatInt(v1IssuedAt, 10))
+	request.Header.Set(legacySignatureHeader, v1Signature)
 
-	if verifier.Verify(request) == nil {
-		t.Fatal("um envelope v1 foi recusado durante a transição")
+	if verifier.Verify(request) != nil {
+		t.Fatal("um envelope só com v1 foi aceito")
 	}
 }
 
-// TestWhatTheV2GatewaySendsStillPassesAV1Verifier: o portão novo e um
-// verificador antigo.
-//
-// O verificador antigo lê cinco cabeçalhos e ignora os outros, então o que ele
-// vê do portão novo é o envelope sem `X-Identity-Signature-V2`. Isso tem de
-// passar, e passa pela `v1`.
-//
-// É também a janela que continua aberta: quem remove o cabeçalho `v2` de um
-// envelope capturado volta à `v1`, que não cobre o corpo. Ela fecha quando os
-// verificadores deixarem de aceitar `v1`, que é o passo seguinte do #191.
-func TestWhatTheV2GatewaySendsStillPassesAV1Verifier(t *testing.T) {
-	verifier := frozenAt(t, v2IssuedAt)
-	request := captured(strings.NewReader(v2Body))
-	request.Header.Del(SignatureV2Header)
+// TestStrippingV2FromACapturedEnvelopeDoesNotFallBackToV1 é o rebaixamento que
+// o #274 fecha: o envelope que o portão anterior mandava, com as duas
+// assinaturas, sem o cabeçalho `v2` e com outro corpo. O `v1` que sobra é
+// válido para esse corpo, porque não cobre corpo nenhum.
+func TestStrippingV2FromACapturedEnvelopeDoesNotFallBackToV1(t *testing.T) {
+	verifier := frozen(t)
 
-	if verifier.Verify(request) == nil {
-		t.Fatal("o `v1` que o portão v2 manda junto não confere")
+	for name, body := range map[string]string{
+		"outra foto":      "cnh-image:attacker",
+		"o mesmo corpo":   v2Body,
+		"sem corpo algum": "",
+	} {
+		t.Run(name, func(t *testing.T) {
+			request := captured(body)
+			request.Header.Set(legacySignatureHeader, previousV1)
+			request.Header.Del(SignatureV2Header)
+
+			if verifier.Verify(request) != nil {
+				t.Fatal("sem a v2, o envelope voltou a valer pela v1")
+			}
+		})
+	}
+}
+
+// TestTheV1OfAPreviousGatewayIsIgnored: durante o rollout do #274, o portão
+// anterior ainda manda as duas assinaturas a um verificador novo. Isso passa
+// pela `v2`, e o `v1` que veio junto não salva um corpo trocado.
+func TestTheV1OfAPreviousGatewayIsIgnored(t *testing.T) {
+	verifier := frozen(t)
+
+	original := captured(v2Body)
+	original.Header.Set(legacySignatureHeader, previousV1)
+	if verifier.Verify(original) == nil {
+		t.Fatal("o envelope do portão anterior foi recusado")
+	}
+
+	substituted := captured("cnh-image:attacker")
+	substituted.Header.Set(legacySignatureHeader, previousV1)
+	if verifier.Verify(substituted) != nil {
+		t.Fatal("o v1 que veio junto fez valer um corpo trocado")
 	}
 }
 
@@ -155,7 +183,7 @@ func TestNoBodyAndAnEmptyBodyAreTheSameDigest(t *testing.T) {
 		"corpo vazio": bytes.NewReader(nil),
 	} {
 		t.Run(name, func(t *testing.T) {
-			request := signedV2(t, http.MethodGet, "/api/riders/rider-1", "", now, body)
+			request := signed(t, http.MethodGet, "/api/riders/rider-1", v2Roles, "", now, body)
 			if verifier.Verify(request) == nil {
 				t.Fatal("recusado")
 			}
@@ -169,7 +197,7 @@ func TestAStreamedBodyIsHashedToItsEnd(t *testing.T) {
 	verifier := signing(t)
 	whole := "cnh-image:in three chunks"
 
-	request := signedV2(t, http.MethodPut, v2Path, whole, time.Now().Unix(),
+	request := signed(t, http.MethodPut, v2Path, v2Roles, whole, time.Now().Unix(),
 		io.MultiReader(strings.NewReader("cnh-image:"), strings.NewReader("in "),
 			strings.NewReader("three chunks")))
 	request.ContentLength = -1
@@ -191,7 +219,7 @@ func TestABodyThatTheGatewayCouldNotHaveSignedIsRefused(t *testing.T) {
 	verifier := signing(t)
 	huge := io.LimitReader(zeros{}, MaxSignedBodyBytes+1)
 
-	request := signedV2(t, http.MethodPut, v2Path, "", time.Now().Unix(), huge)
+	request := signed(t, http.MethodPut, v2Path, v2Roles, "", time.Now().Unix(), huge)
 	if verifier.Verify(request) != nil {
 		t.Fatal("um corpo acima do teto foi aceito")
 	}
@@ -199,13 +227,12 @@ func TestABodyThatTheGatewayCouldNotHaveSignedIsRefused(t *testing.T) {
 
 func TestRejectsWhatIsNotExactlyOneSignature(t *testing.T) {
 	cases := map[string]func(http.Header){
-		"nenhuma assinatura": func(h http.Header) {
-			h.Del(SignatureHeader)
-			h.Del(SignatureV2Header)
-		},
+		"nenhuma assinatura": func(h http.Header) { h.Del(SignatureV2Header) },
 		"v2 repetida":        func(h http.Header) { h.Add(SignatureV2Header, v2Signature) },
-		"v1 repetida":        func(h http.Header) { h.Add(SignatureHeader, v2AlsoV1) },
 		"v2 com a versão v1": func(h http.Header) { h.Set(SignatureV2Header, "v1="+v2Signature[3:]) },
+		"o v1 no lugar da v2": func(h http.Header) {
+			h.Set(SignatureV2Header, previousV1)
+		},
 		"v2 mexida": func(h http.Header) {
 			h.Set(SignatureV2Header, v2Signature[:len(v2Signature)-1]+"A")
 		},
@@ -213,8 +240,8 @@ func TestRejectsWhatIsNotExactlyOneSignature(t *testing.T) {
 
 	for name, tamper := range cases {
 		t.Run(name, func(t *testing.T) {
-			verifier := frozenAt(t, v2IssuedAt)
-			request := captured(strings.NewReader(v2Body))
+			verifier := frozen(t)
+			request := captured(v2Body)
 			tamper(request.Header)
 
 			if verifier.Verify(request) != nil {
@@ -224,59 +251,25 @@ func TestRejectsWhatIsNotExactlyOneSignature(t *testing.T) {
 	}
 }
 
-func TestAcceptsAnEnvelopeTheGatewaySigned(t *testing.T) {
-	verifier := frozen(t)
-
-	request := httptest.NewRequest(http.MethodGet, goldPath, nil)
-	request.Header.Set(KeyIDHeader, goldKeyID)
-	request.Header.Set(SubjectHeader, goldSubject)
-	request.Header.Set(RolesHeader, goldRoles)
-	request.Header.Set(IssuedAtHeader, strconv.FormatInt(goldIssuedAt, 10))
-	request.Header.Set(SignatureHeader, goldSignature)
-
-	caller := verifier.Verify(request)
-	if caller == nil {
-		t.Fatal("o identity recusou um envelope que o portão assinou")
-	}
-	if caller.Subject != goldSubject {
-		t.Fatalf("sujeito lido: %q", caller.Subject)
-	}
-	if !caller.IsAdmin() {
-		t.Fatal("o papel Admin não atravessou o envelope")
-	}
-}
-
 // TestTheSignatureIsBoundToThePath: reapresentar num caminho diferente é o
 // ataque que a assinatura existe para impedir.
 func TestTheSignatureIsBoundToThePath(t *testing.T) {
 	verifier := frozen(t)
 
-	request := httptest.NewRequest(http.MethodGet, "/api/riders?ids=a,c", nil)
-	request.Header.Set(KeyIDHeader, goldKeyID)
-	request.Header.Set(SubjectHeader, goldSubject)
-	request.Header.Set(RolesHeader, goldRoles)
-	request.Header.Set(IssuedAtHeader, strconv.FormatInt(goldIssuedAt, 10))
-	request.Header.Set(SignatureHeader, goldSignature)
-
-	if verifier.Verify(request) != nil {
-		t.Fatal("um envelope assinado para outro caminho foi aceito")
+	for _, path := range []string{"/update-image?rider=outro", "/update-image/", "/api/riders"} {
+		if verifier.Verify(capturedAs(http.MethodPut, path, v2Body)) != nil {
+			t.Fatalf("um envelope assinado para outro caminho foi aceito em %s", path)
+		}
 	}
 }
 
 func TestTheSignatureIsBoundToTheMethod(t *testing.T) {
 	verifier := frozen(t)
 
-	request := httptest.NewRequest(http.MethodDelete, goldPath, nil)
-	request.Header.Set(KeyIDHeader, goldKeyID)
-	request.Header.Set(SubjectHeader, goldSubject)
-	request.Header.Set(RolesHeader, goldRoles)
-	request.Header.Set(IssuedAtHeader, strconv.FormatInt(goldIssuedAt, 10))
-	request.Header.Set(SignatureHeader, goldSignature)
-
-	// Sem o método na string canônica, um envelope de leitura serviria para
-	// apagar o piloto no mesmo caminho.
-	if verifier.Verify(request) != nil {
-		t.Fatal("um envelope de GET foi aceito num DELETE")
+	// Sem o método na string canônica, o envelope de uma troca de foto serviria
+	// para qualquer outro verbo no mesmo caminho.
+	if verifier.Verify(capturedAs(http.MethodPost, v2Path, v2Body)) != nil {
+		t.Fatal("um envelope de PUT foi aceito num POST")
 	}
 }
 
@@ -287,14 +280,11 @@ func TestRejectsWhatIsNotExactlyOneEnvelope(t *testing.T) {
 		// diferentes do mesmo envelope.
 		"cabeçalho repetido": func(h http.Header) { h.Add(SubjectHeader, "outro-piloto") },
 		"chave desconhecida": func(h http.Header) { h.Set(KeyIDHeader, "local-v2") },
-		"assinatura mexida": func(h http.Header) {
-			h.Set(SignatureHeader, goldSignature[:len(goldSignature)-1]+"A")
-		},
 		"assinatura sem versão": func(h http.Header) {
-			h.Set(SignatureHeader, strings.TrimPrefix(goldSignature, "v1="))
+			h.Set(SignatureV2Header, strings.TrimPrefix(v2Signature, "v2="))
 		},
-		"assinatura ilegível":  func(h http.Header) { h.Set(SignatureHeader, "v1=não é base64!") },
-		"carimbo com sinal":    func(h http.Header) { h.Set(IssuedAtHeader, "+1788912722") },
+		"assinatura ilegível":  func(h http.Header) { h.Set(SignatureV2Header, "v2=não é base64!") },
+		"carimbo com sinal":    func(h http.Header) { h.Set(IssuedAtHeader, "+1789300000") },
 		"carimbo não numérico": func(h http.Header) { h.Set(IssuedAtHeader, "ontem") },
 		"sujeito com espaço":   func(h http.Header) { h.Set(SubjectHeader, "rider 123") },
 	}
@@ -302,12 +292,7 @@ func TestRejectsWhatIsNotExactlyOneEnvelope(t *testing.T) {
 	for name, tamper := range cases {
 		t.Run(name, func(t *testing.T) {
 			verifier := frozen(t)
-			request := httptest.NewRequest(http.MethodGet, goldPath, nil)
-			request.Header.Set(KeyIDHeader, goldKeyID)
-			request.Header.Set(SubjectHeader, goldSubject)
-			request.Header.Set(RolesHeader, goldRoles)
-			request.Header.Set(IssuedAtHeader, strconv.FormatInt(goldIssuedAt, 10))
-			request.Header.Set(SignatureHeader, goldSignature)
+			request := captured(v2Body)
 			tamper(request.Header)
 
 			if verifier.Verify(request) != nil {
@@ -329,7 +314,7 @@ func TestTheWindowIsClosedOnBothSides(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			verifier := signing(t)
 			issuedAt := time.Now().Add(offset).Unix()
-			request := signed(t, http.MethodGet, "/api/riders/rider-1", goldSubject, "Rider", issuedAt)
+			request := signed(t, http.MethodGet, "/api/riders/rider-1", "Rider", "", issuedAt, nil)
 
 			accepted := verifier.Verify(request) != nil
 			expected := strings.HasPrefix(name, "dentro")
@@ -342,8 +327,7 @@ func TestTheWindowIsClosedOnBothSides(t *testing.T) {
 
 func TestRolesArriveSeparated(t *testing.T) {
 	verifier := signing(t)
-	request := signed(t, http.MethodGet, "/api/riders", goldSubject,
-		"Rider,Admin", time.Now().Unix())
+	request := signed(t, http.MethodGet, "/api/riders", "Rider,Admin", "", time.Now().Unix(), nil)
 
 	caller := verifier.Verify(request)
 	if caller == nil {
@@ -384,7 +368,7 @@ func TestRefusesAConfigurationThatCannotProtectAnything(t *testing.T) {
 // isso o teste passaria hoje e quebraria em trinta segundos.
 func frozen(t *testing.T) *Verifier {
 	t.Helper()
-	return frozenAt(t, goldIssuedAt)
+	return frozenAt(t, v2IssuedAt)
 }
 
 func frozenAt(t *testing.T, issuedAt int64) *Verifier {
@@ -392,40 +376,6 @@ func frozenAt(t *testing.T, issuedAt int64) *Verifier {
 	verifier := signing(t)
 	verifier.now = func() time.Time { return time.Unix(issuedAt, 0) }
 	return verifier
-}
-
-// signedV2 assina só o `v2`, sobre `signedBody`, e manda `body` -- que é o
-// mesmo conteúdo em outra forma, ou nada.
-func signedV2(
-	t *testing.T,
-	method, pathAndQuery, signedBody string,
-	issuedAt int64,
-	body io.Reader,
-) *http.Request {
-	t.Helper()
-	stamp := strconv.FormatInt(issuedAt, 10)
-	digest := sha256.Sum256([]byte(signedBody))
-	canonical := strings.Join([]string{
-		"v2", goldKeyID, goldSubject, v2Roles, stamp, method, pathAndQuery, goldAudience,
-		hex.EncodeToString(digest[:]),
-	}, "\n")
-	mac := hmac.New(sha256.New, goldKey)
-	mac.Write([]byte(canonical))
-
-	request := httptest.NewRequest(method, pathAndQuery, body)
-	request.Header.Set(KeyIDHeader, goldKeyID)
-	request.Header.Set(SubjectHeader, goldSubject)
-	request.Header.Set(RolesHeader, v2Roles)
-	request.Header.Set(IssuedAtHeader, stamp)
-	request.Header.Set(SignatureV2Header, "v2="+base64.RawURLEncoding.EncodeToString(mac.Sum(nil)))
-	return request
-}
-
-type zeros struct{}
-
-func (zeros) Read(buffer []byte) (int, error) {
-	clear(buffer)
-	return len(buffer), nil
 }
 
 func signing(t *testing.T) *Verifier {
@@ -437,24 +387,36 @@ func signing(t *testing.T) *Verifier {
 	return verifier
 }
 
+// signed assina o envelope sobre `signedBody` e manda `body` -- que é o mesmo
+// conteúdo em outra forma, ou nada.
 func signed(
 	t *testing.T,
-	method, pathAndQuery, subject, roles string,
+	method, pathAndQuery, roles, signedBody string,
 	issuedAt int64,
+	body io.Reader,
 ) *http.Request {
 	t.Helper()
 	stamp := strconv.FormatInt(issuedAt, 10)
+	digest := sha256.Sum256([]byte(signedBody))
 	canonical := strings.Join([]string{
-		"v1", goldKeyID, subject, roles, stamp, method, pathAndQuery, goldAudience,
+		"v2", goldKeyID, goldSubject, roles, stamp, method, pathAndQuery, goldAudience,
+		hex.EncodeToString(digest[:]),
 	}, "\n")
 	mac := hmac.New(sha256.New, goldKey)
 	mac.Write([]byte(canonical))
 
-	request := httptest.NewRequest(method, pathAndQuery, nil)
+	request := httptest.NewRequest(method, pathAndQuery, body)
 	request.Header.Set(KeyIDHeader, goldKeyID)
-	request.Header.Set(SubjectHeader, subject)
+	request.Header.Set(SubjectHeader, goldSubject)
 	request.Header.Set(RolesHeader, roles)
 	request.Header.Set(IssuedAtHeader, stamp)
-	request.Header.Set(SignatureHeader, "v1="+base64.RawURLEncoding.EncodeToString(mac.Sum(nil)))
+	request.Header.Set(SignatureV2Header, "v2="+base64.RawURLEncoding.EncodeToString(mac.Sum(nil)))
 	return request
+}
+
+type zeros struct{}
+
+func (zeros) Read(buffer []byte) (int, error) {
+	clear(buffer)
+	return len(buffer), nil
 }
