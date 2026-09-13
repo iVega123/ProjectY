@@ -337,6 +337,11 @@ public sealed class GatewayIdentitySigner
             .Order(StringComparer.Ordinal)
             .ToArray();
         var rolesValue = string.Join(',', roles);
+        // The body is buffered before the timestamp is taken, as the gateway does: a slow upload
+        // must not spend the envelope's 30-second window before the request is even sent.
+        var body = request.Content is null
+            ? []
+            : await request.Content.ReadAsByteArrayAsync(cancellationToken);
         var issuedAt = _clock.GetUtcNow().ToUnixTimeSeconds()
             .ToString(CultureInfo.InvariantCulture);
         var pathAndQuery = request.RequestUri switch
@@ -353,9 +358,6 @@ public sealed class GatewayIdentitySigner
             request.Method.Method,
             pathAndQuery,
             audience);
-        var body = request.Content is null
-            ? []
-            : await request.Content.ReadAsByteArrayAsync(cancellationToken);
         var v1 = Sign($"v1\n{bound}");
         var v2 = Sign($"v2\n{bound}\n{BodyDigest(body)}");
 

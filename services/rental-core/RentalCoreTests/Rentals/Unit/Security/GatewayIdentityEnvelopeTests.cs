@@ -107,6 +107,27 @@ public sealed class GatewayIdentityEnvelopeTests
         Assert.Equal(Body, await request.Content.ReadAsStringAsync());
     }
 
+    /// <summary>
+    /// A slow upload must not spend the envelope's window before it is sent: the timestamp is
+    /// taken after the body is read. The clock here reads a minute earlier until the content has
+    /// been read, so stamping first would produce a different signature than the golden one.
+    /// </summary>
+    [Fact]
+    public async Task TheServiceSigner_StampsTheEnvelopeAfterReadingTheBody()
+    {
+        var content = new ContentThatReportsItsRead(Encoding.UTF8.GetBytes(Body));
+        var signer = new GatewayIdentitySigner(
+            Key, KeyId, new MovingClock(() => content.WasRead ? IssuedAt : IssuedAt - 60));
+        using var request = new HttpRequestMessage(HttpMethod.Post, "http://rental-core" + RentalPath)
+        {
+            Content = content
+        };
+
+        await signer.SignAsync(request, Rider(), Audience);
+
+        Assert.Equal(GoldenV2, Single(request, GatewayIdentityDefaults.SignatureV2Header));
+    }
+
     /// <summary>The empty-body rule, written down, so a GET does not depend on a guess.</summary>
     [Fact]
     public async Task NoBodyAndAnEmptyBody_AreTheDigestOfZeroBytes()
@@ -252,6 +273,29 @@ public sealed class GatewayIdentityEnvelopeTests
     private sealed class FixedClock(long unixSeconds) : TimeProvider
     {
         public override DateTimeOffset GetUtcNow() => DateTimeOffset.FromUnixTimeSeconds(unixSeconds);
+    }
+
+    private sealed class MovingClock(Func<long> unixSeconds) : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => DateTimeOffset.FromUnixTimeSeconds(unixSeconds());
+    }
+
+    /// <summary>Content with no known length that records when it was read, as a stream upload does.</summary>
+    private sealed class ContentThatReportsItsRead(byte[] bytes) : HttpContent
+    {
+        public bool WasRead { get; private set; }
+
+        protected override async Task SerializeToStreamAsync(Stream stream, System.Net.TransportContext? context)
+        {
+            await stream.WriteAsync(bytes);
+            WasRead = true;
+        }
+
+        protected override bool TryComputeLength(out long length)
+        {
+            length = 0;
+            return false;
+        }
     }
 
     private sealed class FixedOptions(GatewayIdentityOptions options) : IOptionsMonitor<GatewayIdentityOptions>
