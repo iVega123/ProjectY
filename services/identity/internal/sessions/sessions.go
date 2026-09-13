@@ -8,6 +8,10 @@
 //
 // O token é opaco -- bytes aleatórios, sem nada assinado dentro. Ele não é
 // verificado, é PROCURADO, e é essa diferença que permite revogá-lo de verdade.
+//
+// Cada linha guarda também o access token emitido com ela. Revogar a sessão
+// devolve os que ainda podem estar em uso, para o portão passar a recusá-los
+// nas operações de alto valor sem esperar os cinco minutos deles (#59).
 package sessions
 
 import (
@@ -32,6 +36,22 @@ var (
 	ErrReplayed = errors.New("refresh token reapresentado")
 )
 
+// AccessToken é um access token emitido junto com um refresh token: o `jti` e
+// quando ele deixa de valer.
+type AccessToken struct {
+	ID        string
+	ExpiresAt time.Time
+}
+
+// Rotation é o que uma renovação produziu.
+type Rotation struct {
+	UserID string
+	Next   string
+	// Revoked são os access tokens da família revogada por reapresentação.
+	// Vem preenchido junto com [ErrReplayed], e só nesse caso.
+	Revoked []AccessToken
+}
+
 // Store guarda e consome refresh tokens.
 type Store struct {
 	db  *sql.DB
@@ -43,23 +63,26 @@ func NewStore(db *sql.DB, ttl time.Duration) *Store {
 	return &Store{db: db, ttl: ttl}
 }
 
-// Issue abre uma sessão nova: família nova, token novo.
-func (s *Store) Issue(ctx context.Context, userID string) (string, error) {
+// Issue abre uma sessão nova: família nova, token novo, e o access token que
+// sai junto com ele.
+func (s *Store) Issue(ctx context.Context, userID string, access AccessToken) (string, error) {
 	token, hash, err := generate()
 	if err != nil {
 		return "", err
 	}
 	_, err = s.db.ExecContext(ctx,
-		`INSERT INTO refresh_tokens (user_id, token_hash, family_id, expires_at)
-		 VALUES ($1, $2, $3, $4)`,
-		userID, hash, uuid.NewString(), time.Now().UTC().Add(s.ttl))
+		`INSERT INTO refresh_tokens
+		        (user_id, token_hash, family_id, expires_at, access_token_id, access_expires_at)
+		 VALUES ($1, $2, $3, $4, $5, $6)`,
+		userID, hash, uuid.NewString(), time.Now().UTC().Add(s.ttl), access.ID, access.ExpiresAt.UTC())
 	if err != nil {
 		return "", err
 	}
 	return token, nil
 }
 
-// Rotate consome o token apresentado e emite o próximo da mesma família.
+// Rotate consome o token apresentado e emite o próximo da mesma família, com o
+// access token que sai junto.
 //
 // # Por que um token de renovação só serve uma vez
 //
@@ -73,7 +96,10 @@ func (s *Store) Issue(ctx context.Context, userID string) (string, error) {
 // revogar a família inteira. Quem for legítimo faz login de novo; quem roubou
 // perde o acesso. Recusar só aquela chamada deixaria o ladrão renovando com o
 // token seguinte.
-func (s *Store) Rotate(ctx context.Context, presented string) (userID, next string, err error) {
+//
+// O `jti` do access token entra na linha nova antes de o dono ser conhecido: é
+// a mesma escrita que abre a próxima renovação, e o token só é assinado depois.
+func (s *Store) Rotate(ctx context.Context, presented string, access AccessToken) (Rotation, error) {
 	hash := digest(presented)
 
 	// A recusa NÃO viaja pelo retorno de erro da transação.
@@ -83,9 +109,11 @@ func (s *Store) Rotate(ctx context.Context, presented string) (userID, next stri
 	// chamada e continuaria renovando na seguinte. A transação precisa fechar;
 	// o veredito vem por fora dela.
 	var verdict error
+	var rotation Rotation
 
-	err = dbx.InTransaction(ctx, s.db, func(transaction *sql.Tx) error {
+	err := dbx.InTransaction(ctx, s.db, func(transaction *sql.Tx) error {
 		verdict = nil
+		rotation = Rotation{}
 
 		var familyID string
 		err := transaction.QueryRowContext(ctx,
@@ -95,10 +123,10 @@ func (s *Store) Rotate(ctx context.Context, presented string) (userID, next stri
 			    AND consumed_at IS NULL
 			    AND revoked_at IS NULL
 			    AND expires_at > now()
-			 RETURNING user_id, family_id`, hash).Scan(&userID, &familyID)
+			 RETURNING user_id, family_id`, hash).Scan(&rotation.UserID, &familyID)
 
 		if errors.Is(err, sql.ErrNoRows) {
-			verdict, err = s.reject(ctx, transaction, hash)
+			rotation.Revoked, verdict, err = s.reject(ctx, transaction, hash)
 			return err
 		}
 		if err != nil {
@@ -110,22 +138,24 @@ func (s *Store) Rotate(ctx context.Context, presented string) (userID, next stri
 			return err
 		}
 		if _, err := transaction.ExecContext(ctx,
-			`INSERT INTO refresh_tokens (user_id, token_hash, family_id, expires_at)
-			 VALUES ($1, $2, $3, $4)`,
-			userID, nextHash, familyID, time.Now().UTC().Add(s.ttl),
+			`INSERT INTO refresh_tokens
+			        (user_id, token_hash, family_id, expires_at, access_token_id, access_expires_at)
+			 VALUES ($1, $2, $3, $4, $5, $6)`,
+			rotation.UserID, nextHash, familyID, time.Now().UTC().Add(s.ttl),
+			access.ID, access.ExpiresAt.UTC(),
 		); err != nil {
 			return err
 		}
-		next = token
+		rotation.Next = token
 		return nil
 	})
 	if err != nil {
-		return "", "", err
+		return Rotation{}, err
 	}
 	if verdict != nil {
-		return "", "", verdict
+		return Rotation{Revoked: rotation.Revoked}, verdict
 	}
-	return userID, next, nil
+	return rotation, nil
 }
 
 // reject decide entre "não existe" e "já foi usado", e revoga a família no
@@ -135,47 +165,104 @@ func (s *Store) reject(
 	ctx context.Context,
 	transaction *sql.Tx,
 	hash []byte,
-) (verdict error, failure error) {
+) (revoked []AccessToken, verdict error, failure error) {
 	var familyID string
 	err := transaction.QueryRowContext(ctx,
 		`SELECT family_id FROM refresh_tokens WHERE token_hash = $1 AND consumed_at IS NOT NULL`,
 		hash).Scan(&familyID)
 	if errors.Is(err, sql.ErrNoRows) {
-		return ErrUnknown, nil
+		return nil, ErrUnknown, nil
 	}
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	if _, err := transaction.ExecContext(ctx,
+	rows, err := transaction.QueryContext(ctx,
 		`UPDATE refresh_tokens SET revoked_at = now()
-		  WHERE family_id = $1 AND revoked_at IS NULL`, familyID); err != nil {
-		return nil, err
+		  WHERE family_id = $1 AND revoked_at IS NULL
+		 RETURNING access_token_id, access_expires_at`, familyID)
+	if err != nil {
+		return nil, nil, err
 	}
-	return ErrReplayed, nil
+	revoked, _, err = collect(rows)
+	if err != nil {
+		return nil, nil, err
+	}
+	return revoked, ErrReplayed, nil
 }
 
-// Revoke encerra a sessão a que o token pertence.
+// Revoke encerra a sessão a que o token pertence, e devolve os access tokens
+// que ela emitiu.
 //
 // A família inteira, e não só o token apresentado: sair é encerrar a sessão, e
 // a sessão é a família. Revogar uma folha deixaria a cadeia renovável a partir
 // de qualquer token anterior que ainda estivesse por aí.
-func (s *Store) Revoke(ctx context.Context, presented string) error {
-	result, err := s.db.ExecContext(ctx,
+func (s *Store) Revoke(ctx context.Context, presented string) ([]AccessToken, error) {
+	rows, err := s.db.QueryContext(ctx,
 		`UPDATE refresh_tokens SET revoked_at = now()
 		  WHERE revoked_at IS NULL
-		    AND family_id = (SELECT family_id FROM refresh_tokens WHERE token_hash = $1)`,
+		    AND family_id = (SELECT family_id FROM refresh_tokens WHERE token_hash = $1)
+		 RETURNING access_token_id, access_expires_at`,
 		digest(presented))
 	if err != nil {
-		return err
+		return nil, err
 	}
-	affected, err := result.RowsAffected()
+	revoked, touched, err := collect(rows)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	if affected == 0 {
-		return ErrUnknown
+	if touched == 0 {
+		return nil, ErrUnknown
 	}
-	return nil
+	return revoked, nil
+}
+
+// RevokeUser encerra todas as sessões de um usuário -- o caso de conta
+// comprometida -- e devolve os access tokens delas.
+func (s *Store) RevokeUser(ctx context.Context, userID string) ([]AccessToken, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`UPDATE refresh_tokens SET revoked_at = now()
+		  WHERE user_id = $1 AND revoked_at IS NULL
+		 RETURNING access_token_id, access_expires_at`,
+		userID)
+	if err != nil {
+		return nil, err
+	}
+	revoked, _, err := collect(rows)
+	return revoked, err
+}
+
+// Revoked devolve os access tokens de sessões revogadas que expiram depois de
+// `after`: o que ainda pode ser apresentado ao portão e precisa estar negado.
+//
+// É a fonte da denylist. O Redis guarda uma cópia disto, e esta consulta é o
+// que a refaz quando a cópia se perde.
+func (s *Store) Revoked(ctx context.Context, after time.Time) ([]AccessToken, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT access_token_id, access_expires_at
+		   FROM refresh_tokens
+		  WHERE revoked_at IS NOT NULL
+		    AND access_expires_at > $1`,
+		after.UTC())
+	if err != nil {
+		return nil, err
+	}
+	revoked, _, err := collect(rows)
+	return revoked, err
+}
+
+// Ready diz se o schema tem o que este código grava e lê.
+//
+// As colunas do access token chegam pela migração 007, e um binário que as usa
+// subindo antes dela responde erro de banco em todo login e renovação. A
+// prontidão do identity pergunta isto, e é o que segura o rollout até o Job de
+// schema ter rodado.
+func (s *Store) Ready(ctx context.Context) error {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT access_token_id, access_expires_at FROM refresh_tokens LIMIT 0`)
+	if err != nil {
+		return fmt.Errorf("o schema de refresh_tokens não tem as colunas da migração 007: %w", err)
+	}
+	return rows.Close()
 }
 
 // Sweep apaga o que já não pode mais ser usado. Sem isso a tabela só cresce, e
@@ -187,6 +274,24 @@ func (s *Store) Sweep(ctx context.Context) (int64, error) {
 		return 0, err
 	}
 	return result.RowsAffected()
+}
+
+// collect lê pares (jti, expiração) e conta as linhas. Uma linha sem `jti` é de
+// antes da migração 007: ela conta como sessão tocada, e não tem o que negar.
+func collect(rows *sql.Rows) (tokens []AccessToken, touched int, err error) {
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		touched++
+		var id sql.NullString
+		var expiresAt sql.NullTime
+		if err := rows.Scan(&id, &expiresAt); err != nil {
+			return nil, 0, err
+		}
+		if id.Valid && expiresAt.Valid {
+			tokens = append(tokens, AccessToken{ID: id.String, ExpiresAt: expiresAt.Time})
+		}
+	}
+	return tokens, touched, rows.Err()
 }
 
 // generate sorteia o token e devolve junto o que vai para o banco.

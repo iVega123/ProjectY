@@ -214,6 +214,7 @@ type fixture struct {
 	database  *sql.DB
 	key       keys.Key
 	objects   *fakeObjects
+	denied    *fakeDenylist
 	lastCnpj  string
 	lastEmail string
 	lastID    string
@@ -258,6 +259,13 @@ func (f *fakeObjects) Remove(_ context.Context, key string) error {
 
 func start(t *testing.T) *fixture {
 	t.Helper()
+	return startWith(t, nil)
+}
+
+// startWith monta a borda com a denylist dada. Sem nenhuma, a borda recebe a
+// de mentira, que o teste inspeciona em fixture.denied.
+func startWith(t *testing.T, denylist denylister) *fixture {
+	t.Helper()
 	database := testdb.Open(t)
 
 	seed := make([]byte, ed25519.SeedSize)
@@ -278,10 +286,15 @@ func start(t *testing.T) *fixture {
 		t.Fatal(err)
 	}
 	objects := &fakeObjects{stored: map[string][]byte{}}
+	denied := &fakeDenylist{denied: map[string]time.Time{}}
+	if denylist == nil {
+		denylist = denied
+	}
 
 	service := New(Dependencies{
 		Accounts:  accounts.NewStore(database),
 		Sessions:  sessions.NewStore(database, 7*24*time.Hour),
+		Denylist:  denylist,
 		Riders:    riders.NewStore(database),
 		Gateway:   envelope,
 		Guard:     media.NewGuard(sanitizer(t)),
@@ -292,7 +305,9 @@ func start(t *testing.T) *fixture {
 		PublicURL: "http://identity:8095",
 		Logger:    slog.New(slog.DiscardHandler),
 	})
-	return &fixture{routes: service.Routes(), database: database, key: key, objects: objects}
+	return &fixture{
+		routes: service.Routes(), database: database, key: key, objects: objects, denied: denied,
+	}
 }
 
 // sanitizer sobe um media-guard de mentira que devolve um PNG. O que o

@@ -171,9 +171,15 @@ func serve(settings config.Config, database *sql.DB, logger *slog.Logger) error 
 	}
 
 	sessionStore := sessions.NewStore(database, settings.RefreshTokenTTL)
+	denylist, err := startDenylist(ctx, settings, sessionStore, logger)
+	if err != nil {
+		return fmt.Errorf("abrindo a denylist: %w", err)
+	}
+	defer func() { _ = denylist.Close() }()
 	service := api.New(api.Dependencies{
 		Accounts:  accountStore,
 		Sessions:  sessionStore,
+		Denylist:  denylist,
 		Riders:    riderStore,
 		Gateway:   envelope,
 		Guard:     media.NewGuard(settings.MediaGuardURL),
@@ -216,6 +222,13 @@ func serve(settings config.Config, database *sql.DB, logger *slog.Logger) error 
 		defer cancel()
 		if err := database.PingContext(probe); err != nil {
 			http.Error(writer, "database", http.StatusServiceUnavailable)
+			return
+		}
+		// Pronto só com o schema que este binário usa. Um rollout que chega
+		// antes do Job de schema fica sem receber tráfego, em vez de responder
+		// erro de banco em todo login (#59).
+		if err := sessionStore.Ready(probe); err != nil {
+			http.Error(writer, "schema", http.StatusServiceUnavailable)
 			return
 		}
 		if ring.Active().ID == "" {

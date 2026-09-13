@@ -26,6 +26,11 @@ jobs:
         run: |
           docker run --detach --name cockroach --publish 26257:26257 \
             cockroachdb/cockroach:v26.3.1 start-single-node --insecure
+      # E um Redis, para a denylist que o identity grava ao encerrar sessão. Só
+      # o teste do formato da chave e da expiração fala com ele; os que provam
+      # que um Redis fora do ar não desloga ninguém não precisam de um de pé.
+      - name: Start Redis
+        run: docker run --detach --name redis --publish 6379:6379 redis:8.10-alpine
       # gofmt é o `dotnet format --verify-no-changes` desta linguagem.
       - name: Check formatting
         run: test -z "$(gofmt -l .)"
@@ -59,3 +64,4 @@ jobs:
       - run: go test -p 1 ./...
         env:
           IDENTITY_TEST_COCKROACH: 127.0.0.1:26257
+          IDENTITY_TEST_REDIS: 127.0.0.1:6379

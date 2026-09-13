@@ -39,7 +39,7 @@ All runtime configuration comes from environment variables.
 | `GATEWAY_JWKS_CACHE_TTL_SECS` | No (`300`) | Maximum age of cached public keys |
 | `GATEWAY_JWKS_UNKNOWN_KID_REFRESH_SECS` | No (`5`) | Minimum interval between unknown-`kid` refreshes |
 | `GATEWAY_JWKS_TIMEOUT_MS` | No (`2000`) | JWKS request timeout |
-| `GATEWAY_JWT_CLOCK_SKEW_SECS` | No (`30`) | Accepted JWT clock skew |
+| `GATEWAY_JWT_CLOCK_SKEW_SECS` | No (`30`) | Accepted JWT clock skew; at most `60`, how long identity keeps a revoked token's denylist key past its expiry |
 | `GATEWAY_JWT_MAX_LIFETIME_SECS` | No (`300`) | Maximum `exp - iat` access-token lifetime |
 | `GATEWAY_IDENTITY_SIGNING_KEY` | Yes | At least 32 bytes; HMAC key for the internal identity envelope |
 | `GATEWAY_IDENTITY_SIGNING_KEY_ID` | Yes | Rotation identifier forwarded with the signed envelope |
@@ -78,7 +78,10 @@ password brute-force rule applied to a lookup.
 `POST /api/rental/create` additionally checks
 `projecty:revoked:jti:<jti>` in Redis. A present key rejects the token, and a
 Redis error or timeout returns `503` with `Retry-After: 1`; ordinary requests do
-not put Redis in their authentication path. Ambiguous paths (percent encoding,
+not put Redis in their authentication path. identity writes those keys when it
+ends a session, and rewrites them from CockroachDB every five seconds; the key
+format is pinned on both sides by `the_denylist_key_is_the_one_identity_writes`
+here and `TestTheKeyIsTheOneTheGatewayReads` in identity. Ambiguous paths (percent encoding,
 backslashes, duplicate/trailing separators, and dot segments) are rejected
 before route policy is selected so an upstream cannot normalize into a more
 privileged route.

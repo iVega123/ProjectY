@@ -1,6 +1,12 @@
+# The name carries the newest migration in deploy/db/sql. Re-applying a Job that
+# already completed does not run it again, so a fixed name would let a new
+# migration reach the binaries that need it without ever reaching the database
+# (#59). A new name is a new Job, and every migration is idempotent, so it runs
+# the whole schema once more. scripts/Test-KubernetesManifests.ps1 fails when a
+# migration is added without renaming this.
 apiVersion: batch/v1
 kind: Job
-metadata: {name: cockroach-schema}
+metadata: {name: cockroach-schema-007}
 spec:
   backoffLimit: 12
   template:

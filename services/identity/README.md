@@ -12,7 +12,8 @@ inventar um argumento de carga depois do fato.
 | `POST /api/auth/register/rider` | cadastro de piloto: credencial, papel e registro regulatório numa transação |
 | `POST /api/auth/login` | e-mail e senha, devolve access token e refresh token |
 | `POST /api/auth/refresh` | troca o refresh token pelo próximo da mesma família |
-| `POST /api/auth/logout` | revoga a família inteira |
+| `POST /api/auth/logout` | revoga a família inteira e nega os access tokens dela na denylist do Redis |
+| `DELETE /api/auth/users/{userId}/sessions` | revoga todas as sessões do usuário -- o próprio ou um administrador; 404 para os outros |
 | `GET /.well-known/jwks.json` | as chaves públicas, selecionáveis por `kid` |
 | `GET /.well-known/openid-configuration` | documento com a forma da descoberta OIDC |
 | `GET /api/riders?ids=a,b,c` | lote de pilotos, administrador, teto de 100 |
@@ -147,6 +148,7 @@ sobreposição menor que a vida do access token.
 | `IDENTITY_KEY_ENCRYPTION_KEY` | obrigatória, mínimo 32 bytes |
 | `GATEWAY_IDENTITY_SIGNING_KEY` | obrigatória -- a chave com que o portão assina o envelope |
 | `IDENTITY_ENVELOPE_AUDIENCE` | obrigatória, e precisa bater com `GATEWAY_JWT_AUDIENCE_IDENTITY` |
+| `IDENTITY_REDIS_URL` | obrigatória -- a denylist que o portão consulta antes de criar aluguel; o identity só grava nela, e sobe e serve sem ela de pé ([ADR 0017](../../docs/adr/0017-session-lifetime-and-revocation.md)) |
 | `MEDIA_GUARD_URL` | `http://media-guard:8080` |
 | `MINIO_ENDPOINT` / `_ACCESS_KEY` / `_SECRET_KEY` / `_BUCKET` | armazenamento da CNH |
 | `KAFKA_BOOTSTRAP_SERVERS` | opcional; sem ele os fatos ficam retidos no outbox |

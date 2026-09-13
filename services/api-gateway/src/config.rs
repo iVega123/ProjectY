@@ -169,7 +169,10 @@ impl Config {
                     "GATEWAY_JWKS_TIMEOUT_MS",
                     2000,
                 )?),
-                clock_skew: duration_from_env("GATEWAY_JWT_CLOCK_SKEW_SECS", 30)?,
+                clock_skew: clock_skew_within_denylist_margin(duration_from_env(
+                    "GATEWAY_JWT_CLOCK_SKEW_SECS",
+                    30,
+                )?)?,
                 max_token_lifetime: duration_from_env("GATEWAY_JWT_MAX_LIFETIME_SECS", 300)?,
                 identity_signing_key: signing_secret()?,
                 identity_signing_key_id: identity_key_id()?,
@@ -477,6 +480,41 @@ fn parse_timeout_ms() -> Result<u64, String> {
                 Ok(value)
             }
         })
+}
+
+/// Quanto a chave de uma revogação sobrevive ao token no Redis.
+///
+/// O identity grava `projecty:revoked:jti:{jti}` expirando um minuto depois do
+/// `exp` (`revocations.Margin`, em services/identity/internal/revocations). Este
+/// portão aceita um token até a folga de relógio depois do `exp`. Com uma folga
+/// maior que a margem, a chave sumiria antes de o token deixar de valer, e um
+/// token revogado voltaria a criar aluguel no fim da folga. O valor está preso
+/// dos dois lados: aqui e em `TestTheMarginIsTheOneTheGatewayCapsItsSkewAt`.
+pub const DENYLIST_KEY_MARGIN: Duration = Duration::from_secs(60);
+
+fn clock_skew_within_denylist_margin(skew: Duration) -> Result<Duration, String> {
+    if skew > DENYLIST_KEY_MARGIN {
+        return Err(format!(
+            "GATEWAY_JWT_CLOCK_SKEW_SECS must be at most {}: identity keeps a revoked token's denylist key only that long past its expiry",
+            DENYLIST_KEY_MARGIN.as_secs()
+        ));
+    }
+    Ok(skew)
+}
+
+#[cfg(test)]
+mod denylist_margin_tests {
+    use std::time::Duration;
+
+    use super::{DENYLIST_KEY_MARGIN, clock_skew_within_denylist_margin};
+
+    #[test]
+    fn refuses_a_clock_skew_that_outlives_the_denylist_key() {
+        assert_eq!(DENYLIST_KEY_MARGIN, Duration::from_secs(60));
+        assert!(clock_skew_within_denylist_margin(Duration::from_secs(30)).is_ok());
+        assert!(clock_skew_within_denylist_margin(Duration::from_secs(60)).is_ok());
+        assert!(clock_skew_within_denylist_margin(Duration::from_secs(61)).is_err());
+    }
 }
 
 #[cfg(test)]

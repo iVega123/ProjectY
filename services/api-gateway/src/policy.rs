@@ -131,6 +131,17 @@ mod tests {
             access_for(&Method::PUT, "/update-image", UpstreamName::Identity),
             Access::Authenticated
         );
+        // Revogar todas as sessões de alguém é autenticado, e não público nem
+        // Admin: o identity decide se quem pede é o próprio usuário ou um
+        // administrador, e responde 404 para os outros (#59).
+        assert_eq!(
+            access_for(
+                &Method::DELETE,
+                "/api/auth/users/user-1/sessions",
+                UpstreamName::Identity
+            ),
+            Access::Authenticated
+        );
     }
 
     #[test]

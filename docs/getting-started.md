@@ -211,9 +211,12 @@ other, which is [ADR 0023](adr/0023-the-rider-record-lives-with-the-credential.m
 
 Once the identity issuer is available, rental creation also requires Redis for
 the immediate-revocation check defined by ADR 0017. The denylist key is
-`projecty:revoked:jti:<jti>` and expires no later than the access token. Redis
-failure blocks only that high-value operation; ordinary token verification
-continues from the bounded JWKS cache.
+`projecty:revoked:jti:<jti>`. identity writes it when a session ends — logout,
+a replayed refresh token, or `DELETE /api/auth/users/{userId}/sessions` — and it
+expires one minute after the access token, which covers the gateway's clock-skew
+leeway. Redis failure blocks only that high-value operation; ordinary token
+verification continues from the bounded JWKS cache, and login, refresh and logout
+keep working because sessions live in CockroachDB.
 
 The gateway rate limiter is already active for public and protected routes. It
 uses an atomic token bucket shared by every gateway replica, with a stricter

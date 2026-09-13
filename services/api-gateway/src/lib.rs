@@ -2444,6 +2444,33 @@ projecty.identity"
         assert_eq!(state.upstream_requests.load(Ordering::SeqCst), 0);
     }
 
+    /// A outra velocidade do ADR 0017: fora das operações de alto valor o portão
+    /// não pergunta nada ao Redis. Um token revogado continua lendo até expirar
+    /// -- no máximo cinco minutos --, e é isso que mantém o Redis fora do
+    /// caminho de toda requisição.
+    #[tokio::test]
+    async fn a_revoked_token_still_reads_until_it_expires() {
+        let issuer = TestIssuer::new("revoked-read-key");
+        let (upstream, state) = spawn_security_upstream(Some(issuer.jwks())).await;
+        let mut config = test_config(upstream.clone());
+        config.auth.jwks_url = upstream.join(".well-known/jwks.json").unwrap();
+        let (app, revocation) = app_with_revocation(config, Ok(true));
+        let token = issuer.token("projecty.rental-operations", &["Rider"]);
+        let response = app
+            .oneshot(
+                HttpRequest::get("/api/rental/user")
+                    .header(AUTHORIZATION, format!("Bearer {token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(revocation.checks.load(Ordering::SeqCst), 0);
+        assert_eq!(state.upstream_requests.load(Ordering::SeqCst), 1);
+    }
+
     /// O #194: a sessão do console é conferida sem upstream nenhum, e a resposta
     /// é o sujeito que o token carrega.
     #[tokio::test]

@@ -23,7 +23,7 @@ func TestTokenCarriesExactlyWhatTheGatewayRequires(t *testing.T) {
 	issuedAt := time.Unix(1_790_000_000, 0).UTC()
 	minter := NewMinter("projecty.identity", []string{"projecty.rental-core", "projecty.billing"}, 5*time.Minute)
 
-	access, err := minter.Mint(key, "8a1f9c2e-0000-4000-8000-000000000001", []string{"Rider"}, issuedAt)
+	access, err := minter.Mint(key, "8a1f9c2e-0000-4000-8000-000000000001", []string{"Rider"}, minter.Reserve(issuedAt))
 	if err != nil {
 		t.Fatalf("emitindo: %v", err)
 	}
@@ -71,7 +71,7 @@ func TestSignatureIsOverTheHeaderAndPayload(t *testing.T) {
 	key := fixedKey(t)
 	minter := NewMinter("projecty.identity", []string{"projecty.rental-core"}, 5*time.Minute)
 
-	access, err := minter.Mint(key, "rider-1", nil, time.Now())
+	access, err := minter.Mint(key, "rider-1", nil, minter.Reserve(time.Now()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,11 +102,11 @@ func TestEveryTokenGetsItsOwnIdentifier(t *testing.T) {
 	key := fixedKey(t)
 	minter := NewMinter("projecty.identity", []string{"projecty.rental-core"}, 5*time.Minute)
 
-	first, err := minter.Mint(key, "rider-1", nil, time.Now())
+	first, err := minter.Mint(key, "rider-1", nil, minter.Reserve(time.Now()))
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := minter.Mint(key, "rider-1", nil, time.Now())
+	second, err := minter.Mint(key, "rider-1", nil, minter.Reserve(time.Now()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -150,4 +150,28 @@ func decodeSegment(t *testing.T, segment string) map[string]any {
 		t.Fatalf("segmento não é JSON: %v", err)
 	}
 	return decoded
+}
+
+// TestTheTokenCarriesItsReservation: o `jti` que a sessão grava é o `jti` que
+// sai no token. Se os dois divergissem, sair negaria um identificador que
+// ninguém apresenta, e o token de verdade seguiria criando aluguel.
+func TestTheTokenCarriesItsReservation(t *testing.T) {
+	key := fixedKey(t)
+	minter := NewMinter("projecty.identity", []string{"projecty.rental-core"}, 5*time.Minute)
+	reservation := minter.Reserve(time.Unix(1_790_000_000, 400_000_000))
+
+	access, err := minter.Mint(key, "rider-1", nil, reservation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, claims := parse(t, access.Token)
+	if claims["jti"] != reservation.ID || access.TokenID != reservation.ID {
+		t.Fatalf("jti %v e TokenID %q, reservado %q", claims["jti"], access.TokenID, reservation.ID)
+	}
+	if int64(claims["exp"].(float64)) != reservation.ExpiresAt.Unix() {
+		t.Fatalf("exp %v, reservado %v", claims["exp"], reservation.ExpiresAt)
+	}
+	if reservation.ExpiresAt.Sub(reservation.IssuedAt) != 5*time.Minute {
+		t.Fatalf("janela reservada: %v", reservation.ExpiresAt.Sub(reservation.IssuedAt))
+	}
 }

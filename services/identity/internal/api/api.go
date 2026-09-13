@@ -30,6 +30,7 @@ import (
 	"github.com/iVega123/ProjectY/services/identity/internal/keys"
 	"github.com/iVega123/ProjectY/services/identity/internal/media"
 	"github.com/iVega123/ProjectY/services/identity/internal/passwords"
+	"github.com/iVega123/ProjectY/services/identity/internal/revocations"
 	"github.com/iVega123/ProjectY/services/identity/internal/riders"
 	"github.com/iVega123/ProjectY/services/identity/internal/sessions"
 	"github.com/iVega123/ProjectY/services/identity/internal/tokens"
@@ -62,6 +63,7 @@ func init() {
 type API struct {
 	accounts  *accounts.Store
 	sessions  *sessions.Store
+	denylist  revocations.Denylist
 	riders    *riders.Store
 	gateway   *gateway.Verifier
 	guard     *media.Guard
@@ -91,6 +93,7 @@ type ObjectStore interface {
 type Dependencies struct {
 	Accounts  *accounts.Store
 	Sessions  *sessions.Store
+	Denylist  revocations.Denylist
 	Riders    *riders.Store
 	Gateway   *gateway.Verifier
 	Guard     *media.Guard
@@ -107,6 +110,7 @@ func New(dependencies Dependencies) *API {
 	return &API{
 		accounts:  dependencies.Accounts,
 		sessions:  dependencies.Sessions,
+		denylist:  dependencies.Denylist,
 		riders:    dependencies.Riders,
 		gateway:   dependencies.Gateway,
 		guard:     dependencies.Guard,
@@ -126,6 +130,7 @@ func (a *API) Routes() *http.ServeMux {
 	mux.HandleFunc("POST /api/auth/login", a.login)
 	mux.HandleFunc("POST /api/auth/refresh", a.refresh)
 	mux.HandleFunc("POST /api/auth/logout", a.logout)
+	mux.HandleFunc("DELETE /api/auth/users/{id}/sessions", a.revokeEverySession)
 	mux.HandleFunc("GET /.well-known/jwks.json", a.jwks)
 	mux.HandleFunc("GET /.well-known/openid-configuration", a.discovery)
 
@@ -302,13 +307,15 @@ func (a *API) refresh(writer http.ResponseWriter, request *http.Request) {
 		return
 	}
 
-	userID, next, err := a.sessions.Rotate(request.Context(), body.RefreshToken)
+	reservation := a.minter.Reserve(time.Now())
+	rotation, err := a.sessions.Rotate(request.Context(), body.RefreshToken, accessOf(reservation))
 	switch {
 	case errors.Is(err, sessions.ErrReplayed):
-		// A família já foi revogada dentro de Rotate. A resposta é a mesma de
-		// um token desconhecido: quem reapresentou não precisa saber que foi
-		// detectado.
+		// A família já foi revogada dentro de Rotate, e os access tokens dela
+		// caem junto: o do ladrão é um deles. A resposta é a mesma de um token
+		// desconhecido -- quem reapresentou não precisa saber que foi detectado.
 		a.logger.Warn("refresh token reapresentado; sessão revogada")
+		a.deny(request.Context(), rotation.Revoked)
 		fail(writer, http.StatusUnauthorized, "sessão inválida")
 		return
 	case errors.Is(err, sessions.ErrUnknown):
@@ -319,13 +326,13 @@ func (a *API) refresh(writer http.ResponseWriter, request *http.Request) {
 		return
 	}
 
-	user, err := a.accounts.FindByID(request.Context(), userID)
+	user, err := a.accounts.FindByID(request.Context(), rotation.UserID)
 	if err != nil {
 		a.fatal(writer, "procurando o usuário da sessão", err)
 		return
 	}
 
-	access, err := a.mint(user)
+	access, err := a.mint(user, reservation)
 	if err != nil {
 		a.fatal(writer, "emitindo o access token", err)
 		return
@@ -334,7 +341,7 @@ func (a *API) refresh(writer http.ResponseWriter, request *http.Request) {
 		TokenType:    "Bearer",
 		AccessToken:  access.Token,
 		ExpiresIn:    access.ExpiresIn,
-		RefreshToken: next,
+		RefreshToken: rotation.Next,
 	})
 }
 
@@ -351,25 +358,31 @@ func (a *API) logout(writer http.ResponseWriter, request *http.Request) {
 	// seja, qualquer pessoa deslogava qualquer outra, e o token continuava
 	// valendo a hora inteira. Aqui a posse do refresh token É a prova de que a
 	// sessão é sua, e revogá-la encerra a renovação de verdade.
-	err := a.sessions.Revoke(request.Context(), body.RefreshToken)
+	//
+	// Revogar a família devolve os access tokens que ela emitiu, e eles vão
+	// para a denylist: sem isso o access token que já está na mão de alguém
+	// seguiria criando aluguel pelos cinco minutos dele (#59).
+	revoked, err := a.sessions.Revoke(request.Context(), body.RefreshToken)
 	if err != nil && !errors.Is(err, sessions.ErrUnknown) {
 		a.fatal(writer, "encerrando a sessão", err)
 		return
 	}
+	a.deny(request.Context(), revoked)
 	// Mesmo 204 para token desconhecido: sair é idempotente, e responder
 	// diferente diria a quem tentou se aquela sessão existia.
 	writer.WriteHeader(http.StatusNoContent)
 }
 
 func (a *API) issue(writer http.ResponseWriter, ctx context.Context, user accounts.User) {
-	access, err := a.mint(user)
-	if err != nil {
-		a.fatal(writer, "emitindo o access token", err)
-		return
-	}
-	refresh, err := a.sessions.Issue(ctx, user.ID)
+	reservation := a.minter.Reserve(time.Now())
+	refresh, err := a.sessions.Issue(ctx, user.ID, accessOf(reservation))
 	if err != nil {
 		a.fatal(writer, "abrindo a sessão", err)
+		return
+	}
+	access, err := a.mint(user, reservation)
+	if err != nil {
+		a.fatal(writer, "emitindo o access token", err)
 		return
 	}
 	reply(writer, http.StatusOK, issuedSession{
@@ -380,8 +393,8 @@ func (a *API) issue(writer http.ResponseWriter, ctx context.Context, user accoun
 	})
 }
 
-func (a *API) mint(user accounts.User) (tokens.Access, error) {
-	return a.minter.Mint(a.ring.Active(), user.ID, user.Roles, time.Now())
+func (a *API) mint(user accounts.User, reservation tokens.Reservation) (tokens.Access, error) {
+	return a.minter.Mint(a.ring.Active(), user.ID, user.Roles, reservation)
 }
 
 func (a *API) jwks(writer http.ResponseWriter, _ *http.Request) {

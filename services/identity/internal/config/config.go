@@ -55,6 +55,14 @@ type Config struct {
 	EnvelopeKeyID    string
 	EnvelopeAudience string
 
+	// RedisURL é onde fica a denylist que o portão consulta antes de criar um
+	// aluguel (ADR 0017). O identity só escreve nela, e só depois de a
+	// revogação estar no banco: um Redis fora do ar não impede ninguém de
+	// entrar nem de sair. Obrigatória mesmo assim, porque sem ela sair deixaria
+	// de recusar o access token em mãos -- e isso não pode ser um padrão
+	// silencioso.
+	RedisURL string
+
 	MediaGuardURL string
 	ObjectStore   ObjectStore
 
@@ -136,6 +144,9 @@ func Load() (Config, error) {
 	config.EnvelopeKey = []byte(envelopeKey)
 	config.EnvelopeKeyID = value("GATEWAY_IDENTITY_SIGNING_KEY_ID", "local-v1")
 	if config.EnvelopeAudience, err = required("IDENTITY_ENVELOPE_AUDIENCE"); err != nil {
+		return Config{}, err
+	}
+	if config.RedisURL, err = required("IDENTITY_REDIS_URL"); err != nil {
 		return Config{}, err
 	}
 
