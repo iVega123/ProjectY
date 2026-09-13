@@ -1,0 +1,13 @@
+# Ruff's defaults (pyflakes and the pycodestyle errors) plus import order. The
+# pycodestyle whitespace rules stay off: nothing formats this code, and a lint
+# that fails on spacing would be a formatter nobody runs.
+target-version = "py313"
+
+[lint]
+select = ["E4", "E7", "E9", "F", "I"]
+
+[lint.isort]
+# The *_pb2 modules are generated into this directory at image build time, so
+# they are absent from a checkout; without this, ruff files them as third-party
+# on a clean clone and as first-party once they exist, and the order flips.
+known-first-party = ["policy", "state", "schema_registry", "worker", "rider_pb2", "rental_pb2"]

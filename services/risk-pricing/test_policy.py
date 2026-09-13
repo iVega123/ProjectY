@@ -1,13 +1,15 @@
-from policy import verify_number, pricing, score
-from state import State
-from rider_pb2 import RiderEvent
-from rental_pb2 import RentalEvent
 import pytest
+
+from policy import pricing, score, verify_number
+from rental_pb2 import RentalEvent
+from rider_pb2 import RiderEvent
+from state import State
 
 
 def test_deleted_document_does_not_block_replacement_or_other_riders(monkeypatch, tmp_path):
-    import worker
     from botocore.exceptions import ClientError
+
+    import worker
 
     class Storage:
         def get_object(self, **kwargs):
@@ -32,8 +34,9 @@ def test_deleted_document_does_not_block_replacement_or_other_riders(monkeypatch
 
 @pytest.mark.parametrize("code", ["AccessDenied", "NoSuchBucket", "InternalError", "SlowDown"])
 def test_storage_faults_remain_retryable(monkeypatch, code):
-    import worker
     from botocore.exceptions import ClientError
+
+    import worker
 
     class Storage:
         def get_object(self, **kwargs):
@@ -47,7 +50,9 @@ def test_storage_faults_remain_retryable(monkeypatch, code):
 
 def test_real_tesseract_on_sanitized_document(monkeypatch):
     import io
+
     from PIL import Image, ImageDraw, ImageFont
+
     import worker
     image = Image.new("RGB", (900, 160), "white")
     ImageDraw.Draw(image).text((20, 40), "CNH 12345678901", fill="black", font=ImageFont.load_default(size=48))
