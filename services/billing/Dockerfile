@@ -18,7 +18,7 @@ ENTRYPOINT ["gradle", "--no-daemon", "run"]
 FROM development AS builder
 RUN gradle --no-daemon --quiet installDist
 
-FROM eclipse-temurin:21-jre-alpine AS final
+FROM eclipse-temurin:25-jre-alpine AS final
 RUN apk upgrade --no-cache && apk add --no-cache curl
 WORKDIR /app
 # O agente do OpenTelemetry é a única parte da observabilidade que a JVM entrega
