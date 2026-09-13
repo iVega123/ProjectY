@@ -12,7 +12,7 @@
         "value": 500
       }
     ],
-    "expectation": "Rental p99 rises by the injected latency; the gateway breaker stays closed and no 5xx is returned.",
+    "expectation": "Rental creation slows by two database round trips of the injected latency (about 1 s at +500 ms); the gateway breaker stays closed and no 5xx is returned.",
     "observe": "Grafana projecty-load-resilience (creation p99, breaker state) and database spans in Tempo."
   },
   {

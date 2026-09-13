@@ -209,7 +209,7 @@ AMD Ryzen 9 9950X3D2, Docker 29.7.2 with 32 logical CPUs and 61.55 GiB RAM; 5 VU
 | Kafka down | 179 | 1,206 | 0% | 41.1 / 43.5 ms | — |
 | Bad network | 177 | 1,139 | 0.15% | 104.6 / 110.0 ms | 92.6 / 102.2 ms |
 | CockroachDB down | 0 | 1,152 | 13.4% | — | 4.6 / 2,019.7 ms |
-| CockroachDB +500 ms | 0 | 1,127 | 13.6% | — | 4.8 / 2,509.2 ms |
+| CockroachDB +500 ms | 135 | 0 | 0% | 1,037.5 / 1,549.3 ms | — |
 | Redis down | 0 | 0 | 100% | — | 252.2 / 252.9 ms |
 
 Reproduce: `powershell -File scripts/Run-LoadTest.ps1 -Polyglot`; append
@@ -218,15 +218,16 @@ The database and Redis runs fail the unchanged k6 thresholds, and the table says
 without the database, rentals are refused — fast once the gateway breaker opens; without
 Redis, idempotent creation refuses closed by design. During the Kafka outage 80 rental
 events waited in the outbox and drained in 3 seconds after recovery. The slow-database
-run misses its acceptance criterion — no creation fits the gateway deadline at 500 ms
-per round trip — and is tracked in [#206](https://github.com/iVega123/ProjectY/issues/206).
+run creates every rental in about a second — two database round trips at 500 ms each —
+and misses only the p95 < 800 ms threshold, which that latency cannot meet
+([#206](https://github.com/iVega123/ProjectY/issues/206)).
 These measurements include rate limiting and do not estimate maximum capacity.
 [Raw results and caveats](docs/measurements/fault-tolerance/README.md);
 [the first measurement, against MongoDB](docs/measurements/epic-9/README.md).
 
 | Tilt drill | Injection | Measured |
 |---|---|---|
-| Slow database | CockroachDB +500 ms | Fails the no-5xx criterion: [#206](https://github.com/iVega123/ProjectY/issues/206) |
+| Slow database | CockroachDB +500 ms | 135 created, no 5xx, breaker closed; median 1,028 ms |
 | Database down | CockroachDB timeout | 503 with `Retry-After`; breaker opens, then refusals in milliseconds |
 | Redis down | Redis timeout | Limiter open; idempotency and revocation closed |
 | Kafka down | Kafka timeout | Rentals continue; outbox backlog drains on recovery |
