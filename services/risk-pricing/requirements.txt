@@ -3,7 +3,7 @@ uvicorn>=0.34,<1
 confluent-kafka==2.15.0
 protobuf>=6.33,<7
 grpcio-tools>=1.76,<2
-boto3>=1.40,<2
+boto3>=1.43.91,<2
 pillow>=12,<13
 pytesseract==0.3.13
 opentelemetry-sdk>=1.39,<2
