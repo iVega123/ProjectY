@@ -47,7 +47,9 @@ interface InvoiceIssuer {
  * nenhuma janela -- o preço é que só serve para efeitos que moram no banco, que
  * é exatamente o caso de uma fatura.
  */
-class Invoices(private val dataSource: DataSource) : InvoiceIssuer {
+class Invoices(
+    private val dataSource: DataSource,
+) : InvoiceIssuer {
     companion object {
         const val CONSUMER = "billing-v1"
         private const val UNIQUE_VIOLATION = "23505"
@@ -77,7 +79,10 @@ class Invoices(private val dataSource: DataSource) : InvoiceIssuer {
         }
     }
 
-    data class Issued(val outcome: Outcome, val invoiceId: UUID?)
+    data class Issued(
+        val outcome: Outcome,
+        val invoiceId: UUID?,
+    )
 
     override fun issue(
         messageId: String,
@@ -125,17 +130,18 @@ class Invoices(private val dataSource: DataSource) : InvoiceIssuer {
         connection: Connection,
         messageId: String,
     ): Boolean =
-        connection.prepareStatement(
-            """
-            INSERT INTO inbox (message_id, consumer, status)
-            VALUES (?, ?, 'completed')
-            ON CONFLICT (message_id, consumer) DO NOTHING
-            """.trimIndent(),
-        ).use { statement ->
-            statement.setString(1, messageId)
-            statement.setString(2, CONSUMER)
-            statement.executeUpdate() == 1
-        }
+        connection
+            .prepareStatement(
+                """
+                INSERT INTO inbox (message_id, consumer, status)
+                VALUES (?, ?, 'completed')
+                ON CONFLICT (message_id, consumer) DO NOTHING
+                """.trimIndent(),
+            ).use { statement ->
+                statement.setString(1, messageId)
+                statement.setString(2, CONSUMER)
+                statement.executeUpdate() == 1
+            }
 
     private fun recordHandled(
         connection: Connection,
@@ -149,44 +155,46 @@ class Invoices(private val dataSource: DataSource) : InvoiceIssuer {
         invoiceId: UUID,
         rental: ClosedRental,
         settled: Settlement.Settled,
-    ) = connection.prepareStatement(
-        """
-        INSERT INTO invoices (id, rental_id, rider_id, currency, plan_days, days_used,
-                              agreed_minor, adjustment_minor, total_minor, reason, rider_name)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """.trimIndent(),
-    ).use { statement ->
-        statement.setObject(1, invoiceId)
-        statement.setObject(2, UUID.fromString(rental.rentalId))
-        statement.setString(3, rental.riderId)
-        statement.setString(4, rental.currency)
-        statement.setInt(5, settled.planDays)
-        statement.setInt(6, settled.daysUsed)
-        statement.setLong(7, settled.agreedMinor)
-        statement.setLong(8, settled.adjustmentMinor)
-        statement.setLong(9, settled.totalMinor)
-        statement.setString(10, settled.reason)
-        statement.setString(11, rental.riderName)
-        statement.executeUpdate()
-    }
+    ) = connection
+        .prepareStatement(
+            """
+            INSERT INTO invoices (id, rental_id, rider_id, currency, plan_days, days_used,
+                                  agreed_minor, adjustment_minor, total_minor, reason, rider_name)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """.trimIndent(),
+        ).use { statement ->
+            statement.setObject(1, invoiceId)
+            statement.setObject(2, UUID.fromString(rental.rentalId))
+            statement.setString(3, rental.riderId)
+            statement.setString(4, rental.currency)
+            statement.setInt(5, settled.planDays)
+            statement.setInt(6, settled.daysUsed)
+            statement.setLong(7, settled.agreedMinor)
+            statement.setLong(8, settled.adjustmentMinor)
+            statement.setLong(9, settled.totalMinor)
+            statement.setString(10, settled.reason)
+            statement.setString(11, rental.riderName)
+            statement.executeUpdate()
+        }
 
     private fun insertOutbox(
         connection: Connection,
         invoiceId: UUID,
         rental: ClosedRental,
         settled: Settlement.Settled,
-    ) = connection.prepareStatement(
-        """
-        INSERT INTO outbox (aggregate_type, aggregate_id, event_type, topic, payload, trace_parent)
-        VALUES ('invoice', ?, 'invoice.issued', 'invoice.issued', ?, ?)
-        """.trimIndent(),
-    ).use { statement ->
-        // aggregate_id é a chave de partição no Kafka, e topics.json diz que
-        // invoice.issued é particionado por rental_id. A relay não escolhe:
-        // publica o que a transação deixou aqui.
-        statement.setString(1, rental.rentalId)
-        statement.setBytes(2, InvoiceEvents.issued(invoiceId, rental, settled).toByteArray())
-        statement.setString(3, rental.traceParent)
-        statement.executeUpdate()
-    }
+    ) = connection
+        .prepareStatement(
+            """
+            INSERT INTO outbox (aggregate_type, aggregate_id, event_type, topic, payload, trace_parent)
+            VALUES ('invoice', ?, 'invoice.issued', 'invoice.issued', ?, ?)
+            """.trimIndent(),
+        ).use { statement ->
+            // aggregate_id é a chave de partição no Kafka, e topics.json diz que
+            // invoice.issued é particionado por rental_id. A relay não escolhe:
+            // publica o que a transação deixou aqui.
+            statement.setString(1, rental.rentalId)
+            statement.setBytes(2, InvoiceEvents.issued(invoiceId, rental, settled).toByteArray())
+            statement.setString(3, rental.traceParent)
+            statement.executeUpdate()
+        }
 }

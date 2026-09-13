@@ -28,7 +28,8 @@ class SchemaRegistry(
     private val json = ObjectMapper()
     private val ids = ConcurrentHashMap<String, Int>()
     private val http: HttpClient =
-        HttpClient.newBuilder()
+        HttpClient
+            .newBuilder()
             .connectTimeout(Duration.ofSeconds(5))
             .build()
 
@@ -40,14 +41,16 @@ class SchemaRegistry(
                     ?: error("Topic $name is not declared in topics.json")
             val schema = Files.readString(contracts.resolve("events").resolve(file))
             val body =
-                json.createObjectNode()
+                json
+                    .createObjectNode()
                     .put("schemaType", "PROTOBUF")
                     .put("schema", schema)
                     .toString()
 
             val response =
                 http.send(
-                    HttpRequest.newBuilder(URI.create("${baseUrl.trimEnd('/')}/subjects/$name-value"))
+                    HttpRequest
+                        .newBuilder(URI.create("${baseUrl.trimEnd('/')}/subjects/$name-value"))
                         .timeout(Duration.ofSeconds(5))
                         .header("Content-Type", "application/json")
                         .POST(HttpRequest.BodyPublishers.ofString(body))

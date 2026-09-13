@@ -74,7 +74,8 @@ object InvoiceEvents {
         occurredAtMs: Long = System.currentTimeMillis(),
     ): InvoiceIssued {
         val builder =
-            InvoiceIssued.newBuilder()
+            InvoiceIssued
+                .newBuilder()
                 .setEventId(eventId(rental.rentalId))
                 .setInvoiceId(invoiceId.toString())
                 .setRentalId(rental.rentalId)

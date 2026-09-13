@@ -176,7 +176,8 @@ class InvoiceApiTest {
         val response =
             http.send(
                 envelope(
-                    HttpRequest.newBuilder(URI.create(base + InvoiceApi.BASE))
+                    HttpRequest
+                        .newBuilder(URI.create(base + InvoiceApi.BASE))
                         .POST(HttpRequest.BodyPublishers.ofString("{}")),
                     "rider-api-k",
                     "Rider",
@@ -255,7 +256,9 @@ class InvoiceApiTest {
         val signature =
             Mac.getInstance("HmacSHA256").run {
                 init(SecretKeySpec(key, "HmacSHA256"))
-                Base64.getUrlEncoder().withoutPadding()
+                Base64
+                    .getUrlEncoder()
+                    .withoutPadding()
                     .encodeToString(doFinal(canonical.toByteArray(StandardCharsets.UTF_8)))
             }
         return builder

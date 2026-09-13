@@ -75,41 +75,43 @@ class InvoiceRelay(
 
     private fun pending(): List<Pending> =
         dataSource.connection.use { connection ->
-            connection.prepareStatement(
-                """
-                SELECT id, aggregate_id, topic, payload, trace_parent
-                  FROM outbox
-                 WHERE published_at IS NULL
-                   AND aggregate_type = 'invoice'
-                 ORDER BY occurred_at
-                 LIMIT 100
-                """.trimIndent(),
-            ).use { statement ->
-                statement.executeQuery().use { rows ->
-                    buildList {
-                        while (rows.next()) {
-                            add(
-                                Pending(
-                                    rows.getObject(1, UUID::class.java),
-                                    rows.getString(2),
-                                    rows.getString(3),
-                                    rows.getBytes(4),
-                                    rows.getString(5),
-                                ),
-                            )
+            connection
+                .prepareStatement(
+                    """
+                    SELECT id, aggregate_id, topic, payload, trace_parent
+                      FROM outbox
+                     WHERE published_at IS NULL
+                       AND aggregate_type = 'invoice'
+                     ORDER BY occurred_at
+                     LIMIT 100
+                    """.trimIndent(),
+                ).use { statement ->
+                    statement.executeQuery().use { rows ->
+                        buildList {
+                            while (rows.next()) {
+                                add(
+                                    Pending(
+                                        rows.getObject(1, UUID::class.java),
+                                        rows.getString(2),
+                                        rows.getString(3),
+                                        rows.getBytes(4),
+                                        rows.getString(5),
+                                    ),
+                                )
+                            }
                         }
                     }
                 }
-            }
         }
 
     private fun markPublished(id: UUID) =
         dataSource.connection.use { connection ->
-            connection.prepareStatement(
-                "UPDATE outbox SET published_at = now() WHERE id = ? AND published_at IS NULL",
-            ).use { statement ->
-                statement.setObject(1, id)
-                statement.executeUpdate()
-            }
+            connection
+                .prepareStatement(
+                    "UPDATE outbox SET published_at = now() WHERE id = ? AND published_at IS NULL",
+                ).use { statement ->
+                    statement.setObject(1, id)
+                    statement.executeUpdate()
+                }
         }
 }

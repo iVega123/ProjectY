@@ -59,7 +59,10 @@ class InvoiceApi(
             return
         }
 
-        val single = exchange.requestURI.rawPath.removePrefix(BASE).trim('/')
+        val single =
+            exchange.requestURI.rawPath
+                .removePrefix(BASE)
+                .trim('/')
         if (single.isNotEmpty()) {
             val rentalId = runCatching { UUID.fromString(single) }.getOrNull()
             if (rentalId == null) {
@@ -140,8 +143,7 @@ class InvoiceApi(
                     } else {
                         decode(pair.substring(0, separator)) to decode(pair.substring(separator + 1))
                     }
-                }
-                ?.toMap()
+                }?.toMap()
                 .orEmpty()
 
         private fun decode(value: String): String = java.net.URLDecoder.decode(value, StandardCharsets.UTF_8)

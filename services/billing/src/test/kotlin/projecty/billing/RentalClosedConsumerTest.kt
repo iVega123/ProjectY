@@ -2,7 +2,6 @@ package projecty.billing
 
 import org.apache.kafka.clients.consumer.ConsumerRecord
 import org.apache.kafka.clients.consumer.MockConsumer
-import org.apache.kafka.clients.consumer.OffsetResetStrategy
 import org.apache.kafka.common.TopicPartition
 import org.junit.jupiter.api.Tag
 import java.sql.SQLException
@@ -26,7 +25,10 @@ import kotlin.test.assertTrue
 class RentalClosedConsumerTest {
     private val partition = TopicPartition(RentalClosedConsumer.TOPIC, 0)
 
-    private class Observed(val position: Long, val committed: Long?)
+    private class Observed(
+        val position: Long,
+        val committed: Long?,
+    )
 
     @Test
     @Tag("ADR-0009#settlement-inbox")
@@ -76,7 +78,10 @@ class RentalClosedConsumerTest {
 
     // ------------------------------------------------------------------ apoio
 
-    private class LoopResult(val escaped: Throwable?, val observed: Observed?)
+    private class LoopResult(
+        val escaped: Throwable?,
+        val observed: Observed?,
+    )
 
     /**
      * Roda o laço contra um lote e observa o consumidor antes de ele fechar.
@@ -92,7 +97,7 @@ class RentalClosedConsumerTest {
         val stopping = AtomicBoolean(false)
         var observed: Observed? = null
         val consumer =
-            MockConsumer<String, ByteArray>(OffsetResetStrategy.EARLIEST).apply {
+            MockConsumer<String, ByteArray>("earliest").apply {
                 updateBeginningOffsets(mapOf(partition to 0L))
                 schedulePollTask {
                     rebalance(listOf(partition))
@@ -149,7 +154,9 @@ class RentalClosedConsumerTest {
         }
     }
 
-    private class FailingIssuer(private val error: SQLException) : RecordingIssuer() {
+    private class FailingIssuer(
+        private val error: SQLException,
+    ) : RecordingIssuer() {
         override fun issue(
             messageId: String,
             rental: ClosedRental,
