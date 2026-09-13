@@ -1,7 +1,9 @@
 import json
 import sqlite3
-from policy import score, pricing
+
+from policy import pricing, score
 from rider_pb2 import RiderEvent
+
 
 class State:
     def __init__(self, path):

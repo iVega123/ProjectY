@@ -3,19 +3,21 @@ import logging
 import threading
 import time
 from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, Response
-from opentelemetry import trace, metrics
-from opentelemetry.sdk.resources import Resource
-from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.trace.export import BatchSpanProcessor
-from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
-from opentelemetry.sdk.metrics import MeterProvider
-from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
+from opentelemetry import metrics, trace
+from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
 from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter
+from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler
 from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
-from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
+from opentelemetry.sdk.metrics import MeterProvider
+from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
+from opentelemetry.sdk.resources import Resource
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import BatchSpanProcessor
+
 from worker import run
 
 health = {"last_poll":0, "last_event_ms":0}
@@ -56,11 +58,13 @@ def live(): return {"status":"alive"}
 
 @app.get("/health/startup")
 def startup(response: Response):
-    if not getattr(app.state, "worker", None) or not app.state.worker.is_alive(): response.status_code=503
+    if not getattr(app.state, "worker", None) or not app.state.worker.is_alive():
+        response.status_code=503
     return {"status":"started"}
 
 @app.get("/health/ready")
 def ready(response: Response):
     available = time.monotonic()-health["last_poll"]<15
-    if not available: response.status_code=503
+    if not available:
+        response.status_code=503
     return {"status":"ready" if available else "delayed"}

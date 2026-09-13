@@ -2,7 +2,9 @@
 import os
 import time
 import uuid
+
 from confluent_kafka import Consumer, Producer
+
 from rider_pb2 import RiderEvent
 
 identity = "smoke-" + str(uuid.uuid4())

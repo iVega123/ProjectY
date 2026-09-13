@@ -1,7 +1,7 @@
 import {chromium} from '@playwright/test';
 import http from 'node:http';
 import net from 'node:net';
-import {mkdirSync,readFileSync,writeFileSync,existsSync} from 'node:fs';
+import {mkdirSync,readFileSync,writeFileSync} from 'node:fs';
 import assert from 'node:assert/strict';
 
 // Local forwarding keeps browser origins identical to the published fixture URL.

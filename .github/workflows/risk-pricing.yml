@@ -7,5 +7,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+      # Before the image build, which compiles librdkafka: a lint failure should
+      # not cost several minutes to discover. Rules live in services/risk-pricing/ruff.toml.
+      - name: Lint
+        run: pipx run ruff==0.16.7 check services/risk-pricing
       - run: docker build -t risk-test -f services/risk-pricing/Dockerfile .
       - run: docker run --rm --entrypoint pytest risk-test -q -p no:cacheprovider

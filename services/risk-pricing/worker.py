@@ -4,18 +4,20 @@ import logging
 import os
 import time
 from concurrent.futures import Future
+
 import boto3
+import pytesseract
 from botocore.config import Config
 from botocore.exceptions import ClientError
 from confluent_kafka import Consumer, Producer, TopicPartition
+from opentelemetry import propagate, trace
 from PIL import Image
-import pytesseract
-from opentelemetry import trace, propagate
+
+from policy import verify_number
 from rental_pb2 import RentalEvent
 from rider_pb2 import RiderEvent
-from state import State
-from policy import verify_number
 from schema_registry import RegisteredSchemas
+from state import State
 
 log = logging.getLogger("risk-pricing")
 tracer = trace.get_tracer("risk-pricing")

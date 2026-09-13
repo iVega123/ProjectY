@@ -4,11 +4,13 @@ import io
 import json
 import os
 import time
-import uuid
 import urllib.request
+import uuid
+
 import boto3
-from PIL import Image, ImageDraw, ImageFont
 from confluent_kafka import Consumer, Producer
+from PIL import Image, ImageDraw, ImageFont
+
 from rider_pb2 import RiderEvent
 
 identity = 'document-smoke-' + str(uuid.uuid4())
@@ -37,7 +39,8 @@ try:
     deadline=time.monotonic()+60
     while time.monotonic()<deadline:
         message=consumer.poll(1)
-        if message is None or message.error(): continue
+        if message is None or message.error():
+            continue
         fact=RiderEvent.FromString(message.value())
         if fact.rider_id==identity:
             assert fact.HasField('verified') and fact.verified

@@ -1,0 +1,83 @@
+name: CodeQL
+
+# Static analysis of the code itself. The image scans (Trivy, Grype) look at what
+# ships in a container; nothing looked at what the services' own source does
+# with untrusted input. Alerts land in the Security tab and on the PR; they do
+# not fail this workflow, so a new query in a CodeQL release cannot block a merge
+# on its own.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    # Weekly, so new queries run against code nobody touched.
+    - cron: "17 12 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: codeql-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    name: CodeQL / ${{ matrix.language }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {language: actions, build-mode: none}
+          - {language: csharp, build-mode: none}
+          - {language: go, build-mode: autobuild}
+          # Kotlin has no build-free extraction; the classes have to be compiled.
+          - {language: java-kotlin, build-mode: manual}
+          - {language: javascript-typescript, build-mode: none}
+          - {language: python, build-mode: none}
+          - {language: rust, build-mode: none}
+    steps:
+      - uses: actions/checkout@v6
+
+      - if: matrix.language == 'go'
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.27"
+          cache-dependency-path: services/identity/go.sum
+
+      - if: matrix.language == 'java-kotlin'
+        uses: actions/setup-java@v5
+        with: {distribution: temurin, java-version: "21"}
+
+      # No Gradle cache here. CodeQL extracts Kotlin by watching the compiler run;
+      # restored from main, compileKotlin came back FROM-CACHE, nothing compiled,
+      # and the job failed with "could not process any code written in Java/Kotlin".
+      - if: matrix.language == 'java-kotlin'
+        uses: gradle/actions/setup-gradle@v4
+        with: {gradle-version: "8.14.3", cache-disabled: true}
+
+      - uses: github/codeql-action/init@v4
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+
+      - if: matrix.build-mode == 'manual'
+        working-directory: services/billing
+        # --no-build-cache and --rerun-tasks so the compiler always runs; in-process
+        # so it runs inside the build CodeQL is tracing, not in a Kotlin daemon.
+        # In-process also means the compiler shares Gradle's heap: at the default
+        # 512 MiB the garbage collector thrashed and Gradle stopped the build.
+        run: >-
+          gradle --no-daemon --no-build-cache --rerun-tasks
+          "-Dorg.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=1g"
+          -Pkotlin.compiler.execution.strategy=in-process
+          compileKotlin compileTestKotlin
+
+      - uses: github/codeql-action/analyze@v4
+        with:
+          category: /language:${{ matrix.language }}
