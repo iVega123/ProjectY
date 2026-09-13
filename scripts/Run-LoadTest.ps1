@@ -29,7 +29,7 @@ try {
     & "$PSScriptRoot/Update-CommandQueueNames.ps1" -DefinitionsPath (Join-Path $root '.env.load-rabbitmq.json')
     New-Item -ItemType Directory -Force load/results | Out-Null
     $composeFiles = @('-f', 'docker-compose.yml', '-f', 'docker-compose.chaos.yml')
-    if ($Polyglot) { $composeFiles += @('-f', 'docker-compose.polyglot.yml') }
+    if ($Polyglot) { $composeFiles += @('-f', 'docker-compose.polyglot.yml', '-f', 'docker-compose.chaos-polyglot.yml') }
     $json = docker compose --env-file .env.load @composeFiles config --format json
     if ($LASTEXITCODE) { throw 'Benchmark model generation failed.' }
     $model = $json | ConvertFrom-Json

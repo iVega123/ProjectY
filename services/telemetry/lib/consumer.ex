@@ -11,8 +11,10 @@ defmodule ProjectYTelemetry.Consumer do
 
   def handle_info(:connect, _) do
     host = System.get_env("KAFKA_HOST", "kafka") |> String.to_charlist()
+    # The chaos overlay reaches the broker through its proxied listener on 9094.
+    port = System.get_env("KAFKA_PORT", "9092") |> String.to_integer()
 
-    case :brod.start_client([{host, 9092}], :tracking_kafka, auto_start_producers: true) do
+    case :brod.start_client([{host, port}], :tracking_kafka, auto_start_producers: true) do
       :ok ->
         subscribe()
 
