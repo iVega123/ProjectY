@@ -10,4 +10,4 @@ opentelemetry-sdk>=1.39,<2
 opentelemetry-exporter-otlp>=1.39,<2
 opentelemetry-instrumentation-fastapi>=0.60b0,<1
 pytest>=8,<10
-httpx>=0.28,<1
+httpx>=0.28.1,<1
