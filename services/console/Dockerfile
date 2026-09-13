@@ -1,4 +1,4 @@
-FROM node:24-alpine AS development
+FROM node:26-alpine AS development
 RUN apk upgrade --no-cache
 WORKDIR /workspace
 COPY package*.json ./
@@ -10,7 +10,7 @@ CMD ["npm", "run", "dev"]
 FROM development AS builder
 RUN npm run build
 
-FROM node:24-alpine AS final
+FROM node:26-alpine AS final
 RUN apk upgrade --no-cache
 WORKDIR /app
 ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1 HOSTNAME=0.0.0.0 PORT=3001

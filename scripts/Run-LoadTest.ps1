@@ -58,7 +58,7 @@ try {
     $model.services.'api-gateway'.environment.GATEWAY_JWKS_URL = 'http://load-identity:8080/jwks'
     Set-Field $model.services.'api-gateway'.depends_on 'load-identity' @{condition='service_healthy'}
     Set-Field $model.services 'load-identity' @{
-        image='node:24-alpine'; command=@('node','/load/identity.mjs'); networks=@('projecty')
+        image='node:26-alpine'; command=@('node','/load/identity.mjs'); networks=@('projecty')
         volumes=@($fixtureMount)
         healthcheck=@{test=@('CMD','node','-e','fetch("http://127.0.0.1:8080/health").then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))');interval='2s';timeout='2s';retries=15}
     }
