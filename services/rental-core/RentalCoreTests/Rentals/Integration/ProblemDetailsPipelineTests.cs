@@ -120,8 +120,8 @@ public class ProblemDetailsPipelineTests(CustomWebApplicationFactory factory)
         public Task<IReadOnlyList<Rental>> GetRentalsByIdsAsync(
             IReadOnlyCollection<Guid> ids, CancellationToken token = default) => throw Failure();
 
-        public Task<bool> HasOverlappingRentalAsync(
-            Guid motorcycleId, DateTime startDate, DateTime endDate, CancellationToken token = default) => throw Failure();
+        public Task<RentalPreconditions> ReadCreationPreconditionsAsync(
+            string riderId, Guid motorcycleId, DateTime startDate, DateTime endDate, CancellationToken token = default) => throw Failure();
 
         public Task<bool> IsMotorcycleCurrentlyRentedAsync(
             Guid motorcycleId, CancellationToken token = default) => throw Failure();

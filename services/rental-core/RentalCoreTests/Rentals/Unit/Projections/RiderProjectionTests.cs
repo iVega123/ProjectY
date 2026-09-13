@@ -3,9 +3,9 @@ using Google.Protobuf;
 using Moq;
 using ProjectY.Events;
 using RentalCore.Errors;
-using RentalOperations.CrossCutting.Services;
 using RentalOperations.Domain;
 using RentalOperations.DTOs;
+using RentalOperations.Model;
 using RentalOperations.Repository;
 using RentalOperations.Services;
 using Xunit;
@@ -21,27 +21,26 @@ public sealed class RiderProjectionTests
         PredictedEndDate = DateTime.UtcNow.Date.AddDays(8)
     };
 
-    private static Mock<IRentalRepository> ReadyRepository()
+    private static Mock<IRentalRepository> RepositoryReading(RiderView? rider)
     {
         var repository = new Mock<IRentalRepository>();
-        repository.Setup(r => r.HasOverlappingRentalAsync(
-                It.IsAny<Guid>(), It.IsAny<DateTime>(), It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(false);
+        repository.Setup(r => r.ReadCreationPreconditionsAsync(
+                It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<DateTime>(), It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new RentalPreconditions(rider, MotorcycleAvailability.Available, false));
         return repository;
     }
 
     // The refactor this guards against is the tempting one: reaching for identity
-    // while assembling the rental. There is no seam left to do it through, and this
-    // asserts that rather than trusting it.
+    // while assembling the rental. The rider is read from the local projection with
+    // the rest of the preconditions, there is no other seam to do it through, and
+    // this asserts that rather than trusting it.
     [Fact]
     public void RentalCreationHasNoNetworkSeamToIdentity()
     {
         var dependencies = typeof(RentalService).GetConstructors().Single()
             .GetParameters().Select(parameter => parameter.ParameterType).ToArray();
 
-        Assert.Contains(typeof(IRiderProjectionStore), dependencies);
-        Assert.DoesNotContain(dependencies, type => type.Name.Contains("RiderManager", StringComparison.Ordinal));
-        Assert.DoesNotContain(dependencies, type => type == typeof(IHttpClientFactory));
+        Assert.Equal([typeof(IRentalRepository), typeof(IMapper)], dependencies);
         Assert.Null(typeof(RentalService).Assembly.GetType("RentalOperations.CrossCutting.Services.IRiderManagerService"));
     }
 
@@ -51,10 +50,7 @@ public sealed class RiderProjectionTests
     [Fact]
     public async Task LaggingProjectionRefusesWithAnExplicitAwaitingAnswer()
     {
-        var riders = new Mock<IRiderProjectionStore>();
-        riders.Setup(r => r.GetAsync("rider", It.IsAny<CancellationToken>())).ReturnsAsync((RiderView?)null);
-        var service = new RentalService(ReadyRepository().Object, Mock.Of<IMapper>(),
-            riders.Object, Mock.Of<IMotorcycleService>());
+        var service = new RentalService(RepositoryReading(null).Object, Mock.Of<IMapper>());
 
         var pending = await Assert.ThrowsAsync<RiderProjectionPendingException>(
             () => service.CreateRentalAsync(Request(), "rider"));
@@ -64,11 +60,8 @@ public sealed class RiderProjectionTests
     [Fact]
     public async Task UnverifiedRiderIsRefusedPermanently()
     {
-        var riders = new Mock<IRiderProjectionStore>();
-        riders.Setup(r => r.GetAsync("rider", It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new RiderView("rider", false, 1, "Ada Lovelace"));
-        var service = new RentalService(ReadyRepository().Object, Mock.Of<IMapper>(),
-            riders.Object, Mock.Of<IMotorcycleService>());
+        var service = new RentalService(
+            RepositoryReading(new RiderView("rider", false, 1, "Ada Lovelace")).Object, Mock.Of<IMapper>());
 
         // 403 e não 400 desde o #96: o corpo está certo, e reenviá-lo
         // corrigido não existe -- quem muda isto é a habilitação do piloto.

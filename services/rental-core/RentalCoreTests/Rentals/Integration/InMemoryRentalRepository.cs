@@ -96,7 +96,12 @@ public sealed class InMemoryRentalRepository : IRentalRepository
         }
     }
 
-    public Task<bool> HasOverlappingRentalAsync(
+    /// <summary>
+    /// Todo piloto habilitado e toda moto disponível: estes testes não guardam
+    /// piloto nem moto, e as respostas negativas têm testes contra o schema real.
+    /// </summary>
+    public Task<RentalPreconditions> ReadCreationPreconditionsAsync(
+        string riderId,
         Guid motorcycleId,
         DateTime startDate,
         DateTime endDate,
@@ -104,9 +109,12 @@ public sealed class InMemoryRentalRepository : IRentalRepository
     {
         lock (_gate)
         {
-            return Task.FromResult(_rentals
-                .Where(rental => rental.MotorcycleId == motorcycleId)
-                .Any(rental => RentalPeriod.Overlaps(rental, startDate, endDate)));
+            return Task.FromResult(new RentalPreconditions(
+                new RentalOperations.Services.RiderView(riderId, true, 1, "Ada Lovelace"),
+                MotorcycleAvailability.Available,
+                _rentals
+                    .Where(rental => rental.MotorcycleId == motorcycleId)
+                    .Any(rental => RentalPeriod.Overlaps(rental, startDate, endDate))));
         }
     }
 

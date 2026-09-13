@@ -1,9 +1,12 @@
+using Moq;
 using Npgsql;
 using ProjectY.Events;
 using RentalCoreTests.Integration;
 using RentalOperations.Domain;
+using RentalOperations.DTOs;
 using RentalOperations.Model;
 using RentalOperations.Repository;
+using RentalOperations.Services;
 
 namespace RentalCoreTests.Rentals.Integration.Database;
 
@@ -169,10 +172,85 @@ public sealed class RentalStoreTests(RentalCoreDatabase database)
         // Um aluguel devolvido continua ocupando a agenda até onde ocupou. Sem
         // isto, dois aluguéis do mesmo período conviveriam desde que o primeiro
         // já estivesse fechado.
-        Assert.True(await repository.HasOverlappingRentalAsync(
-            motorcycleId, start.AddDays(2), start.AddDays(4)));
-        Assert.False(await repository.HasOverlappingRentalAsync(
-            motorcycleId, start.AddDays(8), start.AddDays(10)));
+        Assert.True((await repository.ReadCreationPreconditionsAsync(
+            "rider-history", motorcycleId, start.AddDays(2), start.AddDays(4))).Overlaps);
+        Assert.False((await repository.ReadCreationPreconditionsAsync(
+            "rider-history", motorcycleId, start.AddDays(8), start.AddDays(10))).Overlaps);
+    }
+
+    [Fact]
+    [Trait("Category", "Integration")]
+    public async Task CreationPreconditions_SayWhichNoItIs()
+    {
+        await database.ResetAsync();
+        var available = await database.AddMotorcycleAsync("PRE0C01");
+        var retired = await database.AddMotorcycleAsync("PRE0C02", DateTime.UtcNow);
+        await using var dataSource = NpgsqlDataSource.Create(database.ConnectionString);
+        await SeedRiderAsync(dataSource, "rider-known", verified: true);
+        var repository = new SqlRentalRepository(dataSource);
+        var start = DateTime.UtcNow.Date.AddDays(1);
+
+        var ready = await repository.ReadCreationPreconditionsAsync("rider-known", available, start, start.AddDays(7));
+        var retiredForAStranger = await repository.ReadCreationPreconditionsAsync("rider-absent", retired, start, start.AddDays(7));
+        var missing = await repository.ReadCreationPreconditionsAsync("rider-known", Guid.NewGuid(), start, start.AddDays(7));
+
+        Assert.Equal(new RiderView("rider-known", true, 1, "Ada Lovelace"), ready.Rider);
+        Assert.Equal(MotorcycleAvailability.Available, ready.Motorcycle);
+        Assert.False(ready.Overlaps);
+        // Ausência também é resposta: a linha volta mesmo sem piloto e sem moto.
+        Assert.Null(retiredForAStranger.Rider);
+        Assert.Equal(MotorcycleAvailability.Retired, retiredForAStranger.Motorcycle);
+        Assert.Equal(MotorcycleAvailability.Missing, missing.Motorcycle);
+    }
+
+    /// <summary>
+    /// Criar um aluguel custa duas idas ao banco: as pré-condições e a escrita.
+    ///
+    /// É o número que decide o drill slow-db (#206). Cada resposta do banco
+    /// atrasada em 500 ms custa 1 s a esta criação, dentro dos 2,5 s que o gateway
+    /// dá à requisição; eram cinco idas, e nenhuma criação cabia. Uma leitura ou
+    /// um COMMIT a mais aparece aqui antes de aparecer no drill.
+    /// </summary>
+    [Fact]
+    [Trait("Category", "Integration")]
+    public async Task CreatingARental_CostsTwoRoundTripsToTheDatabase()
+    {
+        await database.ResetAsync();
+        var motorcycleId = await database.AddMotorcycleAsync("RTT0P01");
+        var target = new NpgsqlConnectionStringBuilder(database.ConnectionString);
+        await using var counter = new RoundTripCounter(target.Host!, target.Port);
+        var proxied = new NpgsqlConnectionStringBuilder(database.ConnectionString)
+        {
+            Host = "127.0.0.1",
+            Port = counter.Port,
+            MaxPoolSize = 1
+        };
+        await using var dataSource = NpgsqlDataSource.Create(proxied.ConnectionString);
+        await SeedRiderAsync(dataSource, "rider-trips", verified: true);
+        var service = new RentalService(new SqlRentalRepository(dataSource), Mock.Of<AutoMapper.IMapper>());
+        var start = DateTime.UtcNow.Date.AddDays(1);
+
+        // A conexão física já aberta e devolvida ao pool: o que se mede é a
+        // requisição, não o aperto de mão.
+        var before = counter.RoundTrips;
+        await service.CreateRentalAsync(
+            new RentalCreateDto { MotorcycleId = motorcycleId, StartDate = start, PredictedEndDate = start.AddDays(7) },
+            "rider-trips");
+
+        Assert.Equal(2, counter.RoundTrips - before);
+        Assert.Equal(1, await CountAsync("SELECT count(*) FROM rentals"));
+        Assert.Equal(1, await CountAsync("SELECT count(*) FROM outbox"));
+    }
+
+    private static async Task SeedRiderAsync(NpgsqlDataSource dataSource, string riderId, bool verified)
+    {
+        await using var seed = dataSource.CreateCommand("""
+            INSERT INTO rider_projection (rider_id, verified, verified_at_ms, rider_name)
+            VALUES (@rider, @verified, 1, 'Ada Lovelace')
+            """);
+        seed.Parameters.AddWithValue("rider", riderId);
+        seed.Parameters.AddWithValue("verified", verified);
+        await seed.ExecuteNonQueryAsync();
     }
 
     [Fact]
