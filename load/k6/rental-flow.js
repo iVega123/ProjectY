@@ -29,6 +29,7 @@ const drills = {
   "db-down": [{ proxy: "cockroachdb", type: "timeout", attributes: { timeout: 0 } }],
   "rabbit-down": [{ proxy: "rabbitmq", type: "timeout", attributes: { timeout: 0 } }],
   "redis-down": [{ proxy: "redis", type: "timeout", attributes: { timeout: 0 } }],
+  "rate-limit-redis-down": [{ proxy: "rate-limit-redis", type: "timeout", attributes: { timeout: 0 } }],
   "kafka-down": [{ proxy: "kafka", type: "timeout", attributes: { timeout: 0 } }],
   "bad-network": [
     { proxy: "cockroachdb", type: "slicer", attributes: { average_size: 64, size_variation: 16, delay: 100 } },

@@ -44,8 +44,24 @@
         "value": 0
       }
     ],
-    "expectation": "Rate limiting degrades open; revocation-checked and idempotent mutations refuse closed; ordinary authenticated reads continue.",
-    "observe": "gateway_ratelimit_degraded_total and gateway 503 traces."
+    "expectation": "Revocation-checked and idempotent mutations refuse closed and live position updates stop; ordinary authenticated reads continue. Rate limiting is unaffected: it has its own Redis.",
+    "observe": "gateway 503 traces."
+  },
+  {
+    "id": "rate-limit-redis-down",
+    "label": "Rate-limit Redis down",
+    "kind": "toxic",
+    "requires": "core",
+    "proxy": "rate-limit-redis",
+    "toxics": [
+      {
+        "name": "rate-limit-redis-down",
+        "type": "timeout",
+        "value": 0
+      }
+    ],
+    "expectation": "Rate limiting degrades open; everything else continues, rental creation included.",
+    "observe": "gateway_ratelimit_degraded_total."
   },
   {
     "id": "kafka-down",

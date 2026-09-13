@@ -22,8 +22,9 @@ try {
         $workloads = @($documents | Where-Object { $_ -match '(?m)^kind:\s+(Deployment|StatefulSet|Job)\s*$' })
         $operatorManagedWorkloads = @($documents | Where-Object { $_ -match '(?m)^kind:\s+Kafka\s*$' })
         $logicalWorkloadCount = $workloads.Count + $operatorManagedWorkloads.Count
-        if ($logicalWorkloadCount -ne 19) {
-            throw "$overlay renders $logicalWorkloadCount logical workloads; expected 19."
+        # 20 since #193 gave the rate limiter a Redis of its own.
+        if ($logicalWorkloadCount -ne 20) {
+            throw "$overlay renders $logicalWorkloadCount logical workloads; expected 20."
         }
         if ($overlay -eq 'aws' -and
             ($operatorManagedWorkloads.Count -ne 1 -or

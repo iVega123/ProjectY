@@ -47,6 +47,10 @@ try {
         if ($model.services.$service.depends_on.toxiproxy.condition -ne 'service_healthy') { throw "$service is not health-gated." }
     }
     if ($model.services.'api-gateway'.environment.GATEWAY_REDIS_URL -notmatch '://toxiproxy:') { throw 'Gateway bypasses Redis proxy.' }
+    # The limiter has its own Redis since #193, and its own proxy: a drill on the
+    # shared Redis must not be able to say anything about rate limiting.
+    if ($model.services.'api-gateway'.environment.GATEWAY_RATE_LIMIT_REDIS_URL -notmatch '://toxiproxy:6380/') { throw 'Gateway rate limiter bypasses its Redis proxy.' }
+    if (-not ($proxies | Where-Object { $_.name -eq 'rate-limit-redis' -and $_.listen -like '*:6380' -and $_.upstream -eq 'rate-limit-redis:6379' })) { throw 'Rate-limit Redis proxy does not target the limiter Redis.' }
     # O identity não é .NET e não usa as mesmas chaves. O que o ensaio precisa
     # provar é o mesmo: banco e armazenamento de objetos atravessam o proxy, e
     # o serviço só sobe depois que ele está de pé.

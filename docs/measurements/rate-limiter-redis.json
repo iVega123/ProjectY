@@ -1,0 +1,36 @@
+{
+    "measuredAt":  "2026-09-13T17:46:20.7462884Z",
+    "commit":  "a04909ae6826a70360a5d2bb74303678d11f1067",
+    "image":  "redis:8.10-alpine",
+    "requests":  20000,
+    "clients":  50,
+    "keyspace":  10000,
+    "docker":  "29.7.2",
+    "cpus":  32,
+    "results":  [
+                    {
+                        "persistence":  "always",
+                        "setRps":  11743.98,
+                        "setP50Ms":  4.623,
+                        "tokenBucketRps":  11273.96,
+                        "tokenBucketP50Ms":  4.895,
+                        "tokenBucketVsAlways":  1
+                    },
+                    {
+                        "persistence":  "everysec",
+                        "setRps":  119760.48,
+                        "setP50Ms":  0.231,
+                        "tokenBucketRps":  71684.59,
+                        "tokenBucketP50Ms":  0.631,
+                        "tokenBucketVsAlways":  6.4
+                    },
+                    {
+                        "persistence":  "none",
+                        "setRps":  97087.38,
+                        "setP50Ms":  0.271,
+                        "tokenBucketRps":  84388.19,
+                        "tokenBucketP50Ms":  0.503,
+                        "tokenBucketVsAlways":  7.5
+                    }
+                ]
+}

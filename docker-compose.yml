@@ -157,16 +157,35 @@ services:
       retries: 12
       start_period: 10s
 
+  # Idempotency claims, the revocation denylist and live-tracking state: durable
+  # to within one second (ADR 0026). The rate limiter moved out, so nothing on
+  # the per-request path pays an fsync per write any more (#193).
   redis:
     image: redis:8.10-alpine
     container_name: redis
-    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "always"]
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec"]
     ports:
       - "6379:6379"
     networks:
       - projecty
     volumes:
       - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  # The rate limiter's token buckets, and nothing else. No persistence and no
+  # volume: a bucket lost on restart refills by itself, and the gateway fails
+  # open while this is down. Under memory pressure a bucket is evicted rather
+  # than a write refused, which only refills it early (#193, ADR 0026).
+  rate-limit-redis:
+    image: redis:8.10-alpine
+    container_name: rate-limit-redis
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "96mb", "--maxmemory-policy", "volatile-ttl"]
+    networks:
+      - projecty
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -293,6 +312,7 @@ services:
       GATEWAY_IDENTITY_SIGNING_KEY: ${GATEWAY_IDENTITY_SIGNING_KEY:?GATEWAY_IDENTITY_SIGNING_KEY is required}
       GATEWAY_IDENTITY_SIGNING_KEY_ID: local-v1
       GATEWAY_REDIS_URL: redis://redis:6379/
+      GATEWAY_RATE_LIMIT_REDIS_URL: redis://rate-limit-redis:6379/
       GATEWAY_RATE_LIMIT_REDIS_TIMEOUT_MS: "100"
       GATEWAY_RATE_LIMIT_GENERAL_CAPACITY: "120"
       GATEWAY_RATE_LIMIT_GENERAL_REFILL_PER_MINUTE: "120"
@@ -315,6 +335,10 @@ services:
       identity:
         condition: service_healthy
       rental-core:
+        condition: service_healthy
+      # Not needed to serve -- the limiter fails open -- but without it every
+      # first request would, and a load run would start unlimited.
+      rate-limit-redis:
         condition: service_healthy
 
   # O emissor dos tokens e o dono do domínio do piloto.

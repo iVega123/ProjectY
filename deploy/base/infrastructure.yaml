@@ -81,7 +81,9 @@ spec:
       containers:
         - name: redis
           image: redis:8.10-alpine
-          args: ["redis-server", "--appendonly", "yes", "--appendfsync", "always"]
+          # Durable to within one second (ADR 0026). The rate limiter is not
+          # here, so no per-request write pays for it (#193).
+          args: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec"]
           ports: [{name: redis, containerPort: 6379}]
           readinessProbe: {tcpSocket: {port: redis}, periodSeconds: 5}
           livenessProbe: {tcpSocket: {port: redis}, periodSeconds: 10}
@@ -104,6 +106,51 @@ kind: Service
 metadata: {name: redis}
 spec:
   selector: {app.kubernetes.io/name: redis}
+  ports: [{name: redis, port: 6379, targetPort: redis}]
+---
+# The rate limiter's token buckets: no persistence, no volume claim. A bucket lost
+# on restart refills by itself and the gateway fails open meanwhile; under memory
+# pressure a bucket is evicted, which only refills it early (#193, ADR 0026).
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: rate-limit-redis}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app.kubernetes.io/name: rate-limit-redis}
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: rate-limit-redis, projecty.io/tier: data}
+    spec:
+      serviceAccountName: rate-limit-redis
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 999
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: redis
+          image: redis:8.10-alpine
+          args: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "96mb", "--maxmemory-policy", "volatile-ttl"]
+          ports: [{name: redis, containerPort: 6379}]
+          readinessProbe: {tcpSocket: {port: redis}, periodSeconds: 5}
+          livenessProbe: {tcpSocket: {port: redis}, periodSeconds: 10}
+          resources:
+            requests: {cpu: 50m, memory: 32Mi}
+            limits: {cpu: 500m, memory: 128Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+            readOnlyRootFilesystem: true
+          volumeMounts: [{name: data, mountPath: /data}]
+      volumes: [{name: data, emptyDir: {}}]
+---
+apiVersion: v1
+kind: Service
+metadata: {name: rate-limit-redis}
+spec:
+  selector: {app.kubernetes.io/name: rate-limit-redis}
   ports: [{name: redis, port: 6379, targetPort: redis}]
 ---
 apiVersion: apps/v1

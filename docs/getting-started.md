@@ -216,11 +216,13 @@ failure blocks only that high-value operation; ordinary token verification
 continues from the bounded JWKS cache.
 
 The gateway rate limiter is already active for public and protected routes. It
-uses an atomic Redis token bucket shared by every gateway replica, with a
-stricter bucket for `/api/auth/**`. Unlike the high-value denylist, it fails
-open: stopping Redis allows ordinary traffic, omits the remaining-token header,
-and increments `gateway_ratelimit_degraded_total` on the gateway `/metrics`
-endpoint and the platform Grafana dashboard.
+uses an atomic token bucket shared by every gateway replica, with a stricter
+bucket for `/api/auth/**`, kept in a Redis of its own (`rate-limit-redis`,
+`GATEWAY_RATE_LIMIT_REDIS_URL`) that has no persistence
+([ADR 0026](adr/0026-redis-durability-follows-the-consumer.md)). Unlike the
+high-value denylist, it fails open: stopping that Redis allows ordinary traffic,
+omits the remaining-token header, and increments `gateway_ratelimit_degraded_total`
+on the gateway `/metrics` endpoint and the platform Grafana dashboard.
 
 The gateway also isolates each legacy upstream independently. Requests have a
 low per-attempt timeout, acquire a bulkhead permit without queueing, and open a
