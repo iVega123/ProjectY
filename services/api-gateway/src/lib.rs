@@ -138,7 +138,6 @@ fn build_app_with_dependencies(
         .route("/health/live", get(liveness))
         .route("/health/ready", get(readiness))
         .route("/metrics", get(metrics))
-        .route("/session", get(session))
         .fallback(proxy)
         .with_state(Arc::new(AppState {
             config,
@@ -228,23 +227,39 @@ struct SessionIdentity {
 /// consultada, como em toda leitura (ADR 0017), e a cota também não: não há
 /// upstream a proteger, e conferir o token com a JWKS em cache custa menos que a
 /// ida ao Redis que a cota faria.
-async fn session(State(state): State<Arc<AppState>>, request: Request) -> Response {
+///
+/// Ela é atendida dentro do proxy, e não numa rota própria do Router, para
+/// passar pelo mesmo span `gateway.request` e pela mesma recusa de caminho não
+/// canônico que as outras rotas. Numa rota própria, o CodeQL também lia o
+/// `State` do handler como entrada do cliente e apontava a busca da JWKS -- uma
+/// URL de configuração -- como SSRF (alerta #11).
+async fn session(
+    state: &AppState,
+    method: &Method,
+    headers: &HeaderMap,
+    uri: &axum::http::Uri,
+) -> Response {
+    if method != Method::GET {
+        return problem(
+            StatusCode::METHOD_NOT_ALLOWED,
+            "urn:projecty:problem:method-not-allowed",
+            "Method not allowed",
+            "The session is only read.",
+            uri.to_string(),
+        );
+    }
     let audience = state
         .config
         .auth
         .audiences
         .for_upstream(UpstreamName::RentalOperations);
-    match state
-        .authenticator
-        .authenticate(request.headers(), audience)
-        .await
-    {
+    match state.authenticator.authenticate(headers, audience).await {
         Ok(identity) => Json(SessionIdentity {
             subject: identity.subject,
             roles: identity.roles,
         })
         .into_response(),
-        Err(error) => authentication_problem(error, request.uri()),
+        Err(error) => authentication_problem(error, uri),
     }
 }
 
@@ -289,6 +304,9 @@ async fn proxy_inner(state: Arc<AppState>, request: Request) -> Response {
             "Clients must not send x-identity-* headers.",
             request.uri().to_string(),
         );
+    }
+    if path == "/session" {
+        return session(&state, request.method(), request.headers(), request.uri()).await;
     }
     let Some((upstream_name, base_url)) = state.config.upstreams.resolve(&path) else {
         return problem(
@@ -2297,6 +2315,19 @@ projecty.identity"
                 "Bearer error=\"invalid_token\""
             );
         }
+
+        // Só se lê a sessão; escrever nela não chega nem a conferir o token.
+        let rental_token = issuer.token("projecty.rental-operations", &["Rider"]);
+        let response = app
+            .oneshot(
+                HttpRequest::post("/session")
+                    .header(AUTHORIZATION, format!("Bearer {rental_token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::METHOD_NOT_ALLOWED);
     }
 
     #[tokio::test]
