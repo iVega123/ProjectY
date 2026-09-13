@@ -19,7 +19,7 @@ jobs:
       # troca um binário versionado por uma verificação em texto, que é a troca
       # que este repositório vem fazendo em todo lugar.
       - uses: gradle/actions/setup-gradle@v4
-        with: {gradle-version: '8.14.3'}
+        with: {gradle-version: '9.7.1'}
       # ktlint é o `dotnet format --verify-no-changes` desta linguagem, e o teste
       # de integração sobe um CockroachDB por Testcontainers -- o runner tem
       # Docker, então ele roda de verdade e não como mock.

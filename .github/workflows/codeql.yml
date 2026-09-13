@@ -59,7 +59,7 @@ jobs:
       # and the job failed with "could not process any code written in Java/Kotlin".
       - if: matrix.language == 'java-kotlin'
         uses: gradle/actions/setup-gradle@v4
-        with: {gradle-version: "8.14.3", cache-disabled: true}
+        with: {gradle-version: "9.7.1", cache-disabled: true}
 
       - uses: github/codeql-action/init@v4
         with:
