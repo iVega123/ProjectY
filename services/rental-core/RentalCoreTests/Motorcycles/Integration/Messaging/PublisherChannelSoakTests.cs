@@ -54,8 +54,8 @@ public sealed class PublisherChannelSoakTests : IAsyncLifetime
             using var channels = JsonDocument.Parse(result.Stdout);
             Assert.Equal(0, channels.RootElement.GetArrayLength());
         }
-        using var connection = new RabbitMqConnectionProvider(options).Create();
-        using var channel = connection.CreateModel();
-        Assert.Equal(3000u, channel.MessageCount("soak"));
+        await using var connection = await new RabbitMqConnectionProvider(options).CreateAsync(CancellationToken.None);
+        await using var channel = await connection.CreateChannelAsync();
+        Assert.Equal(3000u, await channel.MessageCountAsync("soak"));
     }
 }

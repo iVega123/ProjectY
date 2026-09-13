@@ -4,7 +4,7 @@ namespace ProjectY.Shared.Messaging;
 
 public interface IRabbitMqConnectionProvider
 {
-    IConnection Create();
+    Task<IConnection> CreateAsync(CancellationToken cancellationToken);
 }
 
 public sealed class RabbitMqConnectionProvider : IRabbitMqConnectionProvider
@@ -16,7 +16,7 @@ public sealed class RabbitMqConnectionProvider : IRabbitMqConnectionProvider
         _options = options;
     }
 
-    public IConnection Create() => new ConnectionFactory
+    public Task<IConnection> CreateAsync(CancellationToken cancellationToken) => new ConnectionFactory
     {
         HostName = _options.HostName,
         Port = _options.Port,
@@ -24,5 +24,5 @@ public sealed class RabbitMqConnectionProvider : IRabbitMqConnectionProvider
         UserName = _options.UserName,
         Password = _options.Password,
         AutomaticRecoveryEnabled = true
-    }.CreateConnection();
+    }.CreateConnectionAsync(cancellationToken);
 }

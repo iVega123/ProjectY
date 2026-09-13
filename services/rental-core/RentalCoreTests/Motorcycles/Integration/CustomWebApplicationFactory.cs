@@ -6,10 +6,8 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
-using Moq;
 using MotoHub.Data;
 using ProjectY.Shared.Security;
-using RabbitMQ.Client;
 using System.Security.Claims;
 
 namespace MotoHubTests.Integration
@@ -40,25 +38,6 @@ namespace MotoHubTests.Integration
                 services.RemoveAll<MotoHub.Services.IMotorcycleRetirement>();
                 services.AddSingleton<MotoHub.Services.IMotorcycleRetirement, AcceptingRetirement>();
 
-                var modelMock = new Mock<IModel>();
-                modelMock.Setup(m => m.BasicPublish(
-                    It.IsAny<string>(),
-                    It.IsAny<string>(),
-                    It.IsAny<bool>(),
-                    It.IsAny<IBasicProperties>(),
-                    It.IsAny<ReadOnlyMemory<byte>>()));
-
-                var connectionMock = new Mock<IConnection>();
-                connectionMock.Setup(conn => conn.CreateModel()).Returns(modelMock.Object);
-
-                var descriptors = services.SingleOrDefault(
-                    d => d.ServiceType == typeof(IConnection));
-                if (descriptors != null)
-                {
-                    services.Remove(descriptors);
-                }
-
-                services.AddSingleton<IConnection>(connectionMock.Object);
                 services.RemoveAll<DbContextOptions<ApplicationDbContext>>();
                 services.RemoveAll<IDbContextOptionsConfiguration<ApplicationDbContext>>();
 
