@@ -17,16 +17,16 @@ public sealed class MessagingPublisherService : IMessagingPublisherService
         _rabbitmqOptions = rabbitMQOptions;
     }
 
-    public void PublishLicenceUpdate(LicencePlateRabbitMQEntity licenceUpdate)
+    public void PublishLicenceUpdate(LicencePlateRabbitMQEntity licence)
     {
         _context.OutboxMessages.Add(new OutboxMessage
         {
             AggregateType = "motorcycle",
-            AggregateId = licenceUpdate.AggregateId,
+            AggregateId = licence.AggregateId,
             AggregateSequence = 0,
             EventType = "motorcycle.licence-plate-updated.v1",
             Destination = _rabbitmqOptions.LicenceUpdateQueueName,
-            Payload = JsonSerializer.Serialize(licenceUpdate)
+            Payload = JsonSerializer.Serialize(licence)
         });
     }
 }

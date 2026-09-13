@@ -10,7 +10,7 @@ namespace MotoHub.Controllers
     [ApiController]
     [Route("api/[controller]")]
     [Authorize]
-    public class MotorcyclesController : ControllerBase
+    public partial class MotorcyclesController : ControllerBase
     {
         private readonly IMotorcycleService _motorcycleService;
 
@@ -31,7 +31,7 @@ namespace MotoHub.Controllers
         [HttpGet]
         public async Task<IActionResult> GetAll([FromQuery] string? cursor, [FromQuery] int? pageSize)
         {
-            _logger.LogInformation("Fetching a page of motorcycles.");
+            LogFetchingPage(_logger);
             return Ok(await Cursors.Paged(
                 () => _motorcycleService.GetMotorcyclesAsync(cursor, pageSize)));
         }
@@ -106,11 +106,11 @@ namespace MotoHub.Controllers
         [HttpGet("{licensePlate}")]
         public async Task<IActionResult> GetByLicensePlateAsync(string licensePlate)
         {
-            _logger.LogInformation("Fetching motorcycle by license plate: {LicensePlate}", licensePlate);
+            LogFetchingByLicensePlate(_logger, licensePlate);
             var motorcycle = await _motorcycleService.GetMotorcycleByLicensePlateAsync(licensePlate);
             if (motorcycle == null)
             {
-                _logger.LogWarning("Motorcycle with license plate {LicensePlate} not found.", licensePlate);
+                LogLicensePlateNotFound(_logger, licensePlate);
                 return NotFound();
             }
             return Ok(motorcycle);
@@ -122,10 +122,10 @@ namespace MotoHub.Controllers
         {
             motorcycle.LicensePlate = BrazilianLicensePlateAttribute.Normalize(motorcycle.LicensePlate);
             motorcycle.Model = motorcycle.Model?.Trim();
-            _logger.LogInformation("Creating motorcycle with license plate {LicensePlate}.", motorcycle.LicensePlate);
+            LogCreating(_logger, motorcycle.LicensePlate);
             if (_motorcycleService.LicensePlateExists(motorcycle.LicensePlate))
             {
-                _logger.LogWarning("License plate {LicensePlate} already exists.", motorcycle.LicensePlate);
+                LogLicensePlateExists(_logger, motorcycle.LicensePlate);
                 return Conflict("License plate already exists.");
             }
 
@@ -139,11 +139,11 @@ namespace MotoHub.Controllers
         {
             licensePlate = BrazilianLicensePlateAttribute.Normalize(licensePlate);
             newLicencePlate = BrazilianLicensePlateAttribute.Normalize(newLicencePlate);
-            _logger.LogInformation("Updating motorcycle with license plate {LicensePlate}.", licensePlate);
+            LogUpdating(_logger, licensePlate);
             var existingMotorcycle = await _motorcycleService.GetMotorcycleByLicensePlateAsync(licensePlate);
             if (existingMotorcycle == null)
             {
-                _logger.LogWarning("Motorcycle with license plate {LicensePlate} not found.", licensePlate);
+                LogLicensePlateNotFound(_logger, licensePlate);
                 return NotFound();
             }
 
@@ -155,7 +155,7 @@ namespace MotoHub.Controllers
         [HttpDelete("{licensePlate}")]
         public async Task<IActionResult> Delete(string licensePlate)
         {
-            _logger.LogInformation("Deleting motorcycle with license plate {LicensePlate}.", licensePlate);
+            LogDeleting(_logger, licensePlate);
 
             var result = await _motorcycleService.DeleteMotorcycle(licensePlate);
             if (result.Success)
@@ -171,5 +171,26 @@ namespace MotoHub.Controllers
             }
 
         }
+
+        [LoggerMessage(Level = LogLevel.Information, Message = "Fetching a page of motorcycles.")]
+        private static partial void LogFetchingPage(ILogger logger);
+
+        [LoggerMessage(Level = LogLevel.Information, Message = "Fetching motorcycle by license plate: {LicensePlate}")]
+        private static partial void LogFetchingByLicensePlate(ILogger logger, string? licensePlate);
+
+        [LoggerMessage(Level = LogLevel.Warning, Message = "Motorcycle with license plate {LicensePlate} not found.")]
+        private static partial void LogLicensePlateNotFound(ILogger logger, string? licensePlate);
+
+        [LoggerMessage(Level = LogLevel.Information, Message = "Creating motorcycle with license plate {LicensePlate}.")]
+        private static partial void LogCreating(ILogger logger, string? licensePlate);
+
+        [LoggerMessage(Level = LogLevel.Warning, Message = "License plate {LicensePlate} already exists.")]
+        private static partial void LogLicensePlateExists(ILogger logger, string? licensePlate);
+
+        [LoggerMessage(Level = LogLevel.Information, Message = "Updating motorcycle with license plate {LicensePlate}.")]
+        private static partial void LogUpdating(ILogger logger, string? licensePlate);
+
+        [LoggerMessage(Level = LogLevel.Information, Message = "Deleting motorcycle with license plate {LicensePlate}.")]
+        private static partial void LogDeleting(ILogger logger, string? licensePlate);
     }
 }

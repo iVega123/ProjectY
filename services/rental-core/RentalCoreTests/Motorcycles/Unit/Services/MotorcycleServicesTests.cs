@@ -304,7 +304,7 @@ namespace MotoHubTests.Unit.Services
             var mockMessagingPublish = new Mock<IMessagingPublisherService>();
             var mockCrossCutting = new Mock<IMotorcycleRetirement>();
             mockRepository.Setup(repo => repo.GetByLicensePlateAsync(nonExistingLicensePlate))
-                          .ReturnsAsync((Motorcycle)null);
+                          .ReturnsAsync((Motorcycle?)null);
 
             var service = new MotorcycleService(mockRepository.Object, Mock.Of<IMapper>(), mockMessagingPublish.Object, mockCrossCutting.Object);
 
@@ -325,7 +325,7 @@ namespace MotoHubTests.Unit.Services
             var mockMessagingPublish = new Mock<IMessagingPublisherService>();
             var mockCrossCutting = new Mock<IMotorcycleRetirement>();
             mockRepository.Setup(repo => repo.GetByLicensePlateAsync(nonExistingLicensePlate))
-                          .ReturnsAsync((Motorcycle)null);
+                          .ReturnsAsync((Motorcycle?)null);
 
             var service = new MotorcycleService(mockRepository.Object, Mock.Of<IMapper>(), mockMessagingPublish.Object, mockCrossCutting.Object);
 
