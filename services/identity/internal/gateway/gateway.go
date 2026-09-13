@@ -16,13 +16,15 @@
 // Não reimplementa a assinatura, só a verificação. O identity não chama
 // ninguém para trás dele, e uma chave que só confere é uma chave que não emite.
 //
-// Duas versões da string canônica convivem até o #191 terminar. A `v1` liga o
-// envelope a quem, quando, método, caminho e audiência; a `v2` acrescenta o
-// SHA-256 do corpo, e é o que impede um envelope capturado de servir, na mesma
-// rota e dentro da janela, para outro corpo -- outra foto de CNH, por exemplo.
-// Quando `X-Identity-Signature-V2` vem, só ela decide. Sem ela, ainda vale a
-// `v1`, porque recusá-la antes de o portão assinar `v2` trancaria o serviço
-// para fora, como no #136.
+// A string canônica é a `v2`: quem, quando, método, caminho, audiência e o
+// SHA-256 do corpo. O corpo é o que impede um envelope capturado de servir, na
+// mesma rota e dentro da janela, para outro corpo -- outra foto de CNH, por
+// exemplo (#191).
+//
+// A `v1`, que não cobria o corpo, deixou de valer no #274. Aceitá-la na falta da
+// `v2` deixava quem remove `X-Identity-Signature-V2` de um envelope capturado
+// voltar à assinatura que não cobre o corpo. Um `X-Identity-Signature` que ainda
+// chegue, de um portão anterior, é ignorado: só a `v2` decide.
 package gateway
 
 import (
@@ -41,12 +43,11 @@ import (
 
 // Os cabeçalhos do envelope, na ordem em que entram na string canônica.
 const (
-	KeyIDHeader     = "X-Identity-Key-Id"
-	SubjectHeader   = "X-Identity-Subject"
-	RolesHeader     = "X-Identity-Roles"
-	IssuedAtHeader  = "X-Identity-Issued-At"
-	SignatureHeader = "X-Identity-Signature"
-	// SignatureV2Header é a assinatura que cobre o corpo.
+	KeyIDHeader    = "X-Identity-Key-Id"
+	SubjectHeader  = "X-Identity-Subject"
+	RolesHeader    = "X-Identity-Roles"
+	IssuedAtHeader = "X-Identity-Issued-At"
+	// SignatureV2Header é a assinatura, que cobre o corpo.
 	SignatureV2Header = "X-Identity-Signature-V2"
 
 	// AdminRole é comparado sem diferenciar maiúsculas, porque é o que o
@@ -115,8 +116,8 @@ func New(signingKey []byte, signingKeyID, audience string) (*Verifier, error) {
 // Nunca um erro com a razão: quem não passou não precisa saber por qual dos
 // sete motivos, e a resposta que descreve a falha é a que ensina a contorná-la.
 //
-// Com a assinatura `v2`, Verify lê o corpo inteiro para conferi-lo e o devolve
-// a `request.Body` intacto, para o handler ler depois como leria sem isto.
+// Verify lê o corpo inteiro para conferi-lo e o devolve a `request.Body`
+// intacto, para o handler ler depois como leria sem isto.
 func (v *Verifier) Verify(request *http.Request) *Caller {
 	values := make([]string, len(headerOrder))
 	for index, name := range headerOrder {
@@ -130,10 +131,9 @@ func (v *Verifier) Verify(request *http.Request) *Caller {
 	}
 	keyID, subject, roles, issuedAtValue := values[0], values[1], values[2], values[3]
 
-	// Cada assinatura no máximo uma vez, e ao menos uma das duas.
-	v1 := request.Header.Values(SignatureHeader)
-	v2 := request.Header.Values(SignatureV2Header)
-	if len(v1) > 1 || len(v2) > 1 || len(v1)+len(v2) == 0 {
+	// A assinatura também exatamente uma vez.
+	signature := request.Header.Values(SignatureV2Header)
+	if len(signature) != 1 {
 		return nil
 	}
 
@@ -179,22 +179,16 @@ func (v *Verifier) Verify(request *http.Request) *Caller {
 		v.audience,
 	}, "\n")
 
-	if len(v2) == 1 {
-		// Presente, a `v2` decide sozinha. Cair para a `v1` quando ela falha
-		// seria aceitar exatamente o corpo trocado que ela acabou de recusar.
-		digest, ok := digestBody(request)
-		if !ok || !v.validSignature("v2\n"+bound+"\n"+digest, v2[0], "v2=") {
-			return nil
-		}
-	} else if !v.validSignature("v1\n"+bound, v1[0], "v1=") {
+	digest, ok := digestBody(request)
+	if !ok || !v.validSignature("v2\n"+bound+"\n"+digest, signature[0]) {
 		return nil
 	}
 	return &Caller{Subject: subject, Roles: parsedRoles}
 }
 
-// digestBody é a última linha da `v2`: o SHA-256 dos bytes do corpo, em hex
-// minúsculo, lido até o fim, com ou sem `Content-Length`. Sem corpo e corpo
-// vazio são o mesmo digest, o de zero bytes.
+// digestBody é a última linha da string canônica: o SHA-256 dos bytes do corpo,
+// em hex minúsculo, lido até o fim, com ou sem `Content-Length`. Sem corpo e
+// corpo vazio são o mesmo digest, o de zero bytes.
 func digestBody(request *http.Request) (string, bool) {
 	var raw []byte
 	if request.Body != nil && request.Body != http.NoBody {
@@ -209,8 +203,8 @@ func digestBody(request *http.Request) (string, bool) {
 	return hex.EncodeToString(sum[:]), true
 }
 
-func (v *Verifier) validSignature(canonical, signature, version string) bool {
-	encoded, found := strings.CutPrefix(signature, version)
+func (v *Verifier) validSignature(canonical, signature string) bool {
+	encoded, found := strings.CutPrefix(signature, "v2=")
 	if !found {
 		return false
 	}

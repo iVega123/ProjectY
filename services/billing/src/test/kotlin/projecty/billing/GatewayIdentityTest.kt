@@ -14,38 +14,37 @@ import kotlin.test.assertTrue
 /**
  * A verificação do envelope, contra um envelope de verdade.
  *
- * O vetor abaixo não foi escrito à mão: saiu do próprio portão, pelo caminho de
- * assinatura dele, no teste `signs_invoice_reads_for_the_billing_audience`
- * (services/api-gateway/src/lib.rs). Isso é o que o torna útil -- um vetor que
- * eu mesmo assinasse provaria apenas que esta classe concorda consigo mesma, e
- * o risco de uma segunda implementação não é esse. É a string canônica divergir.
+ * O vetor abaixo é o que `signs_the_v2_envelopes_the_verifiers_pin`, em
+ * services/api-gateway/src/auth.rs, prova que o portão produz para uma rota de
+ * fatura. Os valores foram calculados à parte, com openssl, a partir da string
+ * canônica do ADR 0008. Isso é o que o torna útil -- um vetor que eu mesmo
+ * assinasse provaria apenas que esta classe concorda consigo mesma, e o risco de
+ * uma segunda implementação não é esse. É a string canônica divergir.
  *
- * As duas pontas ficam presas: o teste em Rust fixa o que o portão assina para
- * uma rota de fatura, e este fixa o que esta classe aceita. Uma mudança de um
- * dos lados falha de algum dos dois em vez de virar uma porta aberta.
- *
- * O vetor `v2` é o que `signs_the_v2_envelopes_the_verifiers_pin`, em
- * services/api-gateway/src/auth.rs, prova que o portão produz para a mesma
- * rota. Os valores foram calculados à parte, com openssl, a partir da string
- * canônica do ADR 0008. É um GET, e por isso é também o vetor da regra do corpo
- * vazio.
+ * As duas pontas ficam presas: o teste em Rust fixa o que o portão assina, e
+ * este fixa o que esta classe aceita. Uma mudança de um dos lados falha de algum
+ * dos dois em vez de virar uma porta aberta. É um GET, e por isso é também o
+ * vetor da regra do corpo vazio.
  */
 class GatewayIdentityTest {
     private val key = "x".repeat(32).toByteArray(StandardCharsets.UTF_8)
-    private val issuedAt = 1_788_905_813L
-    private val signature = "v1=LyyXb6bQDnqqgS4Ue9Am2Ccq6Uhv4-OWN70fb_Olim8"
     private val path = "/api/invoices?rentalIds=a,b"
+    private val issuedAt = 1_789_300_000L
+    private val signature = "v2=w5r-_x9wbmOcOjdb-icslt_9rsL7Llm5Uy3FVQwVRzE"
 
-    private val v2IssuedAt = 1_789_300_000L
-    private val v2Signature = "v2=w5r-_x9wbmOcOjdb-icslt_9rsL7Llm5Uy3FVQwVRzE"
+    /**
+     * O `v1` que o portão anterior ao #274 mandava junto com este envelope, no
+     * cabeçalho abaixo. Não cobre corpo nenhum.
+     */
+    private val previousV1 = "v1=jPNeT5mDVdMdyKNT5UXQYPfhI8Z-Hh9geXNfdYWKzl4"
+    private val legacySignatureHeader = "x-identity-signature"
 
-    /** O `v1` que o mesmo portão manda junto, para quem ainda não lê o `v2`. */
-    private val v2AlsoV1 = "v1=jPNeT5mDVdMdyKNT5UXQYPfhI8Z-Hh9geXNfdYWKzl4"
-
-    /** O envelope `v2` como o portão o manda: as duas assinaturas. */
-    private fun captured() =
-        envelope(issued = v2IssuedAt.toString(), signed = v2AlsoV1) +
-            (GatewayIdentity.SIGNATURE_V2_HEADER to listOf(v2Signature))
+    /**
+     * Um envelope só com `v1`, que um portão anterior ao #274 assinou para a
+     * mesma rota, no `signs_invoice_reads_for_the_billing_audience` de então.
+     */
+    private val v1IssuedAt = 1_788_905_813L
+    private val v1Signature = "v1=LyyXb6bQDnqqgS4Ue9Am2Ccq6Uhv4-OWN70fb_Olim8"
 
     private fun identity(
         audience: String = "projecty.billing",
@@ -71,7 +70,7 @@ class GatewayIdentityTest {
         GatewayIdentity.SUBJECT_HEADER to listOf(subject),
         GatewayIdentity.ROLES_HEADER to listOf(roles),
         GatewayIdentity.ISSUED_AT_HEADER to listOf(issued),
-        GatewayIdentity.SIGNATURE_HEADER to listOf(signed),
+        GatewayIdentity.SIGNATURE_V2_HEADER to listOf(signed),
     )
 
     private fun GatewayIdentity.check(
@@ -81,13 +80,8 @@ class GatewayIdentityTest {
         body: ByteArray = ByteArray(0),
     ) = verify({ headers[it] ?: emptyList() }, method, pathAndQuery, body)
 
-    /**
-     * Um portão ainda sem `v2` diante deste verificador. Recusar o envelope
-     * antigo aqui, antes de o portão novo estar no ar, trancaria o billing para
-     * fora -- a falha do #136.
-     */
     @Test
-    fun `um envelope v1, de um portao ainda sem v2, continua aceito`() {
+    fun `o envelope que o portao assinou e aceito`() {
         val caller = identity().check(envelope())
 
         assertNotNull(caller)
@@ -96,44 +90,55 @@ class GatewayIdentityTest {
         assertTrue(!caller.isAdmin)
     }
 
-    @Test
-    fun `o envelope v2 que o portao assinou e aceito`() {
-        val caller = identity(atSecond = v2IssuedAt).check(captured())
-
-        assertNotNull(caller)
-        assertEquals("rider-123", caller.subject)
-    }
-
-    /**
-     * O #191: o mesmo envelope, na mesma rota, dentro da janela, com outro
-     * corpo. O `v1` que veio junto continua valendo para esse corpo -- ele não
-     * cobre corpo nenhum --, e é por isso que, presente o `v2`, só ele decide.
-     */
+    /** O #191: o mesmo envelope, na mesma rota, dentro da janela, com outro corpo. */
     @Test
     fun `um envelope capturado nao serve para outro corpo`() {
         for (body in listOf("{}", " ", "rentalIds=a,c")) {
-            assertNull(
-                identity(atSecond = v2IssuedAt).check(captured(), body = body.toByteArray()),
-                body,
-            )
+            assertNull(identity().check(envelope(), body = body.toByteArray()), body)
         }
     }
 
     /**
-     * O portão novo diante de um verificador antigo, que lê cinco cabeçalhos e
-     * ignora o resto: o que ele vê é o envelope sem o `v2`, e isso passa pela
-     * `v1`, com qualquer corpo.
-     *
-     * É também a janela que continua aberta até os verificadores deixarem de
-     * aceitar `v1`: quem remove o cabeçalho `v2` de um envelope capturado volta à
-     * assinatura que não cobre o corpo.
+     * Um envelope que um portão anterior assinou, e que este verificador aceitava
+     * até o #274. O relógio fica no instante da assinatura, para que a recusa seja
+     * pela versão e não pela janela.
      */
     @Test
-    fun `o que o portao v2 manda ainda passa por um verificador v1`() {
-        val seenByV1 = captured() - GatewayIdentity.SIGNATURE_V2_HEADER
+    fun `um envelope so com v1 e recusado`() {
+        val v1Only =
+            (envelope(issued = v1IssuedAt.toString()) - GatewayIdentity.SIGNATURE_V2_HEADER) +
+                (legacySignatureHeader to listOf(v1Signature))
 
-        assertNotNull(identity(atSecond = v2IssuedAt).check(seenByV1))
-        assertNotNull(identity(atSecond = v2IssuedAt).check(seenByV1, body = "{}".toByteArray()))
+        assertNull(identity(atSecond = v1IssuedAt).check(v1Only))
+    }
+
+    /**
+     * O rebaixamento que o #274 fecha: o envelope que o portão anterior mandava,
+     * com as duas assinaturas, sem o cabeçalho `v2` e com outro corpo. O `v1` que
+     * sobra vale para esse corpo, porque não cobre corpo nenhum.
+     */
+    @Test
+    fun `tirar o v2 de um envelope capturado nao volta ao v1`() {
+        val stripped =
+            (envelope() - GatewayIdentity.SIGNATURE_V2_HEADER) +
+                (legacySignatureHeader to listOf(previousV1))
+
+        for (body in listOf("{}", "")) {
+            assertNull(identity().check(stripped, body = body.toByteArray()), "corpo: '$body'")
+        }
+    }
+
+    /**
+     * Durante o rollout do #274, o portão anterior ainda manda as duas assinaturas
+     * a este verificador. Isso passa pela `v2`, e o `v1` que veio junto não salva
+     * um corpo trocado.
+     */
+    @Test
+    fun `o v1 que um portao anterior ainda mande e ignorado`() {
+        val withPreviousV1 = envelope() + (legacySignatureHeader to listOf(previousV1))
+
+        assertNotNull(identity().check(withPreviousV1))
+        assertNull(identity().check(withPreviousV1, body = "{}".toByteArray()))
     }
 
     @Test
@@ -145,15 +150,13 @@ class GatewayIdentityTest {
     }
 
     @Test
-    fun `cada assinatura vem no maximo uma vez, e ao menos uma vem`() {
-        val verifier = identity(atSecond = v2IssuedAt)
-        val v1 = GatewayIdentity.SIGNATURE_HEADER
+    fun `a assinatura vem exatamente uma vez`() {
         val v2 = GatewayIdentity.SIGNATURE_V2_HEADER
 
-        assertNull(verifier.check(captured() - v1 - v2), "nenhuma")
-        assertNull(verifier.check(captured() + (v2 to listOf(v2Signature, v2Signature))), "v2 repetida")
-        assertNull(verifier.check((captured() - v2) + (v1 to listOf(v2AlsoV1, v2AlsoV1))), "v1 repetida")
-        assertNull(verifier.check(captured() + (v2 to listOf("v1=" + v2Signature.substring(3)))), "versão errada")
+        assertNull(identity().check(envelope() - v2), "nenhuma")
+        assertNull(identity().check(envelope() + (v2 to listOf(signature, signature))), "repetida")
+        assertNull(identity().check(envelope(signed = "v1=" + signature.substring(3))), "versão errada")
+        assertNull(identity().check(envelope(signed = previousV1)), "o v1 no lugar da v2")
     }
 
     @Test
@@ -216,7 +219,7 @@ class GatewayIdentityTest {
      */
     @Test
     fun `um carimbo que nao e so digitos recusa`() {
-        for (bad in listOf("-1788905813", "+1788905813", " 1788905813", "1788905813 ", "0x1")) {
+        for (bad in listOf("-1789300000", "+1789300000", " 1789300000", "1789300000 ", "0x1")) {
             assertNull(identity().check(envelope(issued = bad)), bad)
         }
     }

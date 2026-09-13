@@ -88,10 +88,11 @@ it binds the body too. What that still leaves is stated in
 [ADR 0025](../adr/0025-tls-terminates-at-the-ingress.md):
 
 - confidentiality on the wire;
-- identical-request replay inside the 30 second window;
-- the `v1` fallback, until the verifiers drop it. No service redirects to
-HTTPS; `rental-core` reads `X-Forwarded-Proto` through `UseForwardedHeaders`
-with a forward limit of two, because the ingress and the gateway are two hops.
+- identical-request replay inside the 30 second window.
+
+No service redirects to HTTPS; `rental-core` reads `X-Forwarded-Proto` through
+`UseForwardedHeaders` with a forward limit of two, because the ingress and the
+gateway are two hops.
 
 Kyverno first receives the ProjectY image-verification policy in Audit mode and
 is then promoted from the same manifest to Enforce. The policy trusts only the

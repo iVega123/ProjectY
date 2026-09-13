@@ -317,12 +317,9 @@ impl IdentitySigner {
             "{}\n{}\n{}\n{}\n{}\n{}\n{}",
             self.key_id, identity.subject, roles, issued_at, method, path, audience
         );
-        // As duas versões, lado a lado, enquanto houver verificador em `v1`: um
-        // verificador que só conhece `v1` ignora o cabeçalho que não conhece, e
-        // um que conhece `v2` confere `v2` sempre que ele vier. Mandar só `v2`
-        // antes de todos saberem lê-lo trancaria os serviços para fora, que é a
-        // falha do #136.
-        let v1 = format!("v1={}", self.sign(&format!("v1\n{bound}")));
+        // Só a `v2`, que cobre o corpo. A `v1` saiu no #274: mandá-la junto era o
+        // que deixava quem remove o cabeçalho `v2` de um envelope capturado voltar
+        // a uma assinatura que não cobre o corpo.
         let v2 = format!(
             "v2={}",
             self.sign(&format!("v2\n{bound}\n{}", body_digest(body)))
@@ -344,10 +341,6 @@ impl IdentitySigner {
         headers.insert(
             "x-identity-issued-at",
             HeaderValue::from_str(&issued_at).expect("unix timestamp is a valid header"),
-        );
-        headers.insert(
-            "x-identity-signature",
-            HeaderValue::from_str(&v1).expect("base64url signature is a valid header"),
         );
         headers.insert(
             "x-identity-signature-v2",
@@ -527,7 +520,6 @@ mod tests {
         uri: &'static str,
         audience: &'static str,
         body: &'static [u8],
-        v1: &'static str,
         v2: &'static str,
     }
 
@@ -543,7 +535,6 @@ mod tests {
                 uri: "/update-image",
                 audience: "projecty.identity",
                 body: b"cnh-image:original",
-                v1: "v1=WfqfOycgzRAvAjHP2W7VvzA6AJCQVrxU1GEY4KvWQJM",
                 v2: "v2=V6Nzvgn7pJMZjCeBhFND7JmHakPWzdkexDLY8Xk89u8",
             },
             // Sem corpo: a regra do digest vazio, e a query dentro do caminho.
@@ -552,7 +543,6 @@ mod tests {
                 uri: "/api/invoices?rentalIds=a,b",
                 audience: "projecty.billing",
                 body: b"",
-                v1: "v1=jPNeT5mDVdMdyKNT5UXQYPfhI8Z-Hh9geXNfdYWKzl4",
                 v2: "v2=w5r-_x9wbmOcOjdb-icslt_9rsL7Llm5Uy3FVQwVRzE",
             },
             Golden {
@@ -560,7 +550,6 @@ mod tests {
                 uri: "/api/rental",
                 audience: "projecty.rental-core",
                 body: br#"{"motorcycleId":"00000000-0000-0000-0000-000000000001","plan":7}"#,
-                v1: "v1=3vAv26TC3UzJTX5cWizLQx42_D7y7a4m9ZBX3r29gWY",
                 v2: "v2=idQJwvMxcuM0EEsGGXa8tvOm32Dwcya9HJGh0vz8QwE",
             },
         ]
@@ -611,36 +600,36 @@ mod tests {
         }
     }
 
-    /// O portão em `v2` diante de um verificador ainda em `v1`.
+    /// O #274: nenhuma assinatura que deixe o corpo de fora.
     ///
-    /// O verificador antigo lê cinco cabeçalhos e ignora o resto. O que ele
-    /// precisa, então, é que `x-identity-signature` continue sendo o `v1` de
-    /// sempre, byte a byte, e que nenhum dos cinco apareça duas vezes -- ele
-    /// recusa cabeçalho repetido.
+    /// Um `x-identity-signature` com o `v1` é o que um envelope capturado
+    /// precisaria para voltar à assinatura que não cobre o corpo. E nenhum dos
+    /// cinco cabeçalhos aparece duas vezes, porque os verificadores recusam
+    /// cabeçalho repetido.
     #[test]
-    fn still_signs_v1_unchanged_for_verifiers_that_have_not_rolled() {
+    fn sends_the_v2_signature_alone() {
         for golden in goldens() {
             let headers = signed(&golden, golden.body);
-            assert_eq!(header(&headers, "x-identity-signature"), golden.v1);
+            assert!(
+                !headers.contains_key("x-identity-signature"),
+                "{}",
+                golden.uri
+            );
             for name in [
                 "x-identity-key-id",
                 "x-identity-subject",
                 "x-identity-roles",
                 "x-identity-issued-at",
-                "x-identity-signature",
+                "x-identity-signature-v2",
             ] {
                 assert_eq!(headers.get_all(name).iter().count(), 1, "{name}");
             }
         }
     }
 
-    /// A troca de corpo muda o `v2` e não muda o `v1`.
-    ///
-    /// A primeira metade é o #191 fechado. A segunda é por que ele só fecha de
-    /// vez quando os verificadores deixarem de aceitar `v1`: a assinatura antiga
-    /// continua valendo para qualquer corpo.
+    /// A troca de corpo muda a assinatura, que é o #191.
     #[test]
-    fn a_substituted_body_changes_the_v2_signature_and_not_the_v1() {
+    fn a_substituted_body_changes_the_signature() {
         let golden = &goldens()[0];
         let original = signed(golden, golden.body);
         let substituted = signed(golden, b"cnh-image:attacker");
@@ -648,10 +637,6 @@ mod tests {
         assert_ne!(
             header(&original, "x-identity-signature-v2"),
             header(&substituted, "x-identity-signature-v2")
-        );
-        assert_eq!(
-            header(&original, "x-identity-signature"),
-            header(&substituted, "x-identity-signature")
         );
     }
 

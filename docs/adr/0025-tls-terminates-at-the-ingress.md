@@ -70,6 +70,13 @@ written, the canonical string had no digest of the payload, and it said so here.
   rental-core refuse a `v2` envelope whose body does not match. identity tests
   the exact case above through the whole route: a substituted CNH image is
   refused and nothing is stored.
+- **The downgrade, closed.** For the rollout of #191, verifiers still accepted
+  `v1` when `v2` was absent, so stripping the `v2` header from a captured
+  envelope fell back to a signature that does not cover the body.
+  [#274](https://github.com/iVega123/ProjectY/issues/274) removed that. The
+  gateway sends `v2` alone, and identity, billing and rental-core refuse an
+  envelope without it. Each verifier has a test that strips `v2` from a captured
+  envelope and substitutes the body.
 - **Before and after.** Replay to another route, another verb or another
   audience failed before, and fails now. Same-route body substitution fails too.
 
@@ -83,13 +90,6 @@ written, the canonical string had no digest of the payload, and it said so here.
   what the victim already asked for; it cannot change it. `PUT` and `DELETE` are
   idempotent, and a rental created with an `Idempotency-Key` returns the first
   result. The header is optional, so a create sent without one can be repeated.
-- **The rollout downgrade, until `v1` is removed.** The gateway sends both
-  signatures, and a verifier still accepts `v1` when `v2` is absent, so neither
-  side can be deployed first and lock the other out. The same rule lets an
-  attacker strip `x-identity-signature-v2` from a captured envelope and fall back
-  to the signature that does not cover the body. Removing `v1` acceptance from
-  the three verifiers closes it; that is
-  [#274](https://github.com/iVega123/ProjectY/issues/274).
 
 What mTLS would add on top is therefore confidentiality, and with it the end of
 identical-request replay, since an attacker could no longer inject into the
@@ -103,8 +103,8 @@ GraphQL, applied to the transport).
 
 **The cost accepted:** an attacker with packet capture inside the cluster reads
 the envelope and the payload, and can repeat the identical request for 30
-seconds. Once `v1` acceptance is removed, that attacker can no longer substitute
-the payload. That is the trade, stated.
+seconds. That attacker cannot substitute the payload. That is the trade,
+stated.
 
 **The trigger to revisit:** a second tenant in the same cluster, a compliance
 requirement that names encryption in transit between workloads, or the first
@@ -132,9 +132,8 @@ service that is not ours running beside these.
 - The identity envelope carries the weight of internal authentication. If it
   were ever weakened, this decision would have to be reopened with it — the two
   are load-bearing together. Since #191 it carries integrity of the body as
-  well. It does not carry confidentiality, and the `v1` fallback keeps the body
-  unbound until the verifiers drop it. This record says both where the decision
-  rests on them, rather than in a footnote.
+  well. It does not carry confidentiality. This record says both where the
+  decision rests on them, rather than in a footnote.
 
 ## What implemented it
 

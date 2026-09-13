@@ -63,7 +63,7 @@ public class AdminAuthorizationPipelineTests : IClassFixture<CustomWebApplicatio
         client.DefaultRequestHeaders.Add(
             "x-identity-issued-at",
             DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString(System.Globalization.CultureInfo.InvariantCulture));
-        client.DefaultRequestHeaders.Add("x-identity-signature", "v1=forged");
+        client.DefaultRequestHeaders.Add("x-identity-signature-v2", "v2=forged");
 
         var response = await client.GetAsync("/api/Rental/user");
 

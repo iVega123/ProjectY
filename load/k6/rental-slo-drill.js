@@ -30,9 +30,8 @@ export const options = {
   discardResponseBodies: true,
 };
 
-// As duas assinaturas, como o portão manda (ADR 0008): a `v1` e a `v2`, que
-// cobre o corpo. O ensaio continua valendo quando o rental-core deixar de
-// aceitar `v1`.
+// A assinatura `v2`, como o portão manda (ADR 0008), que cobre o corpo. O
+// rental-core não aceita mais `v1` (#274).
 function identityHeaders(method, path, body) {
   const issuedAt = Math.floor(Date.now() / 1000).toString();
   const roles = "Rider";
@@ -48,7 +47,6 @@ function identityHeaders(method, path, body) {
     "x-identity-subject": SUBJECT,
     "x-identity-roles": roles,
     "x-identity-issued-at": issuedAt,
-    "x-identity-signature": `v1=${sign(`v1\n${bound}`)}`,
     "x-identity-signature-v2": `v2=${sign(`v2\n${bound}\n${crypto.sha256(body, "hex")}`)}`,
   };
 }

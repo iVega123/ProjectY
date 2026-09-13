@@ -14,9 +14,8 @@ public static class GatewayIdentityDefaults
     public const string SubjectHeader = "x-identity-subject";
     public const string RolesHeader = "x-identity-roles";
     public const string IssuedAtHeader = "x-identity-issued-at";
-    public const string SignatureHeader = "x-identity-signature";
 
-    /// <summary>The signature that also covers the request body (issue #191).</summary>
+    /// <summary>The signature, which also covers the request body (issue #191).</summary>
     public const string SignatureV2Header = "x-identity-signature-v2";
 
     /// <summary>
@@ -31,7 +30,6 @@ public static class GatewayIdentityDefaults
         SubjectHeader,
         RolesHeader,
         IssuedAtHeader,
-        SignatureHeader,
         SignatureV2Header
     ];
 }
@@ -130,12 +128,14 @@ public sealed class GatewayIdentityAuthenticationHandler(
     : AuthenticationHandler<GatewayIdentityOptions>(options, logger, encoder)
 {
     /// <summary>
-    /// Two canonical strings live side by side until issue #191 is finished. <c>v1</c> binds the
-    /// envelope to key, subject, roles, time, method, path and audience; <c>v2</c> adds the SHA-256
-    /// of the body, which is what stops a captured envelope from carrying a different body on the
-    /// same route inside its window. When the <c>v2</c> signature is present it alone decides.
-    /// Without it <c>v1</c> is still accepted, because refusing it before the gateway signs
-    /// <c>v2</c> would lock this service out — the failure of issue #136.
+    /// The canonical string is <c>v2</c>: key, subject, roles, time, method, path, audience and the
+    /// SHA-256 of the body. The body is what stops a captured envelope from carrying a different
+    /// body on the same route inside its window (issue #191).
+    ///
+    /// <c>v1</c>, which covered no body, stopped being accepted in issue #274. Accepting it when
+    /// <c>v2</c> was absent let anyone who stripped the <c>v2</c> header from a captured envelope
+    /// fall back to the signature that does not cover the body. An <c>x-identity-signature</c>
+    /// header still sent by a previous gateway is ignored.
     /// </summary>
     protected override async Task<AuthenticateResult> HandleAuthenticateAsync()
     {
@@ -148,7 +148,7 @@ public sealed class GatewayIdentityAuthenticationHandler(
             || !TryGetSingleHeader(GatewayIdentityDefaults.SubjectHeader, out var subject)
             || !TryGetSingleHeader(GatewayIdentityDefaults.RolesHeader, out var rolesValue)
             || !TryGetSingleHeader(GatewayIdentityDefaults.IssuedAtHeader, out var issuedAtValue)
-            || !TryGetSignature(out var version, out var signatureValue))
+            || !TryGetSingleHeader(GatewayIdentityDefaults.SignatureV2Header, out var signatureValue))
         {
             return AuthenticateResult.Fail("Incomplete gateway identity envelope.");
         }
@@ -183,22 +183,12 @@ public sealed class GatewayIdentityAuthenticationHandler(
             Request.Method,
             pathAndQuery,
             Options.Audience);
-        string canonical;
-        if (version == "v2")
+        var digest = await DigestBodyAsync();
+        if (digest is null)
         {
-            // Falling back to v1 when v2 fails would accept exactly the substituted body v2 refused.
-            var digest = await DigestBodyAsync();
-            if (digest is null)
-            {
-                return AuthenticateResult.Fail("Unreadable or oversized request body.");
-            }
-            canonical = $"v2\n{bound}\n{digest}";
+            return AuthenticateResult.Fail("Unreadable or oversized request body.");
         }
-        else
-        {
-            canonical = $"v1\n{bound}";
-        }
-        if (!GatewayIdentitySigner.Verify(Options.SigningKey, canonical, signatureValue, version))
+        if (!GatewayIdentitySigner.Verify(Options.SigningKey, $"v2\n{bound}\n{digest}", signatureValue))
         {
             return AuthenticateResult.Fail("Invalid gateway identity signature.");
         }
@@ -215,23 +205,8 @@ public sealed class GatewayIdentityAuthenticationHandler(
             new AuthenticationTicket(principal, GatewayIdentityDefaults.AuthenticationScheme));
     }
 
-    /// <summary>Each signature at most once, and at least one of the two.</summary>
-    private bool TryGetSignature(out string version, out string value)
-    {
-        var v1 = Request.Headers[GatewayIdentityDefaults.SignatureHeader];
-        var v2 = Request.Headers[GatewayIdentityDefaults.SignatureV2Header];
-        version = string.Empty;
-        value = string.Empty;
-        if (v1.Count > 1 || v2.Count > 1 || v1.Count + v2.Count == 0)
-        {
-            return false;
-        }
-        (version, value) = v2.Count == 1 ? ("v2", v2[0] ?? string.Empty) : ("v1", v1[0] ?? string.Empty);
-        return true;
-    }
-
     /// <summary>
-    /// The last line of v2: the SHA-256 of the body bytes, read to their end whether or not a
+    /// The last canonical line: the SHA-256 of the body bytes, read to their end whether or not a
     /// Content-Length came, in lowercase hex. No body and an empty body are the same digest.
     /// The body is rewound afterwards, so model binding reads it as it would have without this.
     /// </summary>
@@ -315,9 +290,9 @@ public sealed class GatewayIdentitySigner
     }
 
     /// <summary>
-    /// Signs both envelope versions, as the gateway does: v1 for verifiers that have not rolled,
-    /// and v2 over the bytes of <see cref="HttpRequestMessage.Content"/>. Reading the content
-    /// buffers it, so the bytes sent are the bytes signed.
+    /// Signs the v2 envelope, as the gateway does, over the bytes of
+    /// <see cref="HttpRequestMessage.Content"/>. Reading the content buffers it, so the bytes sent
+    /// are the bytes signed.
     /// </summary>
     public async Task SignAsync(
         HttpRequestMessage request,
@@ -358,7 +333,6 @@ public sealed class GatewayIdentitySigner
             request.Method.Method,
             pathAndQuery,
             audience);
-        var v1 = Sign($"v1\n{bound}");
         var v2 = Sign($"v2\n{bound}\n{BodyDigest(body)}");
 
         foreach (var header in GatewayIdentityDefaults.Headers)
@@ -369,7 +343,6 @@ public sealed class GatewayIdentitySigner
         request.Headers.TryAddWithoutValidation(GatewayIdentityDefaults.SubjectHeader, subject);
         request.Headers.TryAddWithoutValidation(GatewayIdentityDefaults.RolesHeader, rolesValue);
         request.Headers.TryAddWithoutValidation(GatewayIdentityDefaults.IssuedAtHeader, issuedAt);
-        request.Headers.TryAddWithoutValidation(GatewayIdentityDefaults.SignatureHeader, $"v1={v1}");
         request.Headers.TryAddWithoutValidation(GatewayIdentityDefaults.SignatureV2Header, $"v2={v2}");
     }
 
@@ -393,9 +366,9 @@ public sealed class GatewayIdentitySigner
     public static string BodyDigest(ReadOnlySpan<byte> body) =>
         Convert.ToHexStringLower(SHA256.HashData(body));
 
-    internal static bool Verify(byte[] key, string canonical, string signatureValue, string version)
+    internal static bool Verify(byte[] key, string canonical, string signatureValue)
     {
-        var prefix = version + "=";
+        const string prefix = "v2=";
         if (!signatureValue.StartsWith(prefix, StringComparison.Ordinal)
             || !TryBase64UrlDecode(signatureValue[prefix.Length..], out var supplied))
         {

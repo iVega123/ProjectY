@@ -2078,18 +2078,6 @@ mod tests {
         assert_eq!(body["roles"], "Rider");
         assert_eq!(body["key_id"], "local-v1");
         let issued_at = body["issued_at"].as_str().unwrap();
-        let signature = body["signature"]
-            .as_str()
-            .unwrap()
-            .strip_prefix("v1=")
-            .unwrap();
-        let canonical = format!(
-            "v1\nlocal-v1\nrider-123\nRider\n{issued_at}\nPOST\n/api/rental/close?plan=weekly\nprojecty.rental-operations"
-        );
-        let mut mac = Hmac::<Sha256>::new_from_slice(&[b'x'; 32]).unwrap();
-        mac.update(canonical.as_bytes());
-        mac.verify_slice(&URL_SAFE_NO_PAD.decode(signature).unwrap())
-            .unwrap();
         assert_signed_v2(
             &body,
             &format!(
@@ -2102,8 +2090,13 @@ mod tests {
     const EMPTY_BODY_SHA256: &str =
         "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
 
-    /// Confere o `v2` que o upstream recebeu contra a string canônica dada.
+    /// Confere o `v2` que o upstream recebeu contra a string canônica dada, e
+    /// que nenhuma assinatura `v1` foi junto (#274).
     fn assert_signed_v2(upstream: &Value, canonical: &str) {
+        assert!(
+            upstream["signature"].is_null(),
+            "the upstream received a v1 signature"
+        );
         let signature = upstream["signature_v2"]
             .as_str()
             .expect("the upstream received no v2 signature")
@@ -2234,30 +2227,10 @@ mod tests {
         assert_eq!(response.status(), StatusCode::OK);
         let body = response_json(response).await;
         let issued_at = body["issued_at"].as_str().unwrap();
-        let signature = body["signature"]
-            .as_str()
-            .unwrap()
-            .strip_prefix("v1=")
-            .unwrap();
-        let canonical = format!(
-            "v1
-local-v1
-rider-123
-Rider
-{issued_at}
-GET
-/api/invoices?rentalIds=a,b
-projecty.billing"
-        );
-        let mut mac = Hmac::<Sha256>::new_from_slice(&[b'x'; 32]).unwrap();
-        mac.update(canonical.as_bytes());
-        mac.verify_slice(&URL_SAFE_NO_PAD.decode(signature).unwrap())
-            .unwrap();
         assert_signed_v2(
             &body,
             &format!(
-                "{}\n{EMPTY_BODY_SHA256}",
-                canonical.replacen("v1\n", "v2\n", 1)
+                "v2\nlocal-v1\nrider-123\nRider\n{issued_at}\nGET\n/api/invoices?rentalIds=a,b\nprojecty.billing\n{EMPTY_BODY_SHA256}"
             ),
         );
     }
@@ -2265,7 +2238,7 @@ projecty.billing"
     /// O envelope que o identity confere do outro lado, em Go.
     ///
     /// Este teste fixa o que o portão ASSINA para uma rota de piloto; o
-    /// `TestAcceptsAnEnvelopeTheGatewaySigned`, em
+    /// `TestAcceptsAV2EnvelopeTheGatewaySigned`, em
     /// `services/identity/internal/gateway`, fixa o que o identity ACEITA,
     /// contra um envelope que saiu daqui. Os dois se encontram no meio, e é
     /// isso que faz uma divergência entre as duas implementações aparecer como
@@ -2291,30 +2264,10 @@ projecty.billing"
         assert_eq!(response.status(), StatusCode::OK);
         let body = response_json(response).await;
         let issued_at = body["issued_at"].as_str().unwrap();
-        let signature = body["signature"]
-            .as_str()
-            .unwrap()
-            .strip_prefix("v1=")
-            .unwrap();
-        let canonical = format!(
-            "v1
-local-v1
-rider-123
-Admin
-{issued_at}
-GET
-/api/riders?ids=a,b
-projecty.identity"
-        );
-        let mut mac = Hmac::<Sha256>::new_from_slice(&[b'x'; 32]).unwrap();
-        mac.update(canonical.as_bytes());
-        mac.verify_slice(&URL_SAFE_NO_PAD.decode(signature).unwrap())
-            .unwrap();
         assert_signed_v2(
             &body,
             &format!(
-                "{}\n{EMPTY_BODY_SHA256}",
-                canonical.replacen("v1\n", "v2\n", 1)
+                "v2\nlocal-v1\nrider-123\nAdmin\n{issued_at}\nGET\n/api/riders?ids=a,b\nprojecty.identity\n{EMPTY_BODY_SHA256}"
             ),
         );
     }

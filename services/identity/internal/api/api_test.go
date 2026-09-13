@@ -375,8 +375,8 @@ func (f *fixture) envelope(
 	return f.envelopeWith(t, method, pathAndQuery, subject, roles, nil)
 }
 
-// envelopeWith manda `body` com as duas assinaturas, como o portão manda: a
-// `v1`, que não cobre o corpo, e a `v2`, que cobre.
+// envelopeWith manda `body` assinado como o portão assina: a `v2`, que cobre o
+// corpo.
 func (f *fixture) envelopeWith(
 	t *testing.T,
 	method, pathAndQuery, subject, roles string,
@@ -399,7 +399,6 @@ func (f *fixture) envelopeWith(
 	request.Header.Set(gateway.SubjectHeader, subject)
 	request.Header.Set(gateway.RolesHeader, roles)
 	request.Header.Set(gateway.IssuedAtHeader, stamp)
-	request.Header.Set(gateway.SignatureHeader, "v1="+sign("v1\n"+bound))
 	request.Header.Set(gateway.SignatureV2Header,
 		"v2="+sign("v2\n"+bound+"\n"+hex.EncodeToString(digest[:])))
 	return request
