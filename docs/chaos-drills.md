@@ -26,7 +26,7 @@ failure stops and continues is the [degradation contract](degradation-contract.m
 
 | Drill | Inject | Expect | Observe | Measured |
 |---|---|---|---|---|
-| `slow-db` | +500 ms on every CockroachDB response | p99 rises, breaker stays closed, no 5xx | Grafana `projecty-load-resilience`: creation p99, breaker state | **Fails.** No creation fits the 2.5 s gateway deadline at ~5 round trips of 500 ms; the breaker opens. [#206](https://github.com/iVega123/ProjectY/issues/206) |
+| `slow-db` | +500 ms on every CockroachDB response | Creation slows by two round trips of the injected latency (~1 s), breaker stays closed, no 5xx | Grafana `projecty-load-resilience`: creation p99, breaker state | Holds. 135 created, 0 refused; median 1,028 ms, p95 1,038 ms, p99 1,549 ms. k6 exits on its p95 < 800 ms threshold by design. Was failing at five round trips: [#206](https://github.com/iVega123/ProjectY/issues/206) |
 | `db-down` | CockroachDB timeout | 503 with `Retry-After`, bounded; the breaker opens and later refusals are immediate | `dependency_refusals_total{dependency="database"}`, `gateway_upstream_circuit_breaker_state`, spans tagged `projecty.degradation=database` | Holds. First refusals ~2 s (database deadline), then median 4.6 ms, p95 8.6 ms |
 | `redis-down` | Redis timeout | Rate limiting degrades open; `Idempotency-Key` mutations and revocation checks refuse closed | `gateway_ratelimit_degraded_total`, gateway 503 traces | Holds. No 429s; every creation refused at ~252 ms |
 | `kafka-down` | Kafka timeout | Rental creation continues; events wait in the outbox and drain after Clear | `projecty_rental_outbox_pending`, `dependency_degradations_total{dependency="kafka"}` | Holds. 179 created, 0 errors; 80 events pending at recovery drained in 3.0 s |

@@ -17,7 +17,7 @@ limited subject, not a capacity claim.
 | kafka-down | 179 | 1,206 | 0 / 1,385 (0%) | 41.1 / 43.5 | — | 0 |
 | bad-network | 177 | 1,139 | 2 / 1,318 (0.15%) | 104.6 / 110.0 | 92.6 / 101.4 / 102.2 | 0 |
 | db-down | 0 | 1,152 | 178 / 1,330 (13.4%) | — | 4.6 / 8.6 / 2,019.7 | 99 |
-| slow-db (+500 ms) | 0 | 1,127 | 178 / 1,305 (13.6%) | — | 4.8 / 10.0 / 2,509.2 | 99 |
+| slow-db (+500 ms) | 135 | 0 | 0 / 135 (0%) | 1,037.5 / 1,549.3 | — | 99 |
 | redis-down | 0 | 0 | 425 / 425 (100%) | — | 252.2 / 252.7 / 252.9 | 99 |
 
 Reading the table against the [degradation contract](../../degradation-contract.md):
@@ -33,9 +33,15 @@ Reading the table against the [degradation contract](../../degradation-contract.
   250 ms Redis timeout. Rate limiting failed open (no 429).
 - **bad-network** — errors stay near flat: 2 refusals in 1,318 requests, latency roughly
   doubled.
-- **slow-db** — **fails #68's expectation** (p99 rises, no 5xx). Not one creation fits
-  the 2.5 s gateway deadline at 500 ms per database round trip:
-  [#206](https://github.com/iVega123/ProjectY/issues/206). The criterion stays open.
+- **slow-db** — the expectation holds: slower, not refused. Creating a rental costs two
+  database round trips (the preconditions read and one write statement), so +500 ms per
+  response puts the median at 1,028 ms, inside the 2.5 s gateway deadline. No request
+  was refused, so the breaker never opened; the p99 is a single creation at 1,549 ms. The
+  k6 exit is the p95 < 800 ms threshold, which +500 ms per round trip cannot meet and
+  which was not relaxed. Each creation now takes about a second, so the five VUs never
+  reach the rate limiter (no 429). Re-measured on `f4c8c56`, after
+  [#213](https://github.com/iVega123/ProjectY/pull/213); the first run, at five round
+  trips, created nothing ([#206](https://github.com/iVega123/ProjectY/issues/206)).
 
 ## Drills without a load profile
 
@@ -66,4 +72,5 @@ foreach ($mode in 'slow-db','db-down','redis-down','bad-network','kafka-down') {
 
 The environment files record `commit` as the checkout the runs started from; the
 application code measured is that commit plus the #67, #70 and #71 changes that these
-files were published with.
+files were published with. The exception is slow-db, measured on `f4c8c56` as merged,
+with no working-tree changes.
