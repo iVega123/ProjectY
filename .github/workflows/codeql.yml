@@ -54,9 +54,12 @@ jobs:
         uses: actions/setup-java@v5
         with: {distribution: temurin, java-version: "21"}
 
+      # No Gradle cache here. CodeQL extracts Kotlin by watching the compiler run;
+      # restored from main, compileKotlin came back FROM-CACHE, nothing compiled,
+      # and the job failed with "could not process any code written in Java/Kotlin".
       - if: matrix.language == 'java-kotlin'
         uses: gradle/actions/setup-gradle@v4
-        with: {gradle-version: "8.14.3"}
+        with: {gradle-version: "8.14.3", cache-disabled: true}
 
       - uses: github/codeql-action/init@v4
         with:
@@ -65,7 +68,12 @@ jobs:
 
       - if: matrix.build-mode == 'manual'
         working-directory: services/billing
-        run: gradle --no-daemon compileKotlin compileTestKotlin
+        # --no-build-cache and --rerun-tasks so the compiler always runs; in-process
+        # so it runs inside the build CodeQL is tracing, not in a Kotlin daemon.
+        run: >-
+          gradle --no-daemon --no-build-cache --rerun-tasks
+          -Pkotlin.compiler.execution.strategy=in-process
+          compileKotlin compileTestKotlin
 
       - uses: github/codeql-action/analyze@v4
         with:
