@@ -806,9 +806,13 @@ jobs:
         shell: pwsh
         run: ./scripts/Test-LocalTerraform.ps1
 
+      - name: Verify cost and recovery profile promises
+        shell: pwsh
+        run: ./scripts/Test-CostProfiles.ps1
+
       - name: Validate every Terraform root without contacting a backend
         run: |
-          for root in infra/tests/aws-modules infra/bootstrap infra/envs/aws-mid/* infra/envs/local; do
+          for root in infra/tests/aws-modules infra/bootstrap infra/envs/aws-low infra/envs/aws-mid/* infra/envs/aws-high infra/envs/local; do
             [[ -d "$root" ]] || continue
             terraform -chdir="$root" init -backend=false -input=false
             terraform -chdir="$root" validate -no-color
@@ -816,6 +820,14 @@ jobs:
 
       - name: Plan the local composition with mocked providers
         run: terraform -chdir=infra/envs/local test -no-color
+
+      - name: Plan paid profiles with mocked providers
+        run: |
+          terraform -chdir=infra/envs/aws-low test -no-color
+          for layer in 00-network 10-data 20-platform 30-workloads; do
+            terraform -chdir="infra/envs/aws-mid/$layer" test -no-color
+          done
+          terraform -chdir=infra/envs/aws-high test -no-color
 
       - name: Set up TFLint
         uses: terraform-linters/setup-tflint@v6

@@ -41,7 +41,7 @@ and the budget then tells you whether the promise is payable.
 
 | | Low | Mid | High |
 |---|---|---|---|
-| Cost | ~$40/mo | ~$300/mo | ~$2,500+/mo |
+| Cost (2026-09-13 estimate) | ~$172/mo | ~$1,143/mo | ~$5,856+/mo |
 | Kafka | container | Strimzi on cluster | MSK provisioned |
 | RTO / RPO | hours / 24h | minutes / ~5min | seconds / ~0 |
 | Survives | nothing | an availability zone | a region |
@@ -62,9 +62,10 @@ by hand and nobody noticed.
   experience without the tax.
 - **A separate repository per cloud.** Same drift, more of it, and the shared
   application code has to be vendored or published as packages.
-- **Keeping AWS running.** Roughly $850/month with MSK Serverless alone
-  outweighing everything else. Prohibitive, and it would make the portfolio
-  depend on a recurring bill.
+- **Keeping AWS running.** Current fixed-cost arithmetic and source links live
+  in [`docs/cost-profiles.md`](../cost-profiles.md). Even Mid is roughly
+  $1,143/month before usage, and the review-only regional profile starts near
+  $5,856/month. It would make the portfolio depend on a large recurring bill.
 
 ## What was explicitly rejected
 

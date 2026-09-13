@@ -53,6 +53,7 @@ source locations are in the
 | Active observability | Application OTLP exporters, OpenTelemetry Collector, Prometheus, Tempo, Loki, and Grafana |
 | Retired observability | The unauthenticated Elasticsearch, Logstash, and Kibana stack |
 | Platform integration | Kustomize owns the shared Kubernetes topology with self-hosted and AWS overlays; Tilt provisions kind, Calico, ingress, External Secrets and signed-image admission |
+| AWS cost profiles | Low, Mid, and review-only High encode explicit RTO/RPO promises with [dated fixed-cost arithmetic](docs/cost-profiles.md) |
 | Polyglot services | Rust media-guard, Elixir live telemetry, asynchronous Python risk/pricing and Next.js operations console |
 | Decision records | The design and implementation trail is indexed under [`docs/adr/`](docs/adr/README.md) |
 
@@ -86,6 +87,11 @@ published: they are never maintained and never accept pull requests. Epic work
 uses `task/<issue>-*` → `epic/<issue>-*` → `main`, with validated task PRs first.
 The reasoning is in
 [ADR 0005](docs/adr/0005-repository-and-publication-strategy.md).
+
+The AWS roots are `infra/envs/aws-low`, layered `infra/envs/aws-mid`, and the
+mock-plan-only `infra/envs/aws-high`. Choose one by its recovery promise, not by
+its headline budget; the [cost profile comparison](docs/cost-profiles.md) states
+what each topology survives and which usage charges remain outside the estimate.
 
 ## Run locally
 

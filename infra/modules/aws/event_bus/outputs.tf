@@ -19,3 +19,8 @@ output "event_bus" {
     tls               = true
   }
 }
+
+output "cluster_arn" {
+  description = "Implementation-private MSK cluster ARN used by the high-profile replication composition."
+  value       = aws_msk_cluster.this.arn
+}

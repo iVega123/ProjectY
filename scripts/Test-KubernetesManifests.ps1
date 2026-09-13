@@ -20,7 +20,17 @@ try {
 
         $documents = [regex]::Split($rendered, '(?m)^---\s*$')
         $workloads = @($documents | Where-Object { $_ -match '(?m)^kind:\s+(Deployment|StatefulSet|Job)\s*$' })
-        if ($workloads.Count -ne 19) { throw "$overlay renders $($workloads.Count) workloads; expected 19." }
+        $operatorManagedWorkloads = @($documents | Where-Object { $_ -match '(?m)^kind:\s+Kafka\s*$' })
+        $logicalWorkloadCount = $workloads.Count + $operatorManagedWorkloads.Count
+        if ($logicalWorkloadCount -ne 19) {
+            throw "$overlay renders $logicalWorkloadCount logical workloads; expected 19."
+        }
+        if ($overlay -eq 'aws' -and
+            ($operatorManagedWorkloads.Count -ne 1 -or
+             $rendered -notmatch '(?m)^\s+min\.insync\.replicas:\s+2\s*$' -or
+             $rendered -notmatch '(?m)^\s+default\.replication\.factor:\s+3\s*$')) {
+            throw 'aws must replace the base Kafka StatefulSet with one replicated Strimzi Kafka resource.'
+        }
         $serviceAccounts = @($documents | Where-Object { $_ -match '(?m)^kind:\s+ServiceAccount\s*$' } | ForEach-Object {
             [regex]::Match($_, '(?m)^  name:\s*([^\s]+)').Groups[1].Value
         })
@@ -97,7 +107,7 @@ try {
                 throw "$overlay is missing the $application Service."
             }
         }
-        Write-Host "PASS: $overlay renders $($workloads.Count) bounded, isolated workloads with external secrets"
+        Write-Host "PASS: $overlay renders $logicalWorkloadCount bounded, isolated logical workloads with external secrets"
     }
 } finally {
     Pop-Location

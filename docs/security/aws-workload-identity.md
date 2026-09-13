@@ -7,16 +7,18 @@ injects short-lived container credentials through the AWS SDK default chain.
 | ServiceAccount | Allowed AWS capability | Why |
 |---|---|---|
 | `api-gateway` | read its RESP credential | rate-limit state only |
-| `identity` | read/write/delete `identity/` objects | rider documents belong to identity |
-| `rental-core` | read its AMQP credential | rental commands belong to rental core |
+| `identity` | read/write/delete `identity/` objects; read its SQL credential | rider documents and the identity database principal belong to identity |
+| `rental-core` | read its AMQP and SQL credentials | rental commands and the rental database principal belong to rental core |
 | `media-guard` | read/write `media/` objects | inspect uploads and publish results |
-| `billing` | none in `aws-mid` | Kafka and SQL use protocol credentials |
-| `risk-pricing` | read `risk-pricing/` objects | versioned policy input only |
+| `billing` | read its SQL credential | the billing database principal belongs to billing |
+| `risk-pricing` | read `risk-pricing/` objects and its SQL credential | versioned policy input and the risk database principal only |
 | `telemetry` | select/modify its Keyspaces tables | tracking facts belong to telemetry |
 | `console` | none | the BFF reaches services over HTTP |
 
-Every grant carries a reason in `20-platform/main.tf`. Empty policies are
-intentional proof that deploying on AWS does not imply AWS API access.
+Every grant carries a reason in `20-platform/main.tf`. SQL users are distinct
+CockroachDB principals; Pod Identity permits each workload to retrieve only its
+own bootstrap secret. Empty policies are intentional proof that deploying on
+AWS does not imply AWS API access.
 
 ## Negative authorization check
 

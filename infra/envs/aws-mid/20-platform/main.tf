@@ -45,8 +45,9 @@ module "kubernetes_cluster" {
 }
 
 locals {
-  object_bucket = data.terraform_remote_state.data.outputs.object_store.name
-  connections   = data.terraform_remote_state.data.outputs.connections
+  object_bucket              = data.terraform_remote_state.data.outputs.object_store.name
+  connections                = data.terraform_remote_state.data.outputs.connections
+  database_secret_references = data.terraform_remote_state.data.outputs.database_secret_references
 
   service_policies = {
     api-gateway = {
@@ -58,20 +59,36 @@ locals {
       }]
     }
     identity = {
-      statements = [{
-        sid       = "ManageIdentityDocuments"
-        reason    = "Identity owns rider documents below its isolated object prefix."
-        actions   = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"]
-        resources = ["arn:${data.aws_partition.current.partition}:s3:::${local.object_bucket}/identity/*"]
-      }]
+      statements = [
+        {
+          sid       = "ManageIdentityDocuments"
+          reason    = "Identity owns rider documents below its isolated object prefix."
+          actions   = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"]
+          resources = ["arn:${data.aws_partition.current.partition}:s3:::${local.object_bucket}/identity/*"]
+        },
+        {
+          sid       = "ReadOwnDatabaseCredential"
+          reason    = "Identity receives only its own CockroachDB SQL principal."
+          actions   = ["secretsmanager:DescribeSecret", "secretsmanager:GetSecretValue"]
+          resources = ["arn:${data.aws_partition.current.partition}:secretsmanager:${var.aws_region}:${data.aws_caller_identity.current.account_id}:secret:${local.database_secret_references.identity}-??????"]
+        }
+      ]
     }
     rental-core = {
-      statements = [{
-        sid       = "ReadOwnCommandCredential"
-        reason    = "Rental core alone owns the AMQP command queues and their client credential."
-        actions   = ["secretsmanager:DescribeSecret", "secretsmanager:GetSecretValue"]
-        resources = ["arn:${data.aws_partition.current.partition}:secretsmanager:${var.aws_region}:${data.aws_caller_identity.current.account_id}:secret:${local.connections.command_bus.secret_reference}-??????"]
-      }]
+      statements = [
+        {
+          sid       = "ReadOwnCommandCredential"
+          reason    = "Rental core alone owns the AMQP command queues and their client credential."
+          actions   = ["secretsmanager:DescribeSecret", "secretsmanager:GetSecretValue"]
+          resources = ["arn:${data.aws_partition.current.partition}:secretsmanager:${var.aws_region}:${data.aws_caller_identity.current.account_id}:secret:${local.connections.command_bus.secret_reference}-??????"]
+        },
+        {
+          sid       = "ReadOwnDatabaseCredential"
+          reason    = "Rental core receives only its own CockroachDB SQL principal."
+          actions   = ["secretsmanager:DescribeSecret", "secretsmanager:GetSecretValue"]
+          resources = ["arn:${data.aws_partition.current.partition}:secretsmanager:${var.aws_region}:${data.aws_caller_identity.current.account_id}:secret:${local.database_secret_references["rental-core"]}-??????"]
+        }
+      ]
     }
     media-guard = {
       statements = [{
@@ -82,15 +99,28 @@ locals {
       }]
     }
     billing = {
-      statements = []
+      statements = [{
+        sid       = "ReadOwnDatabaseCredential"
+        reason    = "Billing receives only its own CockroachDB SQL principal."
+        actions   = ["secretsmanager:DescribeSecret", "secretsmanager:GetSecretValue"]
+        resources = ["arn:${data.aws_partition.current.partition}:secretsmanager:${var.aws_region}:${data.aws_caller_identity.current.account_id}:secret:${local.database_secret_references.billing}-??????"]
+      }]
     }
     risk-pricing = {
-      statements = [{
-        sid       = "ReadPricingPolicy"
-        reason    = "Risk pricing reads only the versioned policy document it evaluates."
-        actions   = ["s3:GetObject"]
-        resources = ["arn:${data.aws_partition.current.partition}:s3:::${local.object_bucket}/risk-pricing/*"]
-      }]
+      statements = [
+        {
+          sid       = "ReadPricingPolicy"
+          reason    = "Risk pricing reads only the versioned policy document it evaluates."
+          actions   = ["s3:GetObject"]
+          resources = ["arn:${data.aws_partition.current.partition}:s3:::${local.object_bucket}/risk-pricing/*"]
+        },
+        {
+          sid       = "ReadOwnDatabaseCredential"
+          reason    = "Risk pricing receives only its own CockroachDB SQL principal."
+          actions   = ["secretsmanager:DescribeSecret", "secretsmanager:GetSecretValue"]
+          resources = ["arn:${data.aws_partition.current.partition}:secretsmanager:${var.aws_region}:${data.aws_caller_identity.current.account_id}:secret:${local.database_secret_references["risk-pricing"]}-??????"]
+        }
+      ]
     }
     telemetry = {
       statements = [{

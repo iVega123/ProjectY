@@ -1,5 +1,19 @@
 # aws-mid layered state
 
+This is the default ephemeral AWS profile: a three-AZ EKS node group, Strimzi
+Kafka on that existing capacity, CockroachDB Cloud `STANDARD` in one region,
+multi-AZ RabbitMQ, and a Valkey replica. It promises an RTO measured in minutes,
+an RPO of approximately five minutes, and survival of one Availability Zone.
+The CockroachDB invoice and identity boundary belong to a second vendor; see
+[`docs/cost-profiles.md`](../../../docs/cost-profiles.md) for the dated
+**~$1,143/month** fixed estimate and its assumptions.
+
+| Promise | Value |
+|---|---|
+| RTO | minutes |
+| RPO | approximately five minutes |
+| Survives | loss of one Availability Zone |
+
 Apply in numeric order. Each directory is an independent Terraform root and
 state file; it reads only the immediately preceding state. Supply the same
 backend bucket to `init` and as `TF_VAR_state_bucket` to upper layers.
