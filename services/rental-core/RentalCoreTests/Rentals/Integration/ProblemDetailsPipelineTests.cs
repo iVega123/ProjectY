@@ -107,7 +107,7 @@ public class ProblemDetailsPipelineTests(CustomWebApplicationFactory factory)
 
     private sealed class ThrowingRepository : IRentalRepository
     {
-        private static Exception Failure() => new InvalidDataException(
+        private static InvalidDataException Failure() => new(
             "Npgsql.PostgresException: relation \"rentals\" does not exist (Host=secret-db;Username=root)");
 
         public Task<Rental> CreateRentalAsync(Rental rental, CancellationToken token = default) => throw Failure();

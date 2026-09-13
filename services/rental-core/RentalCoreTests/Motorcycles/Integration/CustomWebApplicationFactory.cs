@@ -72,7 +72,7 @@ namespace MotoHubTests.Integration
             {
                 context.HostingEnvironment.EnvironmentName = "Testing";
 
-                var integrationTestConfig = new Dictionary<string, string>
+                var integrationTestConfig = new Dictionary<string, string?>
                 {
                     {"GatewayIdentity:SigningKey", GatewayIdentityKey},
                     {"GatewayIdentity:SigningKeyId", "test-v1"},

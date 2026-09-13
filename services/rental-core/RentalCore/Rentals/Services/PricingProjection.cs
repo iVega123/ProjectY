@@ -17,6 +17,7 @@ public sealed record PriceTable([property: JsonPropertyName("version")] string V
 public static class LocalPricing
 {
     private static readonly object Gate = new();
+    private static readonly int[] TierLimits = [7, 15, 30, 45, 36500];
     private static long tableAt;
     public static readonly ConcurrentDictionary<string, (int Score, long At)> Scores = new();
     private static readonly Meter Meter = new("ProjectY.Resilience");
@@ -51,7 +52,7 @@ public static class LocalPricing
     {
         if (table is null || string.IsNullOrWhiteSpace(table.Version) || at <= 0 || table.Tiers is null
             || table.Tiers.Any(t => t.DailyMinor is <= 0 or > 100000)
-            || !table.Tiers.Select(t => t.MaxDays).SequenceEqual(new[] { 7, 15, 30, 45, 36500 }))
+            || !table.Tiers.Select(t => t.MaxDays).SequenceEqual(TierLimits))
             throw new InvalidDataException("Invalid pricing table");
         lock (Gate)
         {
@@ -62,24 +63,24 @@ public static class LocalPricing
     }
 }
 
-public sealed class PricingProjection(NpgsqlDataSource database, IConfiguration config, ILogger<PricingProjection> log) : BackgroundService
+public sealed partial class PricingProjection(NpgsqlDataSource database, IConfiguration config, ILogger<PricingProjection> log) : BackgroundService
 {
-    protected override async Task ExecuteAsync(CancellationToken token)
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         var bootstrap = config["Kafka:BootstrapServers"];
         if (string.IsNullOrWhiteSpace(bootstrap)) return;
         using var consumer = new ConsumerBuilder<string, byte[]>(new ConsumerConfig
         { BootstrapServers = bootstrap, GroupId = "rental-pricing-v1-" + Environment.MachineName, EnableAutoCommit = false, AutoOffsetReset = AutoOffsetReset.Earliest }).Build();
         // Rehydrate before consumption. Request handling retains the packaged conservative table meanwhile.
-        while (!token.IsCancellationRequested)
+        while (!stoppingToken.IsCancellationRequested)
         {
-            try { foreach (var (topic, payload) in await RehydrateAsync(token)) Apply(topic, RiderEvent.Parser.ParseFrom(payload)); break; }
-            catch (Exception error) { log.LogWarning(error, "Pricing rehydration delayed"); await Task.Delay(2000, token); }
+            try { foreach (var (topic, payload) in await RehydrateAsync(stoppingToken)) Apply(topic, RiderEvent.Parser.ParseFrom(payload)); break; }
+            catch (Exception error) { LogRehydrationDelayed(log, error); await Task.Delay(2000, stoppingToken); }
         }
         consumer.Subscribe(["risk.scored", "pricing.updated"]);
         try
         {
-            while (!token.IsCancellationRequested)
+            while (!stoppingToken.IsCancellationRequested)
             {
                 ConsumeResult<string, byte[]>? message = null;
                 try
@@ -89,15 +90,15 @@ public sealed class PricingProjection(NpgsqlDataSource database, IConfiguration 
                     var value = RiderEvent.Parser.ParseFrom(message.Message.Value);
                     var id = message.Topic == "pricing.updated" ? "pricing" : "rider:" + value.RiderId;
                     // Read the persisted winner, including when another replica advanced it.
-                    var winner = await StoreAsync(id, message.Topic, message.Message.Value, value.OccurredAtMs, token);
+                    var winner = await StoreAsync(id, message.Topic, message.Message.Value, value.OccurredAtMs, stoppingToken);
                     Apply(winner.Topic, RiderEvent.Parser.ParseFrom(winner.Payload));
                     consumer.Commit(message);
                 }
-                catch (Exception error) when (!token.IsCancellationRequested)
+                catch (Exception error) when (!stoppingToken.IsCancellationRequested)
                 {
-                    log.LogWarning(error, "Risk/pricing projection delayed; last values retained");
+                    LogProjectionDelayed(log, error);
                     if (message is not null) consumer.Seek(message.TopicPartitionOffset);
-                    await Task.Delay(2000, token);
+                    await Task.Delay(2000, stoppingToken);
                 }
             }
         }
@@ -151,4 +152,10 @@ public sealed class PricingProjection(NpgsqlDataSource database, IConfiguration 
         if (topic == "pricing.updated") LocalPricing.Apply(JsonSerializer.Deserialize<PriceTable>(value.PricingJson)!, value.OccurredAtMs);
         else LocalPricing.ApplyScore(value.RiderId, value.RiskScore, value.OccurredAtMs);
     }
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Pricing rehydration delayed")]
+    private static partial void LogRehydrationDelayed(ILogger logger, Exception exception);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Risk/pricing projection delayed; last values retained")]
+    private static partial void LogProjectionDelayed(ILogger logger, Exception exception);
 }

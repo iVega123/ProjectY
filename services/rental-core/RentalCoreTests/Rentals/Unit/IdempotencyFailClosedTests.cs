@@ -23,7 +23,7 @@ public sealed class IdempotencyFailClosedTests
         var multiplexer = new Mock<IConnectionMultiplexer>();
         multiplexer
             .Setup(redis => redis.GetDatabase(It.IsAny<int>(), It.IsAny<object?>()))
-            .Throws(new RedisConnectionException(ConnectionFailureType.UnableToConnect, "redis unavailable"));
+            .Throws(new RedisConnectionException(ConnectionFailureType.UnableToConnect, CommandFlags.None, "redis unavailable", null, CommandStatus.Unknown));
         var handlerRan = false;
         var middleware = new RedisIdempotencyMiddleware(
             _ => { handlerRan = true; return Task.CompletedTask; },

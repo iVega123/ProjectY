@@ -14,7 +14,7 @@ public sealed class RegisteredEventSchemaTests
     {
         var handler = new RegistryHandler();
         using var client = new HttpClient(handler);
-        var schemas = new RegisteredEventSchema(client, "http://registry/apis/ccompat/v7",
+        using var schemas = new RegisteredEventSchema(client, "http://registry/apis/ccompat/v7",
             Path.Combine(AppContext.BaseDirectory, "event-contracts"));
         Assert.Equal(42, await schemas.ResolveAsync("rental.closed", default));
         handler.Available = false;

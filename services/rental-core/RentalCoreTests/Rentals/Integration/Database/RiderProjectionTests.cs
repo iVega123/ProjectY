@@ -23,7 +23,7 @@ public sealed class RiderProjectionTests(RentalCoreDatabase database)
             Name = name
         }.ToByteArray();
 
-    private RiderProjection Projection(NpgsqlDataSource dataSource) => new(
+    private static RiderProjection Projection(NpgsqlDataSource dataSource) => new(
         dataSource,
         new SqlInboxProcessor(dataSource, new InboxOptions(), TimeProvider.System),
         new ConfigurationBuilder().Build(),

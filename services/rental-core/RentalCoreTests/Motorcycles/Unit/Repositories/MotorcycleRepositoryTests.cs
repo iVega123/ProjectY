@@ -188,7 +188,7 @@ namespace MotoHubTests.Unit.Repositories
             var repository = new MotorcycleRepository(mockContext.Object);
 
             // Act & Assert
-            Assert.Throws<NullReferenceException>(() => repository.Add(null));
+            Assert.Throws<NullReferenceException>(() => repository.Add(null!));
         }
     }
 }

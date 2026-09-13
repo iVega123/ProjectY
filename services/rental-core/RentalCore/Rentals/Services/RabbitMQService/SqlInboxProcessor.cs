@@ -131,31 +131,31 @@ public sealed class SqlInboxProcessor(
 /// duplicata que ele evita -- então a varredura passa a ser explícita, com o
 /// mesmo período de retenção de antes.
 /// </summary>
-public sealed class InboxRetentionSweeper(
+public sealed partial class InboxRetentionSweeper(
     NpgsqlDataSource database,
     InboxOptions options,
     ILogger<InboxRetentionSweeper> log) : BackgroundService
 {
     public static readonly TimeSpan Interval = TimeSpan.FromHours(1);
 
-    protected override async Task ExecuteAsync(CancellationToken token)
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        while (!token.IsCancellationRequested)
+        while (!stoppingToken.IsCancellationRequested)
         {
             try
             {
-                var removed = await SweepAsync(database, options.RetentionPeriod, token);
+                var removed = await SweepAsync(database, options.RetentionPeriod, stoppingToken);
                 if (removed > 0)
                 {
-                    log.LogDebug("Removed {Count} expired inbox entries", removed);
+                    LogRemoved(log, removed);
                 }
             }
-            catch (Exception error) when (!token.IsCancellationRequested)
+            catch (Exception error) when (!stoppingToken.IsCancellationRequested)
             {
-                log.LogWarning(error, "Inbox retention sweep delayed; retrying on the next pass");
+                LogSweepDelayed(log, error);
             }
 
-            await Task.Delay(Interval, token);
+            await Task.Delay(Interval, stoppingToken);
         }
     }
 
@@ -170,4 +170,10 @@ public sealed class InboxRetentionSweeper(
         command.Parameters.AddWithValue("cutoff", DateTime.UtcNow - retention);
         return await command.ExecuteNonQueryAsync(token);
     }
+
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Removed {Count} expired inbox entries")]
+    private static partial void LogRemoved(ILogger logger, int count);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Inbox retention sweep delayed; retrying on the next pass")]
+    private static partial void LogSweepDelayed(ILogger logger, Exception exception);
 }
