@@ -102,7 +102,7 @@ if orchestrator == 'kubernetes':
 
         workload_names = [
             'api-gateway', 'identity', 'rental-core', 'media-guard', 'billing', 'risk-pricing', 'telemetry', 'console',
-            'cockroachdb', 'redis', 'rabbitmq', 'minio', 'kafka', 'cassandra', 'schema-registry',
+            'cockroachdb', 'redis', 'rate-limit-redis', 'rabbitmq', 'minio', 'kafka', 'cassandra', 'schema-registry',
             'cockroach-schema', 'kafka-topics', 'cassandra-schema', 'schema-contracts',
         ]
         network_policy_names = [
@@ -110,7 +110,7 @@ if orchestrator == 'kubernetes':
             'console-to-gateway', 'gateway-to-service-ingress', 'identity-to-owned-dependencies',
             'identity-to-media-guard', 'rental-core-to-owned-dependencies', 'billing-to-owned-dependencies',
             'risk-pricing-to-owned-dependencies', 'telemetry-to-owned-dependencies', 'telemetry-cluster', 'cockroachdb-owners',
-            'rabbitmq-owner', 'redis-owners', 'minio-owners', 'kafka-clients', 'cassandra-clients',
+            'rabbitmq-owner', 'redis-owners', 'rate-limit-redis-owner', 'minio-owners', 'kafka-clients', 'cassandra-clients',
             'schema-registry-clients', 'data-service-egress', 'setup-to-data',
         ]
         platform_objects = [
@@ -139,7 +139,7 @@ if orchestrator == 'kubernetes':
                 labels = ['platform'],
             )
 
-        for infrastructure_resource in ['cockroachdb', 'redis', 'kafka', 'cassandra', 'schema-registry']:
+        for infrastructure_resource in ['cockroachdb', 'redis', 'rate-limit-redis', 'kafka', 'cassandra', 'schema-registry']:
             k8s_resource(infrastructure_resource, resource_deps = ['projecty-platform'], labels = ['infra'])
         k8s_resource('rabbitmq', resource_deps = ['projecty-platform', 'rabbitmq-secrets'], labels = ['infra'])
         k8s_resource('minio', resource_deps = ['projecty-platform', 'minio-secrets'], labels = ['infra'])
@@ -201,7 +201,7 @@ if orchestrator == 'compose':
     configure_live_update('projecty/media-guard:dev', 'services/media-guard', ['services/media-guard/Cargo.toml', 'services/media-guard/Cargo.lock'], 'cd /workspace && cargo fetch --locked', 'cd /workspace && cargo build --locked')
     docker_build('projecty/identity:dev', '.', dockerfile = 'services/identity/Dockerfile', target = 'development')
 
-    infrastructure = ['toxiproxy', 'cockroachdb', 'redis', 'rabbitmq', 'minio']
+    infrastructure = ['toxiproxy', 'cockroachdb', 'redis', 'rate-limit-redis', 'rabbitmq', 'minio']
     observability = ['tempo', 'loki', 'otel-collector', 'prometheus', 'grafana']
     setup = ['cockroach-init']
     services = ['identity', 'rental-core', 'media-guard']

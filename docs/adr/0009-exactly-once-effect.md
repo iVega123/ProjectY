@@ -178,8 +178,12 @@ replayed; a different fingerprint returns `422`; concurrent ownership returns
 Once downstream execution starts, an exception is retained as an `unknown`
 outcome rather than releasing the key. That chooses duplicate prevention over
 automatic retry when the database may already have committed. Redis uses AOF
-with `appendfsync always` in both Compose stacks so a claim is fsynced before it
-is acknowledged. The memory-limited self-hosted overlay uses `noeviction`:
+with `appendfsync everysec`: a claim is fsynced within one second of being
+acknowledged, not before. A Redis crash can lose the last second of claims, and
+a retry of one of those requests can run its mutation again.
+[ADR 0026](0026-redis-durability-follows-the-consumer.md) accepted that window
+in place of the earlier `appendfsync always`, once the rate limiter moved to its
+own Redis. The memory-limited self-hosted overlay uses `noeviction`:
 when Redis is full, protected writes fail closed instead of silently evicting
 idempotency history before its TTL. This trades write availability for the
 stated duplicate-prevention guarantee. Redis is still not atomic with a service

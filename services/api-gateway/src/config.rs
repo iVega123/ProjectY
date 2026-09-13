@@ -180,7 +180,14 @@ impl Config {
                 )?),
             },
             rate_limit: RateLimitConfig {
-                redis_url: SensitiveString::new(required_value("GATEWAY_REDIS_URL")?),
+                // O limitador tem Redis próprio, sem persistência, quando um é
+                // configurado (#193, ADR 0026): um balde perdido num restart se
+                // enche sozinho, e o limitador já falha aberto. Sem ele, divide o
+                // GATEWAY_REDIS_URL, como antes -- é o caso do ElastiCache.
+                redis_url: SensitiveString::new(rate_limit_redis_url(
+                    env::var("GATEWAY_RATE_LIMIT_REDIS_URL").ok(),
+                    || required_value("GATEWAY_REDIS_URL"),
+                )?),
                 operation_timeout: Duration::from_millis(positive_u64_from_env(
                     "GATEWAY_RATE_LIMIT_REDIS_TIMEOUT_MS",
                     100,
@@ -295,6 +302,16 @@ fn required_value(name: &str) -> Result<String, String> {
         Err(format!("{name} must not be empty"))
     } else {
         Ok(value)
+    }
+}
+
+fn rate_limit_redis_url(
+    dedicated: Option<String>,
+    shared: impl FnOnce() -> Result<String, String>,
+) -> Result<String, String> {
+    match dedicated {
+        Some(value) if !value.trim().is_empty() => Ok(value),
+        _ => shared(),
     }
 }
 
@@ -534,5 +551,24 @@ mod tests {
         assert_eq!(format!("{secret:?}"), "<redacted>");
         let redis_url = SensitiveString::new("redis://:password@redis:6379/".to_owned());
         assert_eq!(format!("{redis_url:?}"), "<redacted>");
+    }
+
+    /// O limitador usa o Redis próprio quando existe, e o compartilhado quando
+    /// não -- um valor vazio conta como ausente, e não como URL.
+    #[test]
+    fn the_rate_limiter_uses_its_own_redis_when_one_is_configured() {
+        let shared = || Ok::<_, String>("redis://redis:6379/".to_owned());
+        assert_eq!(
+            rate_limit_redis_url(Some("redis://rate-limit-redis:6379/".to_owned()), shared),
+            Ok("redis://rate-limit-redis:6379/".to_owned())
+        );
+        assert_eq!(
+            rate_limit_redis_url(None, shared),
+            Ok("redis://redis:6379/".to_owned())
+        );
+        assert_eq!(
+            rate_limit_redis_url(Some("  ".to_owned()), shared),
+            Ok("redis://redis:6379/".to_owned())
+        );
     }
 }

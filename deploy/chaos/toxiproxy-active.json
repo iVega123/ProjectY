@@ -6,6 +6,12 @@
         "enabled":  true
     },
     {
+        "name":  "rate-limit-redis",
+        "listen":  "0.0.0.0:6380",
+        "upstream":  "rate-limit-redis:6379",
+        "enabled":  true
+    },
+    {
         "name":  "rabbitmq",
         "listen":  "0.0.0.0:5672",
         "upstream":  "rabbitmq:5672",

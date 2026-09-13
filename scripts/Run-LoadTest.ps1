@@ -1,7 +1,7 @@
 #requires -Version 5.1
 [CmdletBinding()]
 param(
-    [ValidateSet('baseline','slow-db','db-down','rabbit-down','redis-down','kafka-down','bad-network')][string]$Mode = 'baseline',
+    [ValidateSet('baseline','slow-db','db-down','rabbit-down','redis-down','rate-limit-redis-down','kafka-down','bad-network')][string]$Mode = 'baseline',
     [ValidateRange(1, 20)][int]$Vus = 5,
     [string]$Duration = '30s',
     [switch]$KeepStack,
@@ -103,6 +103,8 @@ try {
     Compose cp load/fixtures/seed-rental-core.sql cockroachdb:/tmp/seed-rental-core.sql
     Compose exec -T cockroachdb cockroach sql --insecure --database=projecty --file /tmp/seed-rental-core.sql
     Compose exec -T redis redis-cli FLUSHDB
+    # The token buckets live apart since #193; a run starts with them full too.
+    Compose exec -T rate-limit-redis redis-cli FLUSHDB
     & "$PSScriptRoot/Invoke-Chaos.ps1" reset -Url 'http://127.0.0.1:18474'
     if ($PrepareOnly) { $exitCode = 0; return }
     $metadata = @{

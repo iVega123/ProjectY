@@ -266,7 +266,7 @@ It is not visible in normal use, which is what makes it worth writing down:
 | Kafka consumers | fine | **impossible** — consumer state is in process memory ([#70](https://github.com/iVega123/ProjectY/issues/70)) |
 | `telemetry` | fine | a broadcast on one pod never reaches clients on another — the PubSub adapter is node-local |
 | CockroachDB | one node, `--insecure` | connection budget per pod becomes a real limit |
-| Redis | one instance, `appendfsync always` | the rate limiter pays fsync it does not need ([#193](https://github.com/iVega123/ProjectY/issues/193)) |
+| Redis | a shared instance at `appendfsync everysec`, and the rate limiter in one of its own without persistence ([#193](https://github.com/iVega123/ProjectY/issues/193), ADR 0026) | fine — every gateway replica shares the one bucket store |
 
 The relay line is the sharpest: the benchmark creates ~7.3 rentals/s against a
 `rental-core` relay that publishes **1/s**. The outbox already grows seven times

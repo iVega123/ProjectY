@@ -53,6 +53,7 @@ powershell -File scripts/Run-LoadTest.ps1 -Mode slow-db -KeepStack -NoBuild
 powershell -File scripts/Run-LoadTest.ps1 -Mode db-down -KeepStack -NoBuild
 powershell -File scripts/Run-LoadTest.ps1 -Mode rabbit-down -KeepStack -NoBuild
 powershell -File scripts/Run-LoadTest.ps1 -Mode redis-down -KeepStack -NoBuild
+powershell -File scripts/Run-LoadTest.ps1 -Mode rate-limit-redis-down -KeepStack -NoBuild
 powershell -File scripts/Run-LoadTest.ps1 -Mode bad-network -KeepStack -NoBuild
 powershell -File scripts/Run-LoadTest.ps1 -Mode kafka-down -Polyglot -KeepStack -NoBuild
 ```

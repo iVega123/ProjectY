@@ -85,7 +85,9 @@ impl fmt::Display for BuildError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Http(error) => write!(formatter, "could not build HTTP client: {error}"),
-            Self::Redis => formatter.write_str("GATEWAY_REDIS_URL is invalid"),
+            Self::Redis => {
+                formatter.write_str("GATEWAY_REDIS_URL or GATEWAY_RATE_LIMIT_REDIS_URL is invalid")
+            }
         }
     }
 }

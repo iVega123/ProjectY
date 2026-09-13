@@ -17,6 +17,7 @@ services:
   api-gateway:
     environment:
       GATEWAY_REDIS_URL: redis://toxiproxy:6379/
+      GATEWAY_RATE_LIMIT_REDIS_URL: redis://toxiproxy:6380/
     depends_on:
       toxiproxy:
         condition: service_healthy
