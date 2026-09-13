@@ -151,7 +151,7 @@ namespace MotoHubTests.Unit.Controllers
             // Arrange
             var motorcycleServiceMock = new Mock<IMotorcycleService>();
             var mockLogger = new Mock<ILogger<MotorcyclesController>>();
-            motorcycleServiceMock.Setup(service => service.GetMotorcycleByLicensePlateAsync("XYZ789")).ReturnsAsync((MotorcycleDTO)null);
+            motorcycleServiceMock.Setup(service => service.GetMotorcycleByLicensePlateAsync("XYZ789")).ReturnsAsync((MotorcycleDTO?)null);
             var controller = new MotorcyclesController(motorcycleServiceMock.Object, mockLogger.Object);
 
             // Act

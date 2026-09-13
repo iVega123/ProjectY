@@ -83,6 +83,8 @@ public sealed class RentalCoreDatabase : IAsyncLifetime
 }
 
 [CollectionDefinition(Name)]
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Naming", "CA1711",
+    Justification = "xUnit names a collection definition after the collection it defines.")]
 public sealed class RentalCoreDatabaseCollection : ICollectionFixture<RentalCoreDatabase>
 {
     public const string Name = "rental-core database";

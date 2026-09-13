@@ -25,7 +25,7 @@ jobs:
       # Docker, então ele roda de verdade e não como mock.
       - run: gradle --no-daemon ktlintCheck test
       - if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: test-results-billing
           path: services/billing/build/reports/tests/test

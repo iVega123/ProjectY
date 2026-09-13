@@ -255,6 +255,7 @@ public sealed class KafkaRentalEventTransport : IRentalEventTransport, IDisposab
     public void Dispose()
     {
         producer.Dispose();
+        schemas.Dispose();
         registryClient.Dispose();
     }
 }

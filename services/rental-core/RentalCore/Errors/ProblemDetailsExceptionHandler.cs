@@ -26,38 +26,38 @@ namespace RentalCore.Errors;
 /// 3. Qualquer outra coisa -- 500 com uma frase fixa. O motivo vai para o log,
 ///    junto do mesmo <c>traceId</c> que a resposta carrega.
 /// </summary>
-public sealed class ProblemDetailsExceptionHandler(
+public sealed partial class ProblemDetailsExceptionHandler(
     ILogger<ProblemDetailsExceptionHandler> logger) : IExceptionHandler
 {
     public async ValueTask<bool> TryHandleAsync(
-        HttpContext context,
+        HttpContext httpContext,
         Exception exception,
         CancellationToken cancellationToken)
     {
-        var problem = Map(context, exception);
+        var problem = Map(httpContext, exception);
 
         // O detalhe fica aqui, e só aqui. `traceId` é o que liga esta linha à
         // resposta que o cliente tem na mão -- é o que torna "me diga o
         // identificador" uma pergunta útil no suporte.
-        logger.Log(
+        LogRequestFailed(
+            logger,
             problem.Status >= 500 ? LogLevel.Error : LogLevel.Warning,
             exception,
-            "Request failed with {Status} {ProblemType} (traceId {TraceId})",
             problem.Status,
             problem.Type,
             problem.Extensions["traceId"]);
 
-        context.Response.StatusCode = problem.Status ?? StatusCodes.Status500InternalServerError;
+        httpContext.Response.StatusCode = problem.Status ?? StatusCodes.Status500InternalServerError;
         // O tipo de conteúdo vai no WriteAsJsonAsync, e não numa atribuição
         // antes: ele sobrescreve o cabeçalho com application/json ao escrever,
         // e a resposta sairia como JSON comum -- que é a diferença entre
         // "isto é um erro descrito" e "isto é um objeto qualquer".
-        await context.Response.WriteAsJsonAsync(
+        await httpContext.Response.WriteAsJsonAsync(
             problem, options: null, contentType: "application/problem+json", cancellationToken);
         return true;
     }
 
-    private ProblemDetails Map(HttpContext context, Exception exception)
+    private static ProblemDetails Map(HttpContext context, Exception exception)
     {
         if (exception is ClientProblemException client)
         {
@@ -94,4 +94,8 @@ public sealed class ProblemDetailsExceptionHandler(
             // quem depura está no log, endereçada pelo traceId.
             "The request could not be completed. Quote the traceId when reporting it.");
     }
+
+    [LoggerMessage(Message = "Request failed with {Status} {ProblemType} (traceId {TraceId})")]
+    private static partial void LogRequestFailed(
+        ILogger logger, LogLevel level, Exception exception, int? status, string? problemType, object? traceId);
 }

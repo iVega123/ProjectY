@@ -10,7 +10,7 @@ using System.Text.Json;
 
 namespace ProjectY.Shared.Idempotency;
 
-public sealed class RedisIdempotencyMiddleware
+public sealed partial class RedisIdempotencyMiddleware
 {
     private static readonly object RetryBeforeSideEffects = new();
 
@@ -97,7 +97,7 @@ public sealed class RedisIdempotencyMiddleware
         }
         catch (IOException exception)
         {
-            _logger.LogWarning(exception, "Could not read request body for idempotency fingerprinting.");
+            LogBodyUnreadable(_logger, exception);
             await WriteProblemAsync(
                 context,
                 StatusCodes.Status400BadRequest,
@@ -242,7 +242,7 @@ public sealed class RedisIdempotencyMiddleware
         await responseBuffer.CopyToAsync(originalBody, context.RequestAborted);
     }
 
-    private async Task HandleExistingAsync(
+    private static async Task HandleExistingAsync(
         HttpContext context,
         IdempotencyRecord? existing,
         string fingerprint)
@@ -377,7 +377,7 @@ public sealed class RedisIdempotencyMiddleware
         }
         catch (Exception exception) when (exception is RedisException or TimeoutException)
         {
-            _logger.LogCritical(exception, "Could not store unknown idempotency outcome {RedisKey}.", key);
+            LogUnknownOutcomeNotStored(_logger, exception, key);
             await TryExtendClaimAsync(database, key, pendingJson);
         }
     }
@@ -393,13 +393,13 @@ public sealed class RedisIdempotencyMiddleware
         }
         catch (Exception exception) when (exception is RedisException or TimeoutException)
         {
-            _logger.LogCritical(exception, "Could not preserve completed idempotency claim {RedisKey}.", key);
+            LogClaimNotPreserved(_logger, exception, key);
         }
     }
 
     private async Task WriteRedisUnavailableAsync(HttpContext context, Exception exception)
     {
-        _logger.LogError(exception, "Redis is unavailable for an idempotent write request.");
+        LogRedisUnavailable(_logger, exception);
         context.Response.Clear();
         context.Response.Headers.RetryAfter = "1";
         await WriteProblemAsync(
@@ -411,7 +411,7 @@ public sealed class RedisIdempotencyMiddleware
 
     private async Task WriteOutcomeUnknownAsync(HttpContext context, Exception exception)
     {
-        _logger.LogCritical(exception, "An executed write could not be recorded by the idempotency service.");
+        LogOutcomeNotRecorded(_logger, exception);
         context.Response.Clear();
         await WriteUnknownOutcomeProblemAsync(context);
     }
@@ -497,6 +497,21 @@ public sealed class RedisIdempotencyMiddleware
             detail
         });
     }
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Could not read request body for idempotency fingerprinting.")]
+    private static partial void LogBodyUnreadable(ILogger logger, Exception exception);
+
+    [LoggerMessage(Level = LogLevel.Critical, Message = "Could not store unknown idempotency outcome {RedisKey}.")]
+    private static partial void LogUnknownOutcomeNotStored(ILogger logger, Exception exception, RedisKey redisKey);
+
+    [LoggerMessage(Level = LogLevel.Critical, Message = "Could not preserve completed idempotency claim {RedisKey}.")]
+    private static partial void LogClaimNotPreserved(ILogger logger, Exception exception, RedisKey redisKey);
+
+    [LoggerMessage(Level = LogLevel.Error, Message = "Redis is unavailable for an idempotent write request.")]
+    private static partial void LogRedisUnavailable(ILogger logger, Exception exception);
+
+    [LoggerMessage(Level = LogLevel.Critical, Message = "An executed write could not be recorded by the idempotency service.")]
+    private static partial void LogOutcomeNotRecorded(ILogger logger, Exception exception);
 
     private sealed class IdempotencyRecord
     {

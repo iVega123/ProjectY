@@ -1,4 +1,4 @@
-FROM python:3.13-alpine AS development
+FROM python:3.14-alpine AS development
 WORKDIR /workspace
 RUN apk upgrade --no-cache && apk add --no-cache tesseract-ocr tesseract-ocr-data-eng libstdc++ openssl zlib zstd-libs lz4-libs cyrus-sasl
 COPY services/risk-pricing/requirements.lock ./

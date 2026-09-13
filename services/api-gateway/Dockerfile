@@ -1,4 +1,4 @@
-FROM lukemathwalker/cargo-chef:0.1.78-rust-1.98.0-trixie AS chef
+FROM lukemathwalker/cargo-chef:0.1.78-rust-1.98.1-trixie AS chef
 WORKDIR /workspace
 RUN apt-get update \
     && apt-get install --yes --no-install-recommends musl-tools \

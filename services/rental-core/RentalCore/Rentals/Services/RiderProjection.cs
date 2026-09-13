@@ -28,7 +28,7 @@ public sealed class RiderProjectionPendingException(string riderId)
 /// created without calling identity, and what lets rental.closed carry a name this
 /// service does not own.
 /// </summary>
-public sealed class RiderProjection(
+public sealed partial class RiderProjection(
     NpgsqlDataSource database,
     SqlInboxProcessor inbox,
     IConfiguration config,
@@ -37,7 +37,7 @@ public sealed class RiderProjection(
     public const string ConsumerName = "rider-projection";
     public const string Topic = "rider.verified.v2";
 
-    protected override async Task ExecuteAsync(CancellationToken token)
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         var bootstrap = config["Kafka:BootstrapServers"];
         if (string.IsNullOrWhiteSpace(bootstrap)) return;
@@ -51,21 +51,21 @@ public sealed class RiderProjection(
         consumer.Subscribe(Topic);
         try
         {
-            while (!token.IsCancellationRequested)
+            while (!stoppingToken.IsCancellationRequested)
             {
                 ConsumeResult<string, byte[]>? message = null;
                 try
                 {
                     message = consumer.Consume(TimeSpan.FromSeconds(1));
                     if (message is null) continue;
-                    await HandleAsync(message.Message.Value, token);
+                    await HandleAsync(message.Message.Value, stoppingToken);
                     consumer.Commit(message);
                 }
-                catch (Exception error) when (!token.IsCancellationRequested)
+                catch (Exception error) when (!stoppingToken.IsCancellationRequested)
                 {
-                    log.LogWarning(error, "Rider projection delayed; last values retained");
+                    LogProjectionDelayed(log, error);
                     if (message is not null) consumer.Seek(message.TopicPartitionOffset);
-                    await Task.Delay(2000, token);
+                    await Task.Delay(2000, stoppingToken);
                 }
             }
         }
@@ -104,4 +104,7 @@ public sealed class RiderProjection(
             await command.ExecuteNonQueryAsync(inner);
         }, token);
     }
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Rider projection delayed; last values retained")]
+    private static partial void LogProjectionDelayed(ILogger logger, Exception exception);
 }

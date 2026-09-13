@@ -9,6 +9,8 @@ namespace RentalOperationsTests.Unit.Security;
 
 public sealed class GatewayIdentityPropagationHandlerTests
 {
+    private static readonly string[] Plates = ["ABC1234"];
+
     [Fact]
     public async Task OutgoingServiceCall_CarriesSignedCurrentIdentity()
     {
@@ -81,7 +83,7 @@ public sealed class GatewayIdentityPropagationHandlerTests
 
         var response = await client.PostAsync(
             "http://moto-hub/api/Motorcycles/historical-references",
-            JsonContent.Create(new { LicensePlates = new[] { "ABC1234" } }));
+            JsonContent.Create(new { LicensePlates = Plates }));
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.NotNull(capture.Request);

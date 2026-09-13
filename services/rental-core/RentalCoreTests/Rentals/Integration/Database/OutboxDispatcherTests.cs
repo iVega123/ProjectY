@@ -255,7 +255,7 @@ public sealed class OutboxDispatcherTests(RentalCoreDatabase database)
         public Action? OnPublish { get; init; }
         public Func<PendingRentalEvent, Task>? BeforePublish { get; init; }
         public ConcurrentQueue<PendingRentalEvent> PublishedQueue { get; } = new();
-        public IReadOnlyList<PendingRentalEvent> Published => PublishedQueue.ToList();
+        public List<PendingRentalEvent> Published => PublishedQueue.ToList();
 
         public async Task PublishAsync(PendingRentalEvent pending, CancellationToken token)
         {
