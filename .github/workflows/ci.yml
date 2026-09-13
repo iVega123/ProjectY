@@ -55,6 +55,7 @@ jobs:
       has_polyglot_changes: ${{ steps.filter.outputs.polyglot }}
       has_observability_changes: ${{ steps.filter.outputs.observability }}
       has_kubernetes_changes: ${{ steps.filter.outputs.kubernetes }}
+      has_terraform_changes: ${{ steps.filter.outputs.terraform }}
       image_matrix: ${{ steps.matrix.outputs.image_matrix }}
       has_image_changes: ${{ steps.matrix.outputs.has_image_changes }}
     steps:
@@ -201,6 +202,11 @@ jobs:
               - 'scripts/Test-ExternalSecrets.ps1'
               - 'scripts/Test-IngressTls.ps1'
               - 'Tiltfile'
+              - '.github/workflows/ci.yml'
+            terraform:
+              - 'infra/**'
+              - '.terraform-version'
+              - '.tflint.hcl'
               - '.github/workflows/ci.yml'
             polyglot:
               - 'services/media-guard/**'
@@ -783,6 +789,76 @@ jobs:
         shell: pwsh
         run: ./scripts/kind/Remove-ProjectYCluster.ps1
 
+  terraform:
+    name: Terraform / fmt, validate and policy
+    needs: changes
+    if: needs.changes.outputs.has_terraform_changes == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: 1.16.2
+          terraform_wrapper: false
+
+      - name: Verify canonical formatting
+        run: terraform fmt -check -recursive infra
+
+      - name: Verify state-layer blast-radius boundaries
+        shell: pwsh
+        run: ./scripts/Test-TerraformLayers.ps1
+
+      - name: Verify per-service AWS workload identity
+        shell: pwsh
+        run: ./scripts/Test-AwsIdentityPolicies.ps1
+
+      - name: Verify the honest local fidelity boundary
+        shell: pwsh
+        run: ./scripts/Test-LocalTerraform.ps1
+
+      - name: Verify cost and recovery profile promises
+        shell: pwsh
+        run: ./scripts/Test-CostProfiles.ps1
+
+      - name: Validate every Terraform root without contacting a backend
+        run: |
+          for root in infra/tests/aws-modules infra/bootstrap infra/envs/aws-low infra/envs/aws-mid/* infra/envs/aws-high infra/envs/local; do
+            [[ -d "$root" ]] || continue
+            terraform -chdir="$root" init -backend=false -input=false
+            terraform -chdir="$root" validate -no-color
+          done
+
+      - name: Plan the local composition with mocked providers
+        run: terraform -chdir=infra/envs/local test -no-color
+
+      - name: Plan paid profiles with mocked providers
+        run: |
+          terraform -chdir=infra/envs/aws-low test -no-color
+          for layer in 00-network 10-data 20-platform 30-workloads; do
+            terraform -chdir="infra/envs/aws-mid/$layer" test -no-color
+          done
+          terraform -chdir=infra/envs/aws-high test -no-color
+
+      - name: Set up TFLint
+        uses: terraform-linters/setup-tflint@v6
+        with:
+          tflint_version: v0.64.0
+          cache: true
+
+      - name: Lint every Terraform root and module
+        run: tflint --chdir=infra --recursive --format=compact
+
+      - name: Scan Terraform policy
+        uses: bridgecrewio/checkov-action@v12
+        with:
+          directory: infra
+          framework: terraform
+          quiet: true
+          soft_fail: false
+
   required:
     name: Required
     needs:
@@ -797,6 +873,7 @@ jobs:
       - secrets
       - kubernetes-manifests
       - kubernetes-security
+      - terraform
       - media-tests
       - telemetry-tests
       - risk-tests
@@ -818,6 +895,7 @@ jobs:
           SECRETS_RESULT: ${{ needs.secrets.result }}
           KUBERNETES_RESULT: ${{ needs.kubernetes-manifests.result }}
           KUBERNETES_SECURITY_RESULT: ${{ needs.kubernetes-security.result }}
+          TERRAFORM_RESULT: ${{ needs.terraform.result }}
           MEDIA_RESULT: ${{ needs.media-tests.result }}
           TELEMETRY_RESULT: ${{ needs.telemetry-tests.result }}
           RISK_RESULT: ${{ needs.risk-tests.result }}
@@ -837,6 +915,7 @@ jobs:
           [[ "$SECRETS_RESULT" == "success" ]]
           [[ "$KUBERNETES_RESULT" == "success" ]]
           [[ "$KUBERNETES_SECURITY_RESULT" == "success" || "$KUBERNETES_SECURITY_RESULT" == "skipped" ]]
+          [[ "$TERRAFORM_RESULT" == "success" || "$TERRAFORM_RESULT" == "skipped" ]]
           for result in "$MEDIA_RESULT" "$TELEMETRY_RESULT" "$RISK_RESULT" "$CONSOLE_RESULT" "$BILLING_RESULT"; do
             [[ "$result" == "success" || "$result" == "skipped" ]]
           done
