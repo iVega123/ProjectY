@@ -41,7 +41,7 @@ jobs:
           terraform_wrapper: false
 
       - name: Exchange GitHub OIDC token for the read-only plan role
-        uses: aws-actions/configure-aws-credentials@v5
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ vars.AWS_TERRAFORM_PLAN_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
@@ -94,7 +94,7 @@ jobs:
           terraform_wrapper: false
 
       - name: Exchange GitHub OIDC token for the apply role
-        uses: aws-actions/configure-aws-credentials@v5
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ vars.AWS_TERRAFORM_APPLY_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
