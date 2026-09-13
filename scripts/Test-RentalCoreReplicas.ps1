@@ -95,6 +95,7 @@ try {
     $result | ConvertTo-Json -Depth 5 | Write-Host
 
     $failures = @()
+    if ($k6Exit -ne 0) { $failures += "k6 exited with $k6Exit." }
     if ($eventsWritten -le 0) { $failures += 'No rental events were written during the outage.' }
     if ($pending -ne 0) { $failures += "Outbox still holds $pending rental events." }
     if (@($perReplica | Where-Object { $_.published -eq 0 }).Count) { $failures += 'A replica published nothing; the replicas did not compete.' }
