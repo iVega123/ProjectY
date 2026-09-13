@@ -1,4 +1,4 @@
-using Microsoft.OpenApi.Models;
+using Microsoft.OpenApi;
 using Swashbuckle.AspNetCore.SwaggerGen;
 
 namespace ProjectY.Shared.Idempotency;
@@ -20,8 +20,10 @@ public sealed class IdempotencyKeyOperationFilter : IOperationFilter
             In = ParameterLocation.Header,
             Required = false,
             Description = "Makes a state-changing request replay-safe for 24 hours. Reusing the key with a different request returns 422.",
-            Schema = new OpenApiSchema { Type = "string", MaxLength = 200 }
+            Schema = new OpenApiSchema { Type = JsonSchemaType.String, MaxLength = 200 }
         });
+        // Responses is declared nullable in OpenAPI.NET 2, like Parameters.
+        operation.Responses ??= new OpenApiResponses();
         operation.Responses.TryAdd("409", new OpenApiResponse
         {
             Description = "Another request with this idempotency key is still running."
