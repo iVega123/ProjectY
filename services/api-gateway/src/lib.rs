@@ -2306,7 +2306,9 @@ GET
 /api/riders?ids=a,b
 projecty.identity"
         );
-        let mut mac = Hmac::<Sha256>::new_from_slice(&[b'x'; 32]).unwrap();
+        let test_hmac_key =
+            std::env::var("TEST_HMAC_KEY").unwrap_or_else(|_| "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx".to_string());
+        let mut mac = Hmac::<Sha256>::new_from_slice(test_hmac_key.as_bytes()).unwrap();
         mac.update(canonical.as_bytes());
         mac.verify_slice(&URL_SAFE_NO_PAD.decode(signature).unwrap())
             .unwrap();
