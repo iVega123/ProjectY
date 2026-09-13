@@ -125,18 +125,23 @@ class ExactlyOnceTest {
             rental.endedAtMs,
         )
 
-    private class OutboxRow(val key: String, val topic: String, val payload: ByteArray)
+    private class OutboxRow(
+        val key: String,
+        val topic: String,
+        val payload: ByteArray,
+    )
 
     private fun outboxRow(rentalId: String): OutboxRow? =
         query { connection ->
-            connection.prepareStatement(
-                "SELECT aggregate_id, topic, payload FROM outbox WHERE aggregate_type = 'invoice' AND aggregate_id = ?",
-            ).use { statement ->
-                statement.setString(1, rentalId)
-                statement.executeQuery().use { rows ->
-                    if (rows.next()) OutboxRow(rows.getString(1), rows.getString(2), rows.getBytes(3)) else null
+            connection
+                .prepareStatement(
+                    "SELECT aggregate_id, topic, payload FROM outbox WHERE aggregate_type = 'invoice' AND aggregate_id = ?",
+                ).use { statement ->
+                    statement.setString(1, rentalId)
+                    statement.executeQuery().use { rows ->
+                        if (rows.next()) OutboxRow(rows.getString(1), rows.getString(2), rows.getBytes(3)) else null
+                    }
                 }
-            }
         }
 
     private fun invoiceCount(rentalId: String) =

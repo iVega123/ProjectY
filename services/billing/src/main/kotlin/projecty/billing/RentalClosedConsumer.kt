@@ -75,7 +75,12 @@ class RentalClosedConsumer(
         }
 
     private fun handle(record: ConsumerRecord<String, ByteArray>) {
-        val traceParent = record.headers().lastHeader("traceparent")?.value()?.decodeToString()
+        val traceParent =
+            record
+                .headers()
+                .lastHeader("traceparent")
+                ?.value()
+                ?.decodeToString()
         val rental =
             try {
                 ClosedRental.from(RentalEvent.parseFrom(record.value()), traceParent)

@@ -49,7 +49,10 @@ class GatewayIdentity(
      * discordarem sobre quem é administrador seria pior do que qualquer das duas
      * regras isolada.
      */
-    data class Caller(val subject: String, val roles: List<String>) {
+    data class Caller(
+        val subject: String,
+        val roles: List<String>,
+    ) {
         val isAdmin: Boolean get() = roles.any { it.equals(ADMIN_ROLE, ignoreCase = true) }
     }
 

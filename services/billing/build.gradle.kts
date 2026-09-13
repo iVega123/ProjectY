@@ -1,7 +1,7 @@
 plugins {
-    kotlin("jvm") version "2.1.20"
-    id("com.google.protobuf") version "0.9.4"
-    id("org.jlleitschuh.gradle.ktlint") version "12.1.2"
+    kotlin("jvm") version "2.4.10"
+    id("com.google.protobuf") version "0.10.0"
+    id("org.jlleitschuh.gradle.ktlint") version "14.2.0"
     application
 }
 
@@ -29,7 +29,7 @@ sourceSets {
 // Só o gerador Java, que é o padrão do plugin -- declará-lo explicitamente
 // duplica o builtin e o build recusa.
 protobuf {
-    protoc { artifact = "com.google.protobuf:protoc:4.29.3" }
+    protoc { artifact = "com.google.protobuf:protoc:4.36.1" }
 }
 
 // As classes geradas não são escritas à mão e não têm por que passar pelo
@@ -39,18 +39,18 @@ ktlint {
 }
 
 dependencies {
-    implementation("org.apache.kafka:kafka-clients:3.9.1")
-    implementation("com.google.protobuf:protobuf-java:4.29.3")
-    implementation("org.postgresql:postgresql:42.7.5")
+    implementation("org.apache.kafka:kafka-clients:4.3.1")
+    implementation("com.google.protobuf:protobuf-java:4.36.1")
+    implementation("org.postgresql:postgresql:42.7.13")
     implementation("com.zaxxer:HikariCP:7.1.0")
-    implementation("com.fasterxml.jackson.core:jackson-databind:2.18.2")
-    implementation("org.slf4j:slf4j-api:2.0.16")
-    runtimeOnly("ch.qos.logback:logback-classic:1.5.16")
+    implementation("com.fasterxml.jackson.core:jackson-databind:2.22.2")
+    implementation("org.slf4j:slf4j-api:2.0.19")
+    runtimeOnly("ch.qos.logback:logback-classic:1.6.3")
 
     testImplementation(kotlin("test"))
-    testImplementation("org.junit.jupiter:junit-jupiter:5.11.4")
-    testImplementation("org.testcontainers:cockroachdb:1.20.4")
-    testImplementation("org.testcontainers:junit-jupiter:1.20.4")
+    testImplementation("org.junit.jupiter:junit-jupiter:6.1.3")
+    testImplementation("org.testcontainers:cockroachdb:1.21.4")
+    testImplementation("org.testcontainers:junit-jupiter:1.21.4")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 
