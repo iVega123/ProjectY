@@ -48,7 +48,7 @@ dependencies {
     runtimeOnly("ch.qos.logback:logback-classic:1.5.16")
 
     testImplementation(kotlin("test"))
-    testImplementation("org.junit.jupiter:junit-jupiter:5.11.4")
+    testImplementation("org.junit.jupiter:junit-jupiter:6.1.3")
     testImplementation("org.testcontainers:cockroachdb:1.20.4")
     testImplementation("org.testcontainers:junit-jupiter:1.20.4")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
