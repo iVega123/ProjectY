@@ -59,10 +59,10 @@ class InvoiceRelay(
                         null
                     }
                 pass?.failure?.let { log.warn("Kafka relay delayed; invoice events retained", it) }
-                // Um lote cheio quer dizer que pode haver mais, e a próxima passada
-                // vem já. Esperar depois de toda passada limitava a relay a um lote
-                // por intervalo.
-                if (pass == null || pass.failure != null || pass.claimed < OutboxDispatcher.BATCH_SIZE) {
+                // Qualquer passada que reivindicou algo pode ter liberado mais: publicar
+                // a cabeça de um agregado libera a linha seguinte dele. Só o outbox vazio
+                // ou uma falha esperam o intervalo.
+                if (pass == null || pass.failure != null || pass.claimed == 0) {
                     Thread.sleep(2_000)
                 }
             }

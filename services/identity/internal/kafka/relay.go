@@ -112,9 +112,10 @@ func (r *Relay) Close() {
 
 // Run esvazia o outbox até o contexto acabar.
 //
-// Drena enquanto as passadas vêm cheias e só espera quando o outbox esvazia ou
-// o broker falha. Esperar depois de toda passada é o que limitava uma relay a
-// um lote por intervalo.
+// Segue enquanto a passada reivindica alguma linha e só espera quando o outbox
+// esvazia ou o broker falha. Uma passada parcial também deixa trabalho: publicar
+// a cabeça de um piloto é o que libera o fato seguinte dele, e esperar ali
+// drenaria o histórico de um piloto um fato por intervalo.
 func (r *Relay) Run(ctx context.Context) {
 	for {
 		pass, err := r.DispatchOnce(ctx)
@@ -123,7 +124,7 @@ func (r *Relay) Run(ctx context.Context) {
 		}
 		if err != nil {
 			r.log.Warn("relay adiada; os fatos do piloto ficam retidos", slog.Any("error", err))
-		} else if pass.Claimed == BatchSize {
+		} else if pass.Claimed > 0 {
 			continue
 		}
 		select {

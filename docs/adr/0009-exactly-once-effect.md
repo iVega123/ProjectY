@@ -130,8 +130,11 @@ languages and one contract:
   pass at once and count a Kafka degradation; a relay stopped mid-send leaves the
   unacknowledged rows to the lease, as a crash would. Nothing in a batch waits
   behind another send, so no row needs its lease renewed mid-batch.
-- **Drain until empty.** After a full batch the next pass starts immediately; a
-  relay waits only when the outbox is empty or the broker failed.
+- **Drain until empty.** After any pass that claimed rows the next pass starts
+  immediately; a relay waits only when a pass finds nothing or the broker failed.
+  A partial batch is not a drained outbox: publishing an aggregate's head is what
+  makes its next row claimable, so waiting there would drain one aggregate's
+  history one event per polling interval.
 
 **Throughput floor: two relays against one database node drain at least 500
 events/s** with a transport that costs nothing, which isolates what the relay
