@@ -5,7 +5,6 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using RentalOperations.Repository;
-using RentalOperations.Services;
 
 namespace RentalOperationsTests.Integration;
 
@@ -40,14 +39,11 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>
             services.RemoveAll<IRentalRepository>();
             services.RemoveAll<MotoHub.Services.IMotorcycleRetirement>();
             services.AddSingleton<MotoHub.Services.IMotorcycleRetirement, RefusingRetirement>();
+            // The in-memory repository also answers the creation preconditions, rider
+            // included, so the projection needs no substitute of its own.
             services.AddSingleton<InMemoryRentalRepository>();
             services.AddSingleton<IRentalRepository>(provider =>
                 provider.GetRequiredService<InMemoryRentalRepository>());
-            // These tests exercise the authorization pipeline, not the projection.
-            // The real store would pull a live database into a graph this factory
-            // deliberately keeps in memory.
-            services.RemoveAll<IRiderProjectionStore>();
-            services.AddSingleton<IRiderProjectionStore>(new AlwaysVerifiedRiderProjection());
         });
     }
 
@@ -72,10 +68,4 @@ internal sealed class RefusingRetirement : MotoHub.Services.IMotorcycleRetiremen
     public Task<MotoHub.Services.MotorcycleRetirementResult> RetireAsync(
         Guid motorcycleId, DateTime retiredAtUtc, string reason, CancellationToken token = default) =>
         Task.FromResult(MotoHub.Services.MotorcycleRetirementResult.ActiveRental);
-}
-
-internal sealed class AlwaysVerifiedRiderProjection : IRiderProjectionStore
-{
-    public Task<RiderView?> GetAsync(string riderId, CancellationToken token) =>
-        Task.FromResult<RiderView?>(new RiderView(riderId, true, 1, "Ada Lovelace"));
 }

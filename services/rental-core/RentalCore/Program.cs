@@ -133,7 +133,6 @@ builder.Services.AddSingleton<RentalOutboxDispatcher>();
 builder.Services.AddHostedService<RentalKafkaRelay>();
 builder.Services.AddHostedService<PricingProjection>();
 builder.Services.AddHostedService<RiderProjection>();
-builder.Services.AddSingleton<IRiderProjectionStore, SqlRiderProjectionStore>();
 builder.Services.AddSingleton(
     builder.Configuration.GetSection("Messaging:Inbox").Get<InboxOptions>()
         ?? new InboxOptions());
@@ -141,12 +140,9 @@ builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton<SqlInboxProcessor>();
 builder.Services.AddHostedService<InboxRetentionSweeper>();
 
-// A metade de aluguéis pergunta à de motos por chamada de método. Era um
-// HttpClient para o próprio processo, com timeout e propagação de identidade
-// para si mesmo; a costura entre os domínios continua sendo a interface.
-builder.Services.AddScoped<RentalOperations.CrossCutting.Services.IMotorcycleService,
-    RentalOperations.CrossCutting.Services.MotorcycleService>();
-
+// A criação de um aluguel lê o piloto e a moto junto com a agenda, numa
+// instrução do repositório (#206). Não há mais costura por chamada de método
+// entre as duas metades: o banco é um só, e cada ida a ele custa uma espera.
 builder.Services.AddScoped<IRentalRepository, SqlRentalRepository>();
 builder.Services.AddScoped<IRentalService, RentalService>();
 

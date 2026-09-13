@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Npgsql;
 using ProjectY.Events;
 using RentalCoreTests.Integration;
+using RentalOperations.Repository;
 using RentalOperations.Services;
 using RentalOperations.Services.RabbitMQService;
 
@@ -27,6 +28,17 @@ public sealed class RiderProjectionTests(RentalCoreDatabase database)
         new SqlInboxProcessor(dataSource, new InboxOptions(), TimeProvider.System),
         new ConfigurationBuilder().Build(),
         NullLogger<RiderProjection>.Instance);
+
+    // O leitor da projeção é a criação de aluguel: o piloto volta junto com as
+    // outras pré-condições. Ler por ali é afirmar o que a decisão enxerga, e não
+    // o que uma consulta paralela enxergaria.
+    private static async Task<RiderView?> ReadRiderAsync(NpgsqlDataSource dataSource, string riderId)
+    {
+        var start = DateTime.UtcNow.Date.AddDays(1);
+        var preconditions = await new SqlRentalRepository(dataSource)
+            .ReadCreationPreconditionsAsync(riderId, Guid.NewGuid(), start, start.AddDays(7));
+        return preconditions.Rider;
+    }
 
     [Fact]
     [Trait("Category", "Integration")]
@@ -62,7 +74,7 @@ public sealed class RiderProjectionTests(RentalCoreDatabase database)
 
         // Não há ordem entre tópicos, e nenhuma é assumida: o fato mais novo vence
         // pelo próprio carimbo, então um evento antigo reentregue não o desfaz.
-        var view = await new SqlRiderProjectionStore(dataSource).GetAsync(rider, CancellationToken.None);
+        var view = await ReadRiderAsync(dataSource, rider);
         Assert.NotNull(view);
         Assert.False(view!.Verified);
         Assert.Equal(300, view.VerifiedAtMs);
@@ -81,7 +93,7 @@ public sealed class RiderProjectionTests(RentalCoreDatabase database)
         await projection.HandleAsync(Event(rider, false, 100, "Ada Byron"), CancellationToken.None);
         await projection.HandleAsync(Event(rider, true, 400, "Ada Lovelace"), CancellationToken.None);
 
-        var view = await new SqlRiderProjectionStore(dataSource).GetAsync(rider, CancellationToken.None);
+        var view = await ReadRiderAsync(dataSource, rider);
         Assert.True(view!.Verified);
         Assert.Equal(400, view.VerifiedAtMs);
         Assert.Equal("Ada Lovelace", view.Name);
@@ -103,14 +115,14 @@ public sealed class RiderProjectionTests(RentalCoreDatabase database)
         // Apagar o piloto no RiderManager não alcança este banco. O que alcança é
         // o fato, e ele tem de derrubar a linha -- senão a autorização local
         // continua dizendo sim para quem não existe mais.
-        var view = await new SqlRiderProjectionStore(dataSource).GetAsync(rider, CancellationToken.None);
+        var view = await ReadRiderAsync(dataSource, rider);
         Assert.NotNull(view);
         Assert.False(view!.Verified);
     }
 
     [Fact]
     [Trait("Category", "Integration")]
-    public async Task StoreReadsWhatTheProjectionWrote()
+    public async Task CreationReadsWhatTheProjectionWrote()
     {
         await database.ResetAsync();
         await using var dataSource = NpgsqlDataSource.Create(database.ConnectionString);
@@ -119,12 +131,11 @@ public sealed class RiderProjectionTests(RentalCoreDatabase database)
 
         await projection.HandleAsync(Event(rider, true, 200, "Ada Lovelace"), CancellationToken.None);
 
-        var store = new SqlRiderProjectionStore(dataSource);
-        var view = await store.GetAsync(rider, CancellationToken.None);
+        var view = await ReadRiderAsync(dataSource, rider);
         Assert.NotNull(view);
         Assert.True(view!.Verified);
         Assert.Equal("Ada Lovelace", view.Name);
-        Assert.Null(await store.GetAsync("absent", CancellationToken.None));
+        Assert.Null(await ReadRiderAsync(dataSource, "absent"));
     }
 
     // A pilha de benchmark semeia o piloto direto no banco, porque nada chega à
@@ -145,7 +156,7 @@ public sealed class RiderProjectionTests(RentalCoreDatabase database)
             await seed.ExecuteNonQueryAsync();
         }
 
-        var view = await new SqlRiderProjectionStore(dataSource).GetAsync("load-rider", CancellationToken.None);
+        var view = await ReadRiderAsync(dataSource, "load-rider");
 
         Assert.NotNull(view);
         Assert.True(view!.Verified);
