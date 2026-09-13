@@ -27,6 +27,17 @@ export async function session(cursor = ''): Promise<{token:string; userId:string
   if (typeof claims.sub !== 'string') throw new Error('Session has no subject');
   return {token:value, userId:claims.sub, rentals:await result.json()};
 }
+// Quem é a sessão, e só isso. O portão confere o token e devolve o sujeito sem
+// chamar serviço nenhum (#194) -- a checagem que session() faz lendo cem
+// aluguéis. Quem precisa da página continua usando session().
+export async function identity(): Promise<{token:string; userId:string}> {
+  const value = await token();
+  const result = await upstream('/session', value);
+  if (!result.ok) throw new Error('Session unavailable. Sign in again.');
+  const {subject} = await result.json();
+  if (typeof subject !== 'string') throw new Error('Session has no subject');
+  return {token:value, userId:subject};
+}
 // A tela composta: a página de aluguéis mais o que os outros serviços sabem
 // sobre ela. A composição vive aqui, e não no portão -- ADR 0014, e a razão é a
 // taxa de mudança, não a linguagem.
@@ -41,9 +52,17 @@ function signature(payload: string, domain: string) {
   if (!key || key.length < 32) throw new Error('Console signing key unavailable');
   return createHmac('sha256', key).update(domain + payload).digest('base64url');
 }
-export function ticket(rentalId:string, riderId:string) {
-  const payload = Buffer.from(JSON.stringify({rental_id:rentalId, rider_id:riderId, exp:Math.floor(Date.now()/1000)+120})).toString('base64url');
+function socketTicket(claims:object) {
+  const payload = Buffer.from(JSON.stringify({...claims, exp:Math.floor(Date.now()/1000)+120})).toString('base64url');
   return payload+'.'+signature(payload, '');
+}
+export function ticket(rentalId:string, riderId:string) {
+  return socketTicket({rental_id:rentalId, rider_id:riderId});
+}
+// Sem aluguel no ticket, o socket só entra no tópico global: o telemetry exige,
+// para rental:{id}, o id que o ticket carrega.
+export function metricsTicket(riderId:string) {
+  return socketTicket({rider_id:riderId});
 }
 export function grant(traceId:string, userId:string) {
   const payload = Buffer.from(JSON.stringify({traceId,userId,exp:Math.floor(Date.now()/1000)+3600})).toString('base64url');

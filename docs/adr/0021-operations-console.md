@@ -14,9 +14,10 @@ explicit action and browser permission.
 Each create action sends a fresh W3C trace context through the Rust gateway.
 The BFF queries Tempo for that trace, including later asynchronous spans. The
 waterfall displays measured service/span durations, without fabricated hops.
-Load batches stream individual HTTP results while fixed Prometheus queries
-report queue depth, gateway 429s and rolling rental p99. Missing series show
-unavailable, not zero. A batch contains 1–100 real rental attempts; the gateway
+Load batches stream individual HTTP results. Queue depth, gateway 429s and
+rolling rental p99 come from fixed Prometheus queries that telemetry runs once
+per interval and pushes on `metrics:global` (#194, ADR 0019); an idle tab makes
+no periodic request for them. Missing series show unavailable, not zero. A batch contains 1–100 real rental attempts; the gateway
 retains authoritative rate and concurrency limits. Use disposable test fleets.
 
 ## Identity boundary
@@ -28,6 +29,8 @@ token, validates it by an authorized gateway read, then stores it in a HttpOnly,
 SameSite=Strict cookie. TLS origins also set Secure. Tokens are never persisted
 in browser storage or returned by session reads. Mutations require the configured
 Origin. The BFF revalidates the session through the gateway on each operation.
+Where only the subject is needed, as for the metrics ticket, it asks the
+gateway's `GET /session`, which verifies the token and calls no upstream.
 
 Tracking tickets bind the validated subject and an active rental from that
 subject's current page, expire after two minutes, and renew on reconnect.

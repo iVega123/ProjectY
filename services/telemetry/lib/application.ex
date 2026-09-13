@@ -12,7 +12,9 @@ defmodule ProjectYTelemetry.Application do
              nodes: [System.get_env("CASSANDRA_HOST", "cassandra")],
              name: ProjectYTelemetry.Cassandra
            ]},
-          ProjectYTelemetry.Consumer
+          ProjectYTelemetry.Consumer,
+          # After the Endpoint, which it broadcasts through.
+          ProjectYTelemetry.GlobalMetrics
         ]
       else
         []
@@ -20,6 +22,11 @@ defmodule ProjectYTelemetry.Application do
 
     Supervisor.start_link(
       [
+        # Joins the other replicas before PubSub starts, so Presence and the
+        # metrics:global broadcast span the cluster. :ignore when there is no
+        # query, which is every environment with one replica.
+        {DNSCluster,
+         query: Application.get_env(:projecty_telemetry, :dns_cluster_query) || :ignore},
         {Phoenix.PubSub, name: ProjectYTelemetry.PubSub},
         {Registry, keys: :unique, name: ProjectYTelemetry.Registry},
         {DynamicSupervisor, strategy: :one_for_one, name: ProjectYTelemetry.Rentals},
