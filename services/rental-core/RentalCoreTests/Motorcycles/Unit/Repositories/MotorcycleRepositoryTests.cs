@@ -136,7 +136,7 @@ namespace MotoHubTests.Unit.Repositories
         }
 
         [Fact]
-        public async void GetByLicensePlate_ReturnsCorrectMotorcycle_WhenLicensePlateExists()
+        public async Task GetByLicensePlate_ReturnsCorrectMotorcycle_WhenLicensePlateExists()
         {
             // Arrange
             var motorcycles = new List<Motorcycle>
