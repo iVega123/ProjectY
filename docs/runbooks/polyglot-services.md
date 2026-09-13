@@ -115,7 +115,7 @@ requires; temporary compiler dependencies are removed after installation.
   `dotnet test services/rental-core/RentalCore.sln` use isolated Testcontainers.
 * Console: `npm ci`, `npm test`, `npm run build` in services/console.
 * Kotlin: `gradle ktlintCheck test` in services/billing, with a JDK 21 and
-  Gradle 8.14.3 — there is no `gradlew` here; the version is pinned in the
+  Gradle 9.7.1 — there is no `gradlew` here; the version is pinned in the
   Dockerfile and in the workflow, and CI refuses a PR where the two disagree.
   The settlement tests are pure; `ExactlyOnceTest` starts a real CockroachDB
   through Testcontainers and applies `deploy/db/sql` to it. Where the Docker
