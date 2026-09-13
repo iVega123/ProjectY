@@ -15,7 +15,9 @@ defmodule ProjectYTelemetry.MixProject do
       {:protobuf, "~> 0.17"},
       {:opentelemetry_api, "~> 1.5"},
       {:opentelemetry, "~> 1.7"},
-      {:opentelemetry_exporter, "~> 1.10"}
+      {:opentelemetry_exporter, "~> 1.10"},
+      {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
+      {:sobelow, "~> 0.14", only: [:dev, :test], runtime: false}
     ]
   end
 end

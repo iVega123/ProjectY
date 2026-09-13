@@ -20,3 +20,7 @@ jobs:
         working-directory: services/telemetry
       - run: mix format --check-formatted && mix test
         working-directory: services/telemetry
+      # credo for readability and design, sobelow for security. Both found
+      # nothing once .credo.exs dropped the @moduledoc check, so both block.
+      - run: mix credo && mix sobelow --exit
+        working-directory: services/telemetry
