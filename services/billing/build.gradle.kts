@@ -39,7 +39,7 @@ ktlint {
 }
 
 dependencies {
-    implementation("org.apache.kafka:kafka-clients:3.9.1")
+    implementation("org.apache.kafka:kafka-clients:4.3.1")
     implementation("com.google.protobuf:protobuf-java:4.29.3")
     implementation("org.postgresql:postgresql:42.7.5")
     implementation("com.zaxxer:HikariCP:7.1.0")
