@@ -21,7 +21,7 @@ reqwest = { version = "0.13.4", default-features = false, features = ["http2", "
 redis = { version = "1.6.0", default-features = false, features = ["tokio-comp", "connection-manager", "script"] }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
-sha2 = "0.10.9"
+sha2 = "0.11.0"
 tokio = { version = "1.53.1", features = ["macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
 tracing = "0.1.44"
 tracing-appender = "0.2.4"
