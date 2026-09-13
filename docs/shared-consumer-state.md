@@ -37,3 +37,38 @@ dotnet test services/rental-core/RentalCoreTests/RentalCoreTests.csproj --filter
 
 These are integration proofs of shared state and channel lifetime. They do not
 measure long-running production capacity or provide a multi-node database SLA.
+
+## Two replicas, deployed
+
+The rental Kafka relay arrived after this document was first written, and it was
+the part that could not run twice: it selected pending outbox rows without claiming
+them, so two replicas would both send every event. `RentalOutboxDispatcher` now
+claims before sending, with a lease and per-motorcycle ordering; ADR 0009 states the
+guarantee.
+
+`scripts/Test-RentalCoreReplicas.ps1` is the acceptance. It scales rental-core to two
+replicas on the polyglot load stack, cuts Kafka while k6 creates rentals, restores
+it, and lets both replicas' relays compete for the same backlog. It passes only when
+both published part of it, their counts add up to the events written, and the
+`rental.started` topic grew by exactly that many.
+
+Measured 2026-09-13 ([two-replicas.json](measurements/fault-tolerance/two-replicas.json)):
+
+| | |
+|---|---:|
+| Rental events written during the run | 180 |
+| Backlog when Kafka came back | 109 |
+| Published by `rental-core-1` / `rental-core-2` | 80 / 100 |
+| Growth of `rental.started` | 180 |
+| Pending after drain | 0 (in 1.6 s) |
+
+Integration tests cover what a deployed run cannot force on demand
+(`OutboxDispatcherTests`): two dispatchers on one table publish each row once, one
+motorcycle's events leave in order, and a dispatcher killed mid-send does not strand
+its rows. With the claim removed, the two-dispatcher test publishes 120 rows for 60.
+
+Reproduce:
+
+```powershell
+powershell -File scripts/Test-RentalCoreReplicas.ps1
+```

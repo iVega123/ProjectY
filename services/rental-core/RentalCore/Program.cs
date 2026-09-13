@@ -127,6 +127,7 @@ builder.Services.AddSingleton<IRabbitMqConnectionProvider, RabbitMqConnectionPro
 builder.Services.AddHostedService<OutboxRelay<ApplicationDbContext>>();
 
 // The rental half
+builder.Services.AddSingleton<RentalOutboxDispatcher>();
 builder.Services.AddHostedService<RentalKafkaRelay>();
 builder.Services.AddHostedService<PricingProjection>();
 builder.Services.AddHostedService<RiderProjection>();
