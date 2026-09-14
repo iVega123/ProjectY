@@ -6,7 +6,7 @@ jobs:
   risk-pricing:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       # Before the image build, which compiles librdkafka: a lint failure should
       # not cost several minutes to discover. Rules live in services/risk-pricing/ruff.toml.
       - name: Lint
