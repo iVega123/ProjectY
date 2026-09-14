@@ -42,7 +42,7 @@ jobs:
           - {language: python, build-mode: none}
           - {language: rust, build-mode: none}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - if: matrix.language == 'go'
         uses: actions/setup-go@v5
