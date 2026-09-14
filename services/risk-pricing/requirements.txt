@@ -8,6 +8,6 @@ pillow>=12,<13
 pytesseract==0.3.13
 opentelemetry-sdk>=1.39,<2
 opentelemetry-exporter-otlp>=1.39,<2
-opentelemetry-instrumentation-fastapi>=0.60b0,<1
+opentelemetry-instrumentation-fastapi>=0.65b0,<1
 pytest>=9.1.1,<10
 httpx>=0.28,<1
