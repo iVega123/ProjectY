@@ -110,7 +110,7 @@ services:
       start_period: 10s
 
   loki:
-    image: grafana/loki:3.7.7
+    image: grafana/loki:3.7.8
     container_name: loki
     command: ["-config.file=/etc/loki/loki.yaml"]
     ports:
@@ -128,7 +128,7 @@ services:
       start_period: 10s
 
   grafana:
-    image: grafana/grafana:13.2.1
+    image: grafana/grafana:13.2.2
     container_name: grafana
     environment:
       GF_SECURITY_ADMIN_USER: "${GRAFANA_USER:?Set GRAFANA_USER in .env}"
