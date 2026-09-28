@@ -1,5 +1,5 @@
 plugins {
-    kotlin("jvm") version "2.4.10"
+    kotlin("jvm") version "2.4.20"
     id("com.google.protobuf") version "0.10.0"
     id("org.jlleitschuh.gradle.ktlint") version "14.2.0"
     application
@@ -29,7 +29,7 @@ sourceSets {
 // Só o gerador Java, que é o padrão do plugin -- declará-lo explicitamente
 // duplica o builtin e o build recusa.
 protobuf {
-    protoc { artifact = "com.google.protobuf:protoc:4.36.1" }
+    protoc { artifact = "com.google.protobuf:protoc:4.36.2" }
 }
 
 // As classes geradas não são escritas à mão e não têm por que passar pelo
@@ -40,12 +40,12 @@ ktlint {
 
 dependencies {
     implementation("org.apache.kafka:kafka-clients:4.3.1")
-    implementation("com.google.protobuf:protobuf-java:4.36.1")
+    implementation("com.google.protobuf:protobuf-java:4.36.2")
     implementation("org.postgresql:postgresql:42.7.13")
     implementation("com.zaxxer:HikariCP:7.1.0")
-    implementation("com.fasterxml.jackson.core:jackson-databind:2.22.2")
-    implementation("org.slf4j:slf4j-api:2.0.19")
-    runtimeOnly("ch.qos.logback:logback-classic:1.6.3")
+    implementation("com.fasterxml.jackson.core:jackson-databind:2.22.3")
+    implementation("org.slf4j:slf4j-api:2.0.20")
+    runtimeOnly("ch.qos.logback:logback-classic:1.6.4")
 
     testImplementation(kotlin("test"))
     testImplementation("org.junit.jupiter:junit-jupiter:6.1.3")
