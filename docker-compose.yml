@@ -64,7 +64,7 @@ services:
       start_period: 10s
 
   prometheus:
-    image: prom/prometheus:v3.14.0
+    image: prom/prometheus:v3.15.0
     container_name: prometheus
     command:
       - --config.file=/etc/prometheus/prometheus.yml
@@ -92,7 +92,7 @@ services:
       start_period: 10s
 
   tempo:
-    image: grafana/tempo:3.0.3
+    image: grafana/tempo:3.1.0
     container_name: tempo
     command: ["-config.file=/etc/tempo/tempo.yaml"]
     ports:
@@ -110,7 +110,7 @@ services:
       start_period: 10s
 
   loki:
-    image: grafana/loki:3.7.7
+    image: grafana/loki:3.7.8
     container_name: loki
     command: ["-config.file=/etc/loki/loki.yaml"]
     ports:
@@ -128,7 +128,7 @@ services:
       start_period: 10s
 
   grafana:
-    image: grafana/grafana:13.2.1
+    image: grafana/grafana:13.2.4
     container_name: grafana
     environment:
       GF_SECURITY_ADMIN_USER: "${GRAFANA_USER:?Set GRAFANA_USER in .env}"
@@ -196,7 +196,7 @@ services:
   # #135 moves rentals across with both uniqueness guarantees live at once, and
   # neither can be live if one of the two stores is not running.
   cockroachdb:
-    image: cockroachdb/cockroach:v26.3.1
+    image: cockroachdb/cockroach:v26.3.2
     container_name: cockroachdb
     command: start-single-node --insecure --http-addr=0.0.0.0:8080
     environment:
@@ -218,7 +218,7 @@ services:
   # Two invocations: the bootstrap creates the database, the portable schema fills
   # it. That is why the entrypoint is a shell rather than `cockroach sql` directly.
   cockroach-init:
-    image: cockroachdb/cockroach:v26.3.1
+    image: cockroachdb/cockroach:v26.3.2
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
@@ -444,7 +444,7 @@ services:
       redis:
         condition: service_healthy
   k6-slo-drill:
-    image: grafana/k6:2.2.0
+    image: grafana/k6:2.3.0
     profiles: ["load"]
     command: ["run", "--out", "experimental-prometheus-rw", "/scripts/rental-slo-drill.js"]
     environment:
